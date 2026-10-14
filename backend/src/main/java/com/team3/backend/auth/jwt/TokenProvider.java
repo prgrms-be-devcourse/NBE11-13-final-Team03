@@ -19,6 +19,7 @@ import javax.crypto.SecretKey;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Date;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -79,6 +80,7 @@ public class TokenProvider {
                 .header()
                 .type("JWT")
                 .and()
+                .id(UUID.randomUUID().toString())
                 .issuer(jwtProperties.getIssuer())
                 .issuedAt(now)
                 .expiration(expiration)

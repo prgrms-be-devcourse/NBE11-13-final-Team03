@@ -53,6 +53,13 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                         oAuth2User.getAttributes()
                 );
 
+        if (userInfo.id() == null) {
+            throw new OAuth2AuthenticationException(
+                    new OAuth2Error("provider_id_required"),
+                    "카카오 사용자 식별자를 가져오지 못했습니다."
+            );
+        }
+
         if (userInfo.email() == null) {
             throw new OAuth2AuthenticationException(
                     new OAuth2Error("email_required"),

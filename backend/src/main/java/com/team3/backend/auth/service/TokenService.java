@@ -7,8 +7,6 @@ import com.team3.backend.auth.jwt.*;
 import com.team3.backend.auth.redis.RefreshTokenCacheRepository;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.user.domain.entity.User;
-import com.team3.backend.user.domain.repository.UserRepository;
-import com.team3.backend.user.exception.UserErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,7 +21,6 @@ public class TokenService {
 
     private final TokenProvider tokenProvider;
     private final JwtProperties jwtProperties;
-    private final UserRepository userRepository;
     private final RefreshTokenHasher refreshTokenHasher;
     private final RefreshTokenRepository refreshTokenRepository;
     private final RefreshTokenCacheRepository refreshTokenCacheRepository;
@@ -51,26 +48,22 @@ public class TokenService {
     @Transactional
     public TokenPair reissueToken(String refreshToken) {
 
-        // JWT 자체 검증
         validateRefreshToken(refreshToken);
 
-        Long userId = tokenProvider.getUserId(refreshToken);
+        Long userId =
+                tokenProvider.getUserId(refreshToken);
 
-        // 서버에 저장된 토큰과 비교
-        validateStoredRefreshToken(userId, refreshToken);
-
-        User user = userRepository.findById(userId)
-                .orElseThrow(() ->
-                        new BusinessException(
-                                UserErrorCode.USER_NOT_FOUND
-                        )
+        RefreshToken storedToken =
+                getAndValidateStoredRefreshTokenForUpdate(
+                        userId,
+                        refreshToken
                 );
 
-        TokenPair newTokenPair = generateTokenPair(user);
+        TokenPair newTokenPair =
+                generateTokenPair(storedToken.getUser());
 
-        // 저장
-        saveOrUpdateRefreshToken(
-                user,
+        rotateRefreshToken(
+                storedToken,
                 newTokenPair.refreshToken()
         );
 
@@ -164,60 +157,66 @@ public class TokenService {
         }
     }
 
-
-    // 서버에 저장된 현재 유효한 Refresh Token과 일치하는지 검사하는 메서드
-    private void validateStoredRefreshToken(
+    private RefreshToken getAndValidateStoredRefreshTokenForUpdate(
             Long userId,
-            String refreshToken
+            String rawRefreshToken
     ) {
-        Optional<String> cachedTokenHash = refreshTokenCacheRepository.findByUserId(userId);
-
-
-        // Resis HIT + 일치
-        if (cachedTokenHash.isPresent()
-                && refreshTokenHasher.matches(
-                cachedTokenHash.get(),
-                refreshToken
-        )) {
-            return;
-        }
-
-        // Redis MISS or 불일치
-        RefreshToken storedToken = refreshTokenRepository.findByUserId(userId)
-                .orElseThrow(() ->
-                        new BusinessException(
-                                AuthErrorCode.REFRESH_TOKEN_NOT_FOUND
-                        )
-                );
+        RefreshToken storedToken =
+                refreshTokenRepository.findByUserIdForUpdate(userId)
+                        .orElseThrow(() ->
+                                new BusinessException(
+                                        AuthErrorCode.REFRESH_TOKEN_NOT_FOUND
+                                )
+                        );
 
         LocalDateTime now = LocalDateTime.now();
 
-        // Redis MISS
         if (!storedToken.getExpiresAt().isAfter(now)) {
             refreshTokenRepository.delete(storedToken);
+            refreshTokenCacheRepository.delete(userId);
 
             throw new BusinessException(
                     AuthErrorCode.EXPIRED_REFRESH_TOKEN
             );
         }
 
-        // 토큰 불일지
         if (!refreshTokenHasher.matches(
                 storedToken.getTokenHash(),
-                refreshToken
+                rawRefreshToken
         )) {
             throw new BusinessException(
                     AuthErrorCode.REFRESH_TOKEN_MISMATCH
             );
         }
 
-        // DB 일치 -> redis NONE or STALE
-        Duration ttl = Duration.between(now, storedToken.getExpiresAt());
+        return storedToken;
+    }
+
+    private void rotateRefreshToken(
+            RefreshToken storedToken,
+            String newRefreshToken
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+
+        String newTokenHash =
+                refreshTokenHasher.hash(newRefreshToken);
+
+        LocalDateTime expiresAt =
+                now.plus(
+                        jwtProperties.getRefreshTokenValidity()
+                );
+
+        storedToken.rotate(
+                newTokenHash,
+                expiresAt
+        );
+
+        refreshTokenRepository.saveAndFlush(storedToken);
 
         refreshTokenCacheRepository.save(
-                userId,
-                storedToken.getTokenHash(),
-                ttl
+                storedToken.getUser().getId(),
+                newTokenHash,
+                Duration.between(now, expiresAt)
         );
     }
 }

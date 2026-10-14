@@ -50,6 +50,11 @@ spring:
 app:
   admin-kakao-ids: ${ADMIN_KAKAO_IDS:}
 
+  auth-cookie:
+    secure: ${AUTH_COOKIE_SECURE:false}
+    same-site: ${AUTH_COOKIE_SAME_SITE:Lax}
+    path: /
+
 jwt:
   issuer: yon
   secret-key: ${JWT_SECRET_KEY}

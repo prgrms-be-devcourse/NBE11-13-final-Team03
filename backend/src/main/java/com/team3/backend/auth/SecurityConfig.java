@@ -11,6 +11,7 @@ import com.team3.backend.global.logging.TraceIdFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -37,7 +38,10 @@ public class SecurityConfig {
             CustomOAuth2UserService customOAuth2UserService
     ) throws Exception {
         http
-                .csrf(csrf -> csrf.disable())
+                .csrf(csrf -> {
+                    csrf.spa();
+                    csrf.ignoringRequestMatchers("/api/internal/**");
+                })
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
@@ -61,6 +65,14 @@ public class SecurityConfig {
                                 "/api/auth/reissue"
 
                         ).permitAll()
+
+                        // 비회원도 조회 가능한 기회 API
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/opportunities",
+                                "/api/opportunities/{opportunityId}"
+                        )
+                        .permitAll()
 
                         // 내부 자동화 API
                         .requestMatchers("/api/internal/**")

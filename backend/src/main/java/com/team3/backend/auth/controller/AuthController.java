@@ -1,6 +1,6 @@
 package com.team3.backend.auth.controller;
 
-import com.team3.backend.auth.jwt.JwtProperties;
+import com.team3.backend.auth.cookie.TokenCookieManager;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.auth.service.AuthService;
 import com.team3.backend.auth.service.TokenService;
@@ -9,11 +9,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CookieValue;
@@ -31,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
     private final TokenService tokenService;
     private final AuthService authService;
-    private final JwtProperties jwtProperties;
+    private final TokenCookieManager tokenCookieManager;
 
     @Operation(
             summary = "로그아웃",
@@ -60,8 +57,7 @@ public class AuthController {
     ) {
         authService.logout(user.getUserId());
 
-        deleteCookie(response, "access_token");
-        deleteCookie(response, "refresh_token");
+        tokenCookieManager.deleteTokenCookies(response);
 
         return ResponseEntity.noContent().build();
     }
@@ -103,48 +99,8 @@ public class AuthController {
         TokenService.TokenPair tokenPair =
                 tokenService.reissueToken(refreshToken);
 
-        addTokenCookie(
-                response,
-                "access_token",
-                tokenPair.accessToken(),
-                (int) jwtProperties.getAccessTokenValidity().toSeconds()
-        );
-
-        addTokenCookie(
-                response,
-                "refresh_token",
-                tokenPair.refreshToken(),
-                (int) jwtProperties.getRefreshTokenValidity().toSeconds()
-        );
+        tokenCookieManager.addTokenCookies(response, tokenPair);
 
         return ResponseEntity.ok().build();
-    }
-
-    private void addTokenCookie(
-            HttpServletResponse response,
-            String name,
-            String value,
-            int maxAge
-    ) {
-        ResponseCookie cookie = ResponseCookie.from(name, value)
-                .httpOnly(true)
-                .secure(true) // 로컬 HTTP 환경에서는 false
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(maxAge)
-                .build();
-
-        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
-    }
-    private void deleteCookie(
-            HttpServletResponse response,
-            String name
-    ) {
-        Cookie cookie = new Cookie(name, "");
-        cookie.setHttpOnly(true);
-        cookie.setPath("/");
-        cookie.setMaxAge(0);
-
-        response.addCookie(cookie);
     }
 }

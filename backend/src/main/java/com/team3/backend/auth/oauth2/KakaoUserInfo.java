@@ -8,34 +8,81 @@ public record KakaoUserInfo(
 
     @Override
     public Long id() {
-        Object id = attributes.get("id");
-        return id == null ? null : Long.valueOf(id.toString());
+        Object value = attributes.get("id");
+
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+
+        if (value instanceof String stringValue
+                && !stringValue.isBlank()) {
+            try {
+                return Long.valueOf(stringValue);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     @Override
     public String email() {
-        Map<String, Object> kakaAccount = kakaAccount();
-        return kakaAccount == null ? null : String.valueOf( kakaAccount.get("email") );
+        Map<String, Object> account = kakaoAccount();
+
+        return account == null
+                ? null
+                : nullableString(account.get("email"));
     }
 
     @Override
     public String name() {
         Map<String, Object> profile = profile();
-        return profile == null ? null : String.valueOf( profile.get("nickname") );
+
+        return profile == null
+                ? null
+                : nullableString(profile.get("nickname"));
     }
 
     @Override
     public String imageUrl() {
         Map<String, Object> profile = profile();
-        return profile == null ? null : String.valueOf( profile.get("profile_image_url") );
+
+        return profile == null
+                ? null
+                : nullableString(profile.get("profile_image_url"));
     }
 
-    private Map<String, Object> kakaAccount() {
-        return (Map<String, Object>) attributes.get("kakao_account");
+    private Map<String, Object> kakaoAccount() {
+        return mapValue(attributes.get("kakao_account"));
     }
 
     private Map<String, Object> profile() {
-        return (Map<String, Object>) kakaAccount().get("profile");
+        Map<String, Object> account = kakaoAccount();
+
+        return account == null
+                ? null
+                : mapValue(account.get("profile"));
     }
 
+    private String nullableString(Object value) {
+        if (!(value instanceof String stringValue)) {
+            return null;
+        }
+
+        String trimmedValue = stringValue.trim();
+
+        return trimmedValue.isEmpty()
+                ? null
+                : trimmedValue;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        if (!(value instanceof Map<?, ?> map)) {
+            return null;
+        }
+
+        return (Map<String, Object>) map;
+    }
 }
