@@ -4,7 +4,6 @@ import com.team3.backend.auth.domain.entity.RefreshToken;
 import com.team3.backend.auth.domain.repository.RefreshTokenRepository;
 import com.team3.backend.auth.exception.AuthErrorCode;
 import com.team3.backend.auth.jwt.RefreshTokenHasher;
-import com.team3.backend.auth.redis.RefreshTokenCacheRepository;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
@@ -17,7 +16,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -64,13 +62,6 @@ class RefreshTokenConcurrencyIntegrationTest {
                 () -> "create-drop"
         );
     }
-
-    /*
-     * 이번 테스트 대상은 PostgreSQL 잠금이므로
-     * Redis는 실제 서버 대신 Mock으로 교체한다.
-     */
-    @MockitoBean
-    private RefreshTokenCacheRepository refreshTokenCacheRepository;
 
     @Autowired
     private TokenService tokenService;

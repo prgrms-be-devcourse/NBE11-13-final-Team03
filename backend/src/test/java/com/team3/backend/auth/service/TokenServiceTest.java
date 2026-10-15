@@ -4,7 +4,6 @@ import com.team3.backend.auth.domain.entity.RefreshToken;
 import com.team3.backend.auth.domain.repository.RefreshTokenRepository;
 import com.team3.backend.auth.exception.AuthErrorCode;
 import com.team3.backend.auth.jwt.*;
-import com.team3.backend.auth.redis.RefreshTokenCacheRepository;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
@@ -35,9 +34,6 @@ class TokenServiceTest {
     @Mock
     private RefreshTokenRepository refreshTokenRepository;
 
-    @Mock
-    private RefreshTokenCacheRepository refreshTokenCacheRepository;
-
     private TokenService tokenService;
 
     private JwtProperties jwtProperties;
@@ -52,8 +48,7 @@ class TokenServiceTest {
                 tokenProvider,
                 jwtProperties,
                 refreshTokenHasher,
-                refreshTokenRepository,
-                refreshTokenCacheRepository
+                refreshTokenRepository
         );
     }
 
@@ -120,12 +115,6 @@ class TokenServiceTest {
 
         verify(refreshTokenRepository)
                 .saveAndFlush(storedToken);
-
-        verify(refreshTokenCacheRepository).save(
-                eq(1L),
-                eq("new-token-hash"),
-                any(Duration.class)
-        );
     }
 
     @Test
@@ -173,9 +162,6 @@ class TokenServiceTest {
 
         verify(refreshTokenRepository, never())
                 .saveAndFlush(any());
-
-        verify(refreshTokenCacheRepository, never())
-                .save(anyLong(), anyString(), any());
     }
 
     @Test
@@ -192,5 +178,50 @@ class TokenServiceTest {
         );
 
         verifyNoInteractions(refreshTokenRepository);
+    }
+
+    @Test
+    @DisplayName("저장된 Refresh Token이 만료되면 만료 예외를 발생시킨다")
+    void rejectsExpiredStoredRefreshToken() {
+        String refreshToken = "expired-refresh-token";
+
+        User user = User.builder()
+                .id(1L)
+                .role(Role.USER)
+                .build();
+
+        RefreshToken storedToken = RefreshToken.builder()
+                .id(10L)
+                .user(user)
+                .tokenHash("expired-token-hash")
+                .expiresAt(LocalDateTime.now().minusMinutes(1))
+                .build();
+
+        when(tokenProvider.validateToken(
+                refreshToken,
+                TokenType.REFRESH
+        )).thenReturn(TokenStatus.VALID);
+
+        when(tokenProvider.getUserId(refreshToken))
+                .thenReturn(1L);
+
+        when(refreshTokenRepository.findByUserIdForUpdate(1L))
+                .thenReturn(Optional.of(storedToken));
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> tokenService.reissueToken(refreshToken)
+        );
+
+        assertSame(
+                AuthErrorCode.EXPIRED_REFRESH_TOKEN,
+                exception.getErrorCode()
+        );
+
+        verify(refreshTokenRepository, never())
+                .delete(any());
+
+        verify(refreshTokenRepository, never())
+                .saveAndFlush(any());
     }
 }
