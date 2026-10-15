@@ -1,0 +1,66 @@
+# 온통청년 코드값 → 내부 값 매핑 (YouthPolicyCodeTable)
+# 출처: 온통청년 Open API 코드정보 (API코드정보.xlsx, 2026-10-15 확인)
+#
+# 내부 값: 제한없음 = NO_LIMIT, 기타(본문 확인 필요) = OTHER
+# 표에 없는 코드는 정규화에서 NEEDS_REVIEW로 남는다.
+# 필드명 키는 대문자가 섞여 있어 Spring 바인딩에서 바뀌지 않도록 "[필드명]"으로 감싼다.
+youth-policy:
+  codes:
+    fields:
+      # 결혼상태코드 → MaritalStatus
+      "[mrgSttsCd]":
+        "0055001": MARRIED      # 기혼
+        "0055002": SINGLE       # 미혼
+        "0055003": NO_LIMIT     # 제한없음
+      # 소득조건구분코드
+      "[earnCndSeCd]":
+        "0043001": NO_LIMIT       # 무관
+        "0043002": ANNUAL_INCOME  # 연소득
+        "0043003": OTHER          # 기타
+      # 정책전공요건코드 → MajorField
+      "[plcyMajorCd]":
+        "0011001": HUMANITIES          # 인문계열
+        "0011002": SOCIAL_SCIENCE      # 사회계열
+        "0011003": BUSINESS_ECONOMICS  # 상경계열
+        "0011004": NATURAL_SCIENCE     # 이학계열
+        "0011005": ENGINEERING         # 공학계열
+        "0011006": ARTS_AND_PHYSICAL   # 예체능계열
+        "0011007": AGRICULTURE         # 농산업계열
+        "0011008": OTHER               # 기타
+        "0011009": NO_LIMIT            # 제한없음
+      # 정책취업요건코드 → EmploymentStatus
+      "[jobCd]":
+        "0013001": EMPLOYED            # 재직자
+        "0013002": SELF_EMPLOYED       # 자영업자
+        "0013003": UNEMPLOYED          # 미취업자
+        "0013004": FREELANCER          # 프리랜서
+        "0013005": DAY_LABORER         # 일용근로자
+        "0013006": STARTUP_PREPARING   # (예비)창업자
+        "0013007": PART_TIME           # 단기근로자
+        "0013008": FARMER              # 영농종사자
+        "0013009": OTHER               # 기타
+        "0013010": NO_LIMIT            # 제한없음
+      # 정책학력요건코드 → 학력·학적 값 (판정 엔진에서 EducationLevel·EnrollmentStatus와 비교)
+      "[schoolCd]":
+        "0049001": BELOW_HIGH_SCHOOL                 # 고졸 미만
+        "0049002": HIGH_SCHOOL_ENROLLED              # 고교 재학
+        "0049003": HIGH_SCHOOL_EXPECTED_GRADUATION   # 고졸 예정
+        "0049004": HIGH_SCHOOL_GRADUATED             # 고교 졸업
+        "0049005": UNIVERSITY_ENROLLED               # 대학 재학
+        "0049006": UNIVERSITY_EXPECTED_GRADUATION    # 대졸 예정
+        "0049007": UNIVERSITY_GRADUATED              # 대학 졸업
+        "0049008": GRADUATE_SCHOOL                   # 석·박사
+        "0049009": OTHER                             # 기타
+        "0049010": NO_LIMIT                          # 제한없음
+      # 정책특화요건코드 (실제 JSON 키 sbizCd) → SpecialTarget
+      "[sBizCd]":
+        "0014001": SME_EMPLOYEE                # 중소기업
+        "0014002": WOMAN                       # 여성
+        "0014003": BASIC_LIVELIHOOD_RECIPIENT  # 기초생활수급자
+        "0014004": SINGLE_PARENT               # 한부모가정
+        "0014005": DISABLED                    # 장애인
+        "0014006": FARMER                      # 농업인
+        "0014007": SOLDIER                     # 군인
+        "0014008": LOCAL_TALENT                # 지역인재
+        "0014009": OTHER                       # 기타
+        "0014010": NO_LIMIT                    # 제한없음
