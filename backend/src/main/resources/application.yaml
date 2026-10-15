@@ -1,3 +1,11 @@
 spring:
   application:
     name: backend
+  config:
+    import: optional:classpath:youth-policy-codes.yaml
+
+region-code-api:
+  base-url: https://apis.data.go.kr/1741000/StanReginCd/getStanReginCdList
+  service-key: ${REGION_CODE_API_KEY:}
+  page-size: 1000
+  sync-on-startup: ${REGION_CODE_SYNC_ON_STARTUP:false}
