@@ -2,7 +2,6 @@ package com.team3.backend.eligibility.engine;
 
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
-import com.team3.backend.opportunity.domain.entity.OpportunityCondition;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.region.directory.RegionIndex;
@@ -32,11 +31,11 @@ public class EligibilityEngine {
 
     private static final String UNSTRUCTURED = "UNSTRUCTURED";
 
-    public EligibilityEvaluation evaluate(EligibilityProfile profile, List<OpportunityCondition> conditions,
+    public EligibilityEvaluation evaluate(EligibilityProfile profile, List<EligibilityConditionInput> conditions,
                                           Collection<String> residenceRegionCodes, RegionIndex regionIndex, LocalDate today) {
         List<ConditionEvaluation> results = new ArrayList<>();
-        for (OpportunityCondition c : conditions) {
-            if (c.getRequirementType() == RequirementType.PREFERRED) {
+        for (EligibilityConditionInput c : conditions) {
+            if (c.requirement() == RequirementType.PREFERRED) {
                 continue;
             }
             results.add(applyValidation(c, evaluate(c, profile, residenceRegionCodes, regionIndex, today)));
@@ -73,8 +72,8 @@ public class EligibilityEngine {
     }
 
     /** 조건 검증 상태 반영 */
-    private static ConditionEvaluation applyValidation(OpportunityCondition c, ConditionEvaluation e) {
-        ValidationStatus v = c.getValidationStatus();
+    private static ConditionEvaluation applyValidation(EligibilityConditionInput c, ConditionEvaluation e) {
+        ValidationStatus v = c.validationStatus();
         if (e.result() == NOT_SPECIFIED || e.result() == CHECK_REQUIRED && UNSTRUCTURED.equals(status(c))) {
             return e;
         }
@@ -89,24 +88,24 @@ public class EligibilityEngine {
 
     // ── 조건별 판정 ──
 
-    private ConditionEvaluation evaluate(OpportunityCondition c, EligibilityProfile p, Collection<String> regionCodes,
+    private ConditionEvaluation evaluate(EligibilityConditionInput c, EligibilityProfile p, Collection<String> regionCodes,
                                          RegionIndex index, LocalDate today) {
         String status = status(c);
         if (UNSTRUCTURED.equals(status)) {
             return result(c, "TEXT", null, null, CHECK_REQUIRED,
-                    c.getRequirementType() == RequirementType.EXCLUSION
+                    c.requirement() == RequirementType.EXCLUSION
                             ? "참여 제한 대상에 해당하지 않는지 공고 원문을 확인해야 합니다."
                             : "추가 신청 자격을 공고 원문에서 확인해야 합니다.");
         }
-        if ("UNKNOWN".equals(status) && c.getValidationStatus() == ValidationStatus.UNKNOWN) {
-            boolean core = c.getConditionType() == ConditionType.AGE || c.getConditionType() == ConditionType.REGION;
+        if ("UNKNOWN".equals(status) && c.validationStatus() == ValidationStatus.UNKNOWN) {
+            boolean core = c.type() == ConditionType.AGE || c.type() == ConditionType.REGION;
             return result(c, null, null, null, core ? CHECK_REQUIRED : NOT_SPECIFIED,
                     core ? "정책 데이터에 이 조건 정보가 없어 직접 확인해야 합니다." : "정책 데이터에 이 조건 정보가 없습니다.");
         }
         if ("UNKNOWN".equals(status)) {
             return result(c, null, null, null, DATA_UNCLEAR, "정책 조건을 확인할 수 없습니다.");
         }
-        return switch (c.getConditionType()) {
+        return switch (c.type()) {
             case AGE -> age(c, p, today);
             case REGION -> region(c, p, regionCodes, index);
             case INCOME -> income(c, p);
@@ -115,8 +114,8 @@ public class EligibilityEngine {
         };
     }
 
-    private ConditionEvaluation age(OpportunityCondition c, EligibilityProfile p, LocalDate today) {
-        Map<String, Object> e = c.getExpression();
+    private ConditionEvaluation age(EligibilityConditionInput c, EligibilityProfile p, LocalDate today) {
+        Map<String, Object> e = c.expression();
         String status = status(c);
         if ("NO_LIMIT".equals(status) || "NOT_APPLICABLE".equals(status)) {
             return result(c, "ANY", status, null, MATCHED, "연령 제한이 없습니다.");
@@ -143,7 +142,7 @@ public class EligibilityEngine {
                 ok ? "연령 조건을 충족합니다." : "연령 조건을 충족하지 않습니다.");
     }
 
-    private ConditionEvaluation region(OpportunityCondition c, EligibilityProfile p, Collection<String> codes, RegionIndex index) {
+    private ConditionEvaluation region(EligibilityConditionInput c, EligibilityProfile p, Collection<String> codes, RegionIndex index) {
         if ("NATIONAL".equals(status(c))) {
             return result(c, "ANY", "NATIONAL", null, MATCHED, "전국 대상입니다.");
         }
@@ -157,14 +156,14 @@ public class EligibilityEngine {
                 ok ? "거주지역 조건을 충족합니다." : "거주지역 조건을 충족하지 않습니다.");
     }
 
-    private ConditionEvaluation code(OpportunityCondition c, EligibilityProfile p) {
+    private ConditionEvaluation code(EligibilityConditionInput c, EligibilityProfile p) {
         if ("NO_LIMIT".equals(status(c))) {
             return result(c, "ANY", "NO_LIMIT", null, MATCHED, "제한이 없습니다.");
         }
-        List<String> values = strings(c.getExpression().get("values"));
-        Optional<UserValues> user = userValues(c.getConditionType(), p);
+        List<String> values = strings(c.expression().get("values"));
+        Optional<UserValues> user = userValues(c.type(), p);
         if (user.isEmpty()) {
-            return result(c, "ANY_OF", values, null, USER_INFO_MISSING, label(c.getConditionType()) + " 정보가 필요합니다.");
+            return result(c, "ANY_OF", values, null, USER_INFO_MISSING, label(c.type()) + " 정보가 필요합니다.");
         }
         Set<String> matched = new TreeSet<>(user.get().values());
         matched.retainAll(values);
@@ -174,16 +173,16 @@ public class EligibilityEngine {
             if (user.get().onLeave()) {
                 return result(c, "ANY_OF", values, actual, CHECK_REQUIRED, "휴학 중에도 재학 조건이 인정되는지 확인해야 합니다.");
             }
-            return result(c, "ANY_OF", values, actual, MATCHED, label(c.getConditionType()) + " 조건을 충족합니다.");
+            return result(c, "ANY_OF", values, actual, MATCHED, label(c.type()) + " 조건을 충족합니다.");
         }
         if (values.contains(com.team3.backend.opportunity.normalization.YouthPolicyCodeTable.OTHER)) {
-            return result(c, "ANY_OF", values, actual, CHECK_REQUIRED, label(c.getConditionType()) + " 기타 조건을 공고 원문에서 확인해야 합니다.");
+            return result(c, "ANY_OF", values, actual, CHECK_REQUIRED, label(c.type()) + " 기타 조건을 공고 원문에서 확인해야 합니다.");
         }
-        return result(c, "ANY_OF", values, actual, NOT_MATCHED, label(c.getConditionType()) + " 조건을 충족하지 않습니다.");
+        return result(c, "ANY_OF", values, actual, NOT_MATCHED, label(c.type()) + " 조건을 충족하지 않습니다.");
     }
 
-    private ConditionEvaluation income(OpportunityCondition c, EligibilityProfile p) {
-        Map<String, Object> e = c.getExpression();
+    private ConditionEvaluation income(EligibilityConditionInput c, EligibilityProfile p) {
+        Map<String, Object> e = c.expression();
         String status = status(c);
         if ("NO_LIMIT".equals(status)) {
             return result(c, "ANY", "NO_LIMIT", null, MATCHED, "소득 제한이 없습니다.");
@@ -315,14 +314,14 @@ public class EligibilityEngine {
                 : amount.divide(BigDecimal.valueOf(12), 0, RoundingMode.HALF_UP);
     }
 
-    private static String status(OpportunityCondition c) {
-        Object s = c.getExpression() == null ? null : c.getExpression().get("status");
+    private static String status(EligibilityConditionInput c) {
+        Object s = c.expression() == null ? null : c.expression().get("status");
         return s == null ? "UNKNOWN" : s.toString();
     }
 
-    private static ConditionEvaluation result(OpportunityCondition c, String operator, Object expected, Object actual,
+    private static ConditionEvaluation result(EligibilityConditionInput c, String operator, Object expected, Object actual,
                                               ConditionMatchResult result, String reason) {
-        return new ConditionEvaluation(c.getConditionType(), c.getConditionField(), c.getRequirementType(),
+        return new ConditionEvaluation(c.type(), c.field(), c.requirement(),
                 operator, expected, actual, result, reason);
     }
 

@@ -54,7 +54,7 @@ class EligibilityEngineTest {
 
     @Test
     void 영영Y처럼_정책_연령이_모순이면_UNKNOWN() {
-        OpportunityCondition conflict = condition(ConditionType.AGE, RequirementType.REQUIRED,
+        EligibilityConditionInput conflict = condition(ConditionType.AGE, RequirementType.REQUIRED,
                 Map.of("status", "UNKNOWN"), ValidationStatus.DATA_CONFLICT);
 
         EligibilityEvaluation r = evaluate(profile(), List.of(conflict), List.of());
@@ -65,7 +65,7 @@ class EligibilityEngineTest {
 
     @Test
     void 정책에_연령_정보_자체가_없으면_ELIGIBLE을_확정하지_않는다() {
-        OpportunityCondition missing = condition(ConditionType.AGE, RequirementType.REQUIRED,
+        EligibilityConditionInput missing = condition(ConditionType.AGE, RequirementType.REQUIRED,
                 Map.of("status", "UNKNOWN"), ValidationStatus.UNKNOWN);
 
         EligibilityEvaluation r = evaluate(profile(), List.of(missing), List.of());
@@ -78,10 +78,10 @@ class EligibilityEngineTest {
 
     @Test
     void 불충족이_데이터_불확실보다_우선하고_데이터_불확실이_입력_누락보다_우선한다() {
-        OpportunityCondition unclear = condition(ConditionType.AGE, RequirementType.REQUIRED,
+        EligibilityConditionInput unclear = condition(ConditionType.AGE, RequirementType.REQUIRED,
                 Map.of("status", "UNKNOWN"), ValidationStatus.DATA_CONFLICT);
-        OpportunityCondition notMatched = region("SPECIFIC");
-        OpportunityCondition userMissing = income("MEDIAN_PERCENT", null, 150, null, null, ValidationStatus.VALID);
+        EligibilityConditionInput notMatched = region("SPECIFIC");
+        EligibilityConditionInput userMissing = income("MEDIAN_PERCENT", null, 150, null, null, ValidationStatus.VALID);
 
         assertThat(evaluate(profile(), List.of(unclear, notMatched), List.of("1144000000")).status())
                 .isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
@@ -93,9 +93,9 @@ class EligibilityEngineTest {
 
     @Test
     void 우대조건은_판정하지_않고_비어_있는_코드_조건은_집계에서_뺀다() {
-        OpportunityCondition preferred = condition(ConditionType.EMPLOYMENT, RequirementType.PREFERRED,
+        EligibilityConditionInput preferred = condition(ConditionType.EMPLOYMENT, RequirementType.PREFERRED,
                 Map.of("status", "SPECIFIC", "values", List.of("EMPLOYED")), ValidationStatus.VALID);
-        OpportunityCondition blankCode = condition(ConditionType.MARITAL, RequirementType.REQUIRED,
+        EligibilityConditionInput blankCode = condition(ConditionType.MARITAL, RequirementType.REQUIRED,
                 Map.of("status", "UNKNOWN", "values", List.of()), ValidationStatus.UNKNOWN);
 
         EligibilityEvaluation r = evaluate(profile(), List.of(age(19, 34), preferred, blankCode), List.of());
@@ -115,7 +115,7 @@ class EligibilityEngineTest {
 
     @Test
     void 코드표에_없는_코드가_섞인_조건은_일치하지_않으면_데이터_불확실() {
-        OpportunityCondition review = condition(ConditionType.EMPLOYMENT, RequirementType.REQUIRED,
+        EligibilityConditionInput review = condition(ConditionType.EMPLOYMENT, RequirementType.REQUIRED,
                 Map.of("status", "SPECIFIC", "values", List.of("EMPLOYED")), ValidationStatus.NEEDS_REVIEW);
 
         assertThat(result(review)).isEqualTo(DATA_UNCLEAR);
@@ -175,7 +175,7 @@ class EligibilityEngineTest {
 
         Map<String, Object> unconfirmed = new HashMap<>(Map.of("status", "MAX_ONLY", "type", "AMOUNT", "max", 5000,
                 "unitConfirmed", false));
-        OpportunityCondition apiAmount = condition(ConditionType.INCOME, RequirementType.REQUIRED, unconfirmed,
+        EligibilityConditionInput apiAmount = condition(ConditionType.INCOME, RequirementType.REQUIRED, unconfirmed,
                 ValidationStatus.NEEDS_REVIEW);
         assertThat(evaluate(p, List.of(apiAmount), List.of()).conditions().get(0).result()).isEqualTo(DATA_UNCLEAR);
     }
@@ -184,9 +184,9 @@ class EligibilityEngineTest {
 
     @Test
     void 추가_자격과_참여_제한_원문은_확인_필요로_POSSIBLY() {
-        OpportunityCondition qualification = condition(ConditionType.OTHER, RequirementType.REQUIRED,
+        EligibilityConditionInput qualification = condition(ConditionType.OTHER, RequirementType.REQUIRED,
                 Map.of("status", "UNSTRUCTURED"), ValidationStatus.NEEDS_REVIEW);
-        OpportunityCondition restriction = condition(ConditionType.OTHER, RequirementType.EXCLUSION,
+        EligibilityConditionInput restriction = condition(ConditionType.OTHER, RequirementType.EXCLUSION,
                 Map.of("status", "UNSTRUCTURED"), ValidationStatus.NEEDS_REVIEW);
 
         EligibilityEvaluation r = evaluate(profile(), List.of(age(19, 34), qualification, restriction), List.of());
@@ -197,11 +197,11 @@ class EligibilityEngineTest {
 
     // ── 보조 ──
 
-    private EligibilityEvaluation evaluate(EligibilityProfile p, List<OpportunityCondition> conditions, List<String> regionCodes) {
+    private EligibilityEvaluation evaluate(EligibilityProfile p, List<EligibilityConditionInput> conditions, List<String> regionCodes) {
         return engine.evaluate(p, conditions, regionCodes, index, TODAY);
     }
 
-    private ConditionMatchResult result(OpportunityCondition condition) {
+    private ConditionMatchResult result(EligibilityConditionInput condition) {
         return evaluate(profile(), List.of(condition), List.of()).conditions().get(0).result();
     }
 
@@ -220,22 +220,22 @@ class EligibilityEngineTest {
                 .enrollmentStatus(EnrollmentStatus.GRADUATED);
     }
 
-    private static OpportunityCondition age(int min, int max) {
+    private static EligibilityConditionInput age(int min, int max) {
         return condition(ConditionType.AGE, RequirementType.REQUIRED,
                 Map.of("status", "RANGE", "min", min, "max", max), ValidationStatus.VALID);
     }
 
-    private static OpportunityCondition region(String status) {
+    private static EligibilityConditionInput region(String status) {
         return condition(ConditionType.REGION, RequirementType.REQUIRED,
                 Map.of("status", status, "role", "RESIDENCE"), ValidationStatus.VALID);
     }
 
-    private static OpportunityCondition code(ConditionType type, String... values) {
+    private static EligibilityConditionInput code(ConditionType type, String... values) {
         return condition(type, RequirementType.REQUIRED,
                 Map.of("status", "SPECIFIC", "match", "ANY_OF", "values", List.of(values)), ValidationStatus.VALID);
     }
 
-    private static OpportunityCondition income(String type, Integer min, Integer max, Boolean maxInclusive,
+    private static EligibilityConditionInput income(String type, Integer min, Integer max, Boolean maxInclusive,
                                                String subject, ValidationStatus validation) {
         Map<String, Object> e = new HashMap<>();
         e.put("status", min != null && max != null ? "RANGE" : min != null ? "MIN_ONLY" : "MAX_ONLY");
@@ -248,20 +248,14 @@ class EligibilityEngineTest {
         return condition(ConditionType.INCOME, RequirementType.REQUIRED, e, validation);
     }
 
-    private static OpportunityCondition amount(int max, boolean maxInclusive, String subject, String period) {
+    private static EligibilityConditionInput amount(int max, boolean maxInclusive, String subject, String period) {
         Map<String, Object> e = new HashMap<>(Map.of("status", "MAX_ONLY", "type", "AMOUNT", "max", max,
                 "maxInclusive", maxInclusive, "subject", subject, "period", period, "unitConfirmed", true));
         return condition(ConditionType.INCOME, RequirementType.REQUIRED, e, ValidationStatus.VALID);
     }
 
-    private static OpportunityCondition condition(ConditionType type, RequirementType requirement,
+    private static EligibilityConditionInput condition(ConditionType type, RequirementType requirement,
                                                   Map<String, Object> expression, ValidationStatus validation) {
-        return OpportunityCondition.builder()
-                .conditionType(type)
-                .requirementType(requirement)
-                .conditionField(type.name().toLowerCase())
-                .expression(expression)
-                .validationStatus(validation)
-                .build();
+        return new EligibilityConditionInput(type, requirement, type.name().toLowerCase(), expression, validation);
     }
 }
