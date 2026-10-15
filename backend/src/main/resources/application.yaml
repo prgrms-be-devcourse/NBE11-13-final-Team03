@@ -1,3 +1,10 @@
 spring:
   application:
     name: backend
+
+collection:
+  youth-policy:
+    url: https://www.youthcenter.go.kr/go/ythip/getPlcy
+    api-key: ${YOUTH_POLICY_API_KEY:}
+    connect-timeout: 5s
+    read-timeout: 20s
