@@ -1,7 +1,6 @@
 package com.team3.backend.auth.domain.repository;
 
 import com.team3.backend.auth.domain.entity.RefreshToken;
-import com.team3.backend.user.domain.entity.User;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;

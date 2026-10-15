@@ -4,14 +4,12 @@ import com.team3.backend.auth.domain.entity.RefreshToken;
 import com.team3.backend.auth.domain.repository.RefreshTokenRepository;
 import com.team3.backend.auth.exception.AuthErrorCode;
 import com.team3.backend.auth.jwt.*;
-import com.team3.backend.auth.redis.RefreshTokenCacheRepository;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.user.domain.entity.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -23,7 +21,6 @@ public class TokenService {
     private final JwtProperties jwtProperties;
     private final RefreshTokenHasher refreshTokenHasher;
     private final RefreshTokenRepository refreshTokenRepository;
-    private final RefreshTokenCacheRepository refreshTokenCacheRepository;
 
     public record TokenPair(
             String accessToken,
@@ -116,14 +113,6 @@ public class TokenService {
 
             refreshTokenRepository.save(newToken);
         }
-
-        Duration ttl = Duration.between(now, expiresAt);
-
-        refreshTokenCacheRepository.save(
-                user.getId(),
-                tokenHash,
-                ttl
-        );
     }
 
     // 토큰 자체가 정상인지 검증하는 메서드
@@ -172,9 +161,6 @@ public class TokenService {
         LocalDateTime now = LocalDateTime.now();
 
         if (!storedToken.getExpiresAt().isAfter(now)) {
-            refreshTokenRepository.delete(storedToken);
-            refreshTokenCacheRepository.delete(userId);
-
             throw new BusinessException(
                     AuthErrorCode.EXPIRED_REFRESH_TOKEN
             );
@@ -212,11 +198,5 @@ public class TokenService {
         );
 
         refreshTokenRepository.saveAndFlush(storedToken);
-
-        refreshTokenCacheRepository.save(
-                storedToken.getUser().getId(),
-                newTokenHash,
-                Duration.between(now, expiresAt)
-        );
     }
 }
