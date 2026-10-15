@@ -9,6 +9,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.convert.DurationStyle;
@@ -22,6 +24,7 @@ import tools.jackson.databind.JsonNode;
 
 @Component
 public class Employment24Client {
+    private static final Logger log = LoggerFactory.getLogger(Employment24Client.class);
     private final RestClient restClient;
     private final String apiKey;
 
@@ -42,6 +45,15 @@ public class Employment24Client {
 
     /** NCS 코드 하나의 한 페이지를 조회한다. 코드·페이지 순회와 저장은 수집 서비스가 담당한다. */
     public Employment24Page fetchPage(Employment24SearchRequest search) {
+        try {
+            return fetchPageInternal(search);
+        } catch (Employment24ClientException exception) {
+            log.warn("source=EMPLOYMENT24 page={} ncs={} errorCode={}", search == null ? null : search.pageNum(), search == null ? null : search.srchNcs1(), exception.getErrorCode());
+            throw exception;
+        }
+    }
+
+    private Employment24Page fetchPageInternal(Employment24SearchRequest search) {
         Objects.requireNonNull(search, "고용24 조회 조건이 필요합니다.");
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalStateException("EMPLOYMENT24_API_KEY 설정이 필요합니다.");
@@ -69,9 +81,11 @@ public class Employment24Client {
                     })
                     .body(JsonNode.class);
         } catch (ResourceAccessException exception) {
+            log.warn("source=EMPLOYMENT24 page={} ncs={} exceptionType={}", search.pageNum(), search.srchNcs1(), exception.getClass().getSimpleName());
             // 요청 URL에 포함된 인증키가 원인 예외를 통해 노출되지 않게 한다.
             throw new Employment24ClientException("CONNECTION_ERROR", true);
         } catch (RestClientException exception) {
+            log.warn("source=EMPLOYMENT24 page={} ncs={} exceptionType={}", search.pageNum(), search.srchNcs1(), exception.getClass().getSimpleName());
             throw invalidResponse();
         }
         return parsePage(response, search);

@@ -7,6 +7,9 @@ import java.io.IOException;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
@@ -19,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
+@ExtendWith(OutputCaptureExtension.class)
 class YouthPolicyClientTests {
 
     private final String apiKey = UUID.randomUUID().toString();
@@ -119,13 +123,17 @@ class YouthPolicyClientTests {
     }
 
     @Test
-    void reportsConnectionErrorsWithoutLeakingTheKeyThroughTheCause() {
+    void reportsConnectionErrorsWithoutLeakingTheKeyThroughTheCause(CapturedOutput output) {
+        // 실패 로그에는 요청 메타데이터만 남기고 원본 예외 메시지는 제외한다.
         server.expect(anything()).andRespond(withException(new IOException("URL contains " + apiKey)));
         YouthPolicyClientException exception = assertThrows(YouthPolicyClientException.class,
                 () -> client.fetchPage(1, 100));
         assertEquals("CONNECTION_ERROR", exception.getErrorCode());
         assertTrue(exception.isRetryable());
         assertNull(exception.getCause());
+        assertTrue(output.getOut().contains("source=YOUTH_POLICY"));
+        assertTrue(output.getOut().contains("ResourceAccessException"));
+        assertFalse(output.getAll().contains(apiKey));
         server.verify();
     }
 

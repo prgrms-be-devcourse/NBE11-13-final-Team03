@@ -7,6 +7,9 @@ import java.util.UUID;
 import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -20,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
+@ExtendWith(OutputCaptureExtension.class)
 class Employment24ClientTests {
     private final String apiKey = UUID.randomUUID() + "+/=";
     private MockRestServiceServer server;
@@ -100,12 +104,16 @@ class Employment24ClientTests {
     }
 
     @Test
-    void classifiesConnectionErrorsWithoutKeepingTheCause() {
+    void classifiesConnectionErrorsWithoutKeepingTheCause(CapturedOutput output) {
+        // 실패 로그에는 요청 메타데이터만 남기고 원본 예외 메시지는 제외한다.
         server.expect(anything()).andRespond(withException(new IOException("URL contains " + apiKey)));
         var error = assertThrows(Employment24ClientException.class, () -> client.fetchPage(search));
         assertEquals("CONNECTION_ERROR", error.getErrorCode());
         assertTrue(error.isRetryable());
         assertNull(error.getCause());
+        assertTrue(output.getOut().contains("source=EMPLOYMENT24"));
+        assertTrue(output.getOut().contains("ResourceAccessException"));
+        assertFalse(output.getAll().contains(apiKey));
         server.verify();
     }
 

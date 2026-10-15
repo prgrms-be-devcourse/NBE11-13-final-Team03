@@ -7,6 +7,8 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.convert.DurationStyle;
@@ -20,6 +22,7 @@ import tools.jackson.databind.JsonNode;
 
 @Component
 public class YouthPolicyClient {
+    private static final Logger log = LoggerFactory.getLogger(YouthPolicyClient.class);
 
     private final RestClient restClient;
     private final String apiKey;
@@ -40,6 +43,15 @@ public class YouthPolicyClient {
     }
 
     public YouthPolicyPage fetchPage(int pageNumber, int pageSize) {
+        try {
+            return fetchPageInternal(pageNumber, pageSize);
+        } catch (YouthPolicyClientException exception) {
+            log.warn("source=YOUTH_POLICY page={} errorCode={}", pageNumber, exception.getErrorCode());
+            throw exception;
+        }
+    }
+
+    private YouthPolicyPage fetchPageInternal(int pageNumber, int pageSize) {
         if (pageNumber < 1 || pageSize < 1) {
             throw new IllegalArgumentException("페이지 번호와 크기는 1 이상이어야 합니다.");
         }
@@ -65,8 +77,10 @@ public class YouthPolicyClient {
                     })
                     .body(JsonNode.class);
         } catch (ResourceAccessException exception) {
+            log.warn("source=YOUTH_POLICY page={} exceptionType={}", pageNumber, exception.getClass().getSimpleName());
             throw new YouthPolicyClientException("CONNECTION_ERROR", true);
         } catch (RestClientException exception) {
+            log.warn("source=YOUTH_POLICY page={} exceptionType={}", pageNumber, exception.getClass().getSimpleName());
             throw new YouthPolicyClientException("INVALID_RESPONSE", false);
         }
         return parsePage(response, pageNumber, pageSize);

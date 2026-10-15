@@ -3,6 +3,7 @@ package com.team3.backend.collection.service;
 import com.team3.backend.collection.client.Employment24Client;
 import com.team3.backend.collection.dto.external.Employment24CollectionResult;
 import com.team3.backend.collection.dto.external.Employment24SearchRequest;
+import com.team3.backend.collection.dto.external.Employment24Page;
 import com.team3.backend.collection.dto.response.Employment24PageFailureResponse;
 import com.team3.backend.collection.exception.Employment24ClientException;
 import java.time.LocalDate;
@@ -16,6 +17,7 @@ import tools.jackson.databind.JsonNode;
 
 @Service
 public class Employment24CollectionService {
+    private static final int MAX_ATTEMPTS = 3;
     private final Employment24Client client;
 
     public Employment24CollectionService(Employment24Client client) {
@@ -42,7 +44,7 @@ public class Employment24CollectionService {
             for (int pageNum = 1; pageNum <= maxPages; pageNum++) {
                 var request = Employment24SearchRequest.forNextSixMonths(ncsCode, today, pageNum, pageSize);
                 try {
-                    var page = client.fetchPage(request);
+                    var page = fetchWithRetry(request);
                     records.addAll(page.srchList());
                     if (page.totalCount() != null) {
                         totalCount = page.totalCount();
@@ -54,8 +56,14 @@ public class Employment24CollectionService {
                 } catch (Employment24ClientException exception) {
                     failures.add(new Employment24PageFailureResponse(request, exception.getErrorCode(),
                             exception.getMessage(), exception.isRetryable()));
+                    if (exception.getErrorCode().equals("HTTP_401") || exception.getErrorCode().equals("HTTP_403")) {
+                        for (int remaining = code; remaining <= 24; remaining++) {
+                            incompleteNcsCodes.add(String.format(Locale.ROOT, "%02d", remaining));
+                        }
+                        return new Employment24CollectionResult(records, failures, incompleteNcsCodes);
+                    }
+                    break;
                 }
-                // 실패한 페이지도 순회한 것으로 계산하고, 다음 페이지·NCS 수집을 계속한다.
                 if (totalCount != null && (long) pageNum * pageSize >= totalCount) {
                     completed = true;
                     break;
@@ -66,5 +74,18 @@ public class Employment24CollectionService {
             }
         }
         return new Employment24CollectionResult(records, failures, incompleteNcsCodes);
+    }
+
+    private Employment24Page fetchWithRetry(Employment24SearchRequest request) {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return client.fetchPage(request);
+            } catch (Employment24ClientException exception) {
+                if (!exception.isRetryable() || attempt >= MAX_ATTEMPTS
+                        || exception.getErrorCode().equals("HTTP_401") || exception.getErrorCode().equals("HTTP_403")) {
+                    throw exception;
+                }
+            }
+        }
     }
 }
