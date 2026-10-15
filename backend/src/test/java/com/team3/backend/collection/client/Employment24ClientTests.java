@@ -3,6 +3,7 @@ package com.team3.backend.collection.client;
 import com.team3.backend.collection.dto.external.Employment24SearchRequest;
 import com.team3.backend.collection.exception.Employment24ClientException;
 import java.io.IOException;
+import java.util.UUID;
 import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
 class Employment24ClientTests {
+    private final String apiKey = UUID.randomUUID() + "+/=";
     private MockRestServiceServer server;
     private Employment24Client client;
     private final Employment24SearchRequest search = Employment24SearchRequest.forNextSixMonths(
@@ -29,12 +31,12 @@ class Employment24ClientTests {
     void setUp() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://example.test/training");
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new Employment24Client(builder.build(), "test+key/=");
+        client = new Employment24Client(builder.build(), apiKey);
     }
 
     @Test
     void sendsNcsAndSixMonthDatesAndPreservesRawFields() {
-        server.expect(requestTo("https://example.test/training?authKey=test%2Bkey%2F%3D&returnType=JSON&outType=1&pageNum=1&pageSize=100&srchNcs1=06&srchTraStDt=20261015&srchTraEndDt=20270415&sort=ASC&sortCol=2"))
+        server.expect(requestTo("https://example.test/training?authKey=" + apiKey.replace("+/=", "%2B%2F%3D") + "&returnType=JSON&outType=1&pageNum=1&pageSize=100&srchNcs1=06&srchTraStDt=20261015&srchTraEndDt=20270415&sort=ASC&sortCol=2"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("""
                         {"scn_cnt":300,"pageNum":"1","pageSize":"100","srchList":[
@@ -64,7 +66,7 @@ class Employment24ClientTests {
     @ParameterizedTest
     @ValueSource(strings = {
             "null", "{}", "not json",
-            "{\"error\":\"invalid test+key/=\"}",
+            "{\"error\":\"invalid %s\"}",
             "{\"scn_cnt\":0,\"pageNum\":1,\"pageSize\":100}",
             "{\"scn_cnt\":0,\"pageNum\":2,\"pageSize\":100,\"srchList\":[]}",
             "{\"scn_cnt\":0,\"pageNum\":1,\"pageSize\":20,\"srchList\":[]}",
@@ -76,30 +78,30 @@ class Employment24ClientTests {
             "{\"scn_cnt\":1,\"pageNum\":1,\"pageSize\":100,\"srchList\":[\"record\"]}"
     })
     void rejectsMalformedOrErrorResponsesWithoutLeakingKey(String response) {
-        respond(response);
+        respond(response.formatted(apiKey));
         var error = assertThrows(Employment24ClientException.class, () -> client.fetchPage(search));
         assertEquals("INVALID_RESPONSE", error.getErrorCode());
         assertFalse(error.isRetryable());
         assertNull(error.getCause());
-        assertFalse(error.toString().contains("test+key"));
+        assertFalse(error.toString().contains(apiKey));
         server.verify();
     }
 
     @ParameterizedTest
     @ValueSource(ints = {302, 401, 403, 429, 503})
     void classifiesHttpErrors(int status) {
-        server.expect(anything()).andRespond(withStatus(HttpStatus.valueOf(status)).body("test+key/="));
+        server.expect(anything()).andRespond(withStatus(HttpStatus.valueOf(status)).body(apiKey));
         var error = assertThrows(Employment24ClientException.class, () -> client.fetchPage(search));
         assertEquals("HTTP_" + status, error.getErrorCode());
         assertEquals(status == 429 || status >= 500, error.isRetryable());
         assertNull(error.getCause());
-        assertFalse(error.toString().contains("test+key"));
+        assertFalse(error.toString().contains(apiKey));
         server.verify();
     }
 
     @Test
     void classifiesConnectionErrorsWithoutKeepingTheCause() {
-        server.expect(anything()).andRespond(withException(new IOException("URL contains test+key/=")));
+        server.expect(anything()).andRespond(withException(new IOException("URL contains " + apiKey)));
         var error = assertThrows(Employment24ClientException.class, () -> client.fetchPage(search));
         assertEquals("CONNECTION_ERROR", error.getErrorCode());
         assertTrue(error.isRetryable());
@@ -121,7 +123,7 @@ class Employment24ClientTests {
         var unconfigured = new Employment24Client(RestClient.create(), " ");
         assertThrows(IllegalStateException.class, () -> unconfigured.fetchPage(search));
         assertThrows(IllegalArgumentException.class, () ->
-                new Employment24Client("https://example.test", "key", "0s", "20s"));
+                new Employment24Client("https://example.test", apiKey, "0s", "20s"));
         server.verify();
     }
 

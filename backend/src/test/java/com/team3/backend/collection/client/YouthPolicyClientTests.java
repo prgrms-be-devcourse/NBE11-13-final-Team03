@@ -4,6 +4,7 @@ import com.team3.backend.collection.dto.external.YouthPolicyPage;
 import com.team3.backend.collection.exception.YouthPolicyClientException;
 
 import java.io.IOException;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,6 +21,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class YouthPolicyClientTests {
 
+    private final String apiKey = UUID.randomUUID().toString();
     private MockRestServiceServer server;
     private YouthPolicyClient client;
 
@@ -42,12 +44,12 @@ class YouthPolicyClientTests {
     void setUp() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://example.test/policies");
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new YouthPolicyClient(builder.build(), "test-key");
+        client = new YouthPolicyClient(builder.build(), apiKey);
     }
 
     @Test
     void fetchesOnePageAndPreservesUnknownRawFields() {
-        server.expect(requestTo("https://example.test/policies?apiKeyNm=test-key&pageNum=2&pageSize=100&pageType=1&rtnType=json"))
+        server.expect(requestTo("https://example.test/policies?apiKeyNm=" + apiKey + "&pageNum=2&pageSize=100&pageType=1&rtnType=json"))
                 .andExpect(method(org.springframework.http.HttpMethod.GET))
                 .andRespond(withSuccess("""
                         {"resultCode":200,"result":{"pagging":{"pageNum":2,"pageSize":100,"totCount":3000},
@@ -93,12 +95,12 @@ class YouthPolicyClientTests {
 
     @Test
     void rejectsAnApiErrorWithoutExposingTheExternalMessage() {
-        respond("{\"resultCode\":401,\"resultMessage\":\"invalid test-key\"}");
+        respond("{\"resultCode\":401,\"resultMessage\":\"invalid " + apiKey + "\"}");
         YouthPolicyClientException exception = assertThrows(YouthPolicyClientException.class,
                 () -> client.fetchPage(1, 100));
         assertEquals("API_ERROR", exception.getErrorCode());
         assertFalse(exception.isRetryable());
-        assertFalse(exception.toString().contains("test-key"));
+        assertFalse(exception.toString().contains(apiKey));
         assertNull(exception.getCause());
         server.verify();
     }
@@ -107,18 +109,18 @@ class YouthPolicyClientTests {
     @ValueSource(ints = {302, 401, 429, 503})
     void reportsHttpErrorsAndWhetherTheyCanBeRetried(int status) {
         server.expect(anything()).andRespond(withStatus(HttpStatus.valueOf(status))
-                .body("test-key").contentType(MediaType.TEXT_PLAIN));
+                .body(apiKey).contentType(MediaType.TEXT_PLAIN));
         YouthPolicyClientException exception = assertThrows(YouthPolicyClientException.class,
                 () -> client.fetchPage(1, 100));
         assertEquals("HTTP_" + status, exception.getErrorCode());
         assertEquals(status == 429 || status >= 500, exception.isRetryable());
-        assertFalse(exception.toString().contains("test-key"));
+        assertFalse(exception.toString().contains(apiKey));
         server.verify();
     }
 
     @Test
     void reportsConnectionErrorsWithoutLeakingTheKeyThroughTheCause() {
-        server.expect(anything()).andRespond(withException(new IOException("URL contains test-key")));
+        server.expect(anything()).andRespond(withException(new IOException("URL contains " + apiKey)));
         YouthPolicyClientException exception = assertThrows(YouthPolicyClientException.class,
                 () -> client.fetchPage(1, 100));
         assertEquals("CONNECTION_ERROR", exception.getErrorCode());
