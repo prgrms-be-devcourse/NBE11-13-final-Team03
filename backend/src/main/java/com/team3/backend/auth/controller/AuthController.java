@@ -55,7 +55,10 @@ public class AuthController {
             @AuthenticationPrincipal CustomUserDetails user,
             HttpServletResponse response
     ) {
-        authService.logout(user.getUserId());
+        authService.logout(
+                user.getUserId(),
+                user.getSessionId()
+        );
 
         tokenCookieManager.deleteTokenCookies(response);
 

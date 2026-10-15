@@ -1,5 +1,6 @@
 package com.team3.backend.auth.oauth2;
 
+import com.team3.backend.auth.cookie.DeviceCookieManager;
 import com.team3.backend.auth.cookie.TokenCookieManager;
 import com.team3.backend.auth.service.TokenService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,6 +20,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
     private final TokenService tokenService;
     private final TokenCookieManager tokenCookieManager;
+    private final DeviceCookieManager deviceCookieManager;
 
     @Override
     public void onAuthenticationSuccess(
@@ -32,10 +34,22 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         CustomOAuth2User principal =
                 (CustomOAuth2User) authentication.getPrincipal();
 
-        TokenService.TokenPair tokens =
-                tokenService.issueToken(principal.getUser());
+        String deviceId =
+                deviceCookieManager.resolveOrCreate(
+                        request,
+                        response
+                );
 
-        tokenCookieManager.addTokenCookies(response, tokens);
+        TokenService.TokenPair tokens =
+                tokenService.issueToken(
+                        principal.getUser(),
+                        deviceId
+                );
+
+        tokenCookieManager.addTokenCookies(
+                response,
+                tokens
+        );
 
         log.info("JWT 쿠키 저장 완료");
 

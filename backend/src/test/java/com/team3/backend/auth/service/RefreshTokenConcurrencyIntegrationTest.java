@@ -94,7 +94,10 @@ class RefreshTokenConcurrencyIntegrationTest {
         );
 
         TokenService.TokenPair originalTokenPair =
-                tokenService.issueToken(user);
+                tokenService.issueToken(
+                        user,
+                        "test-device-id"
+                );
 
         String originalRefreshToken =
                 originalTokenPair.refreshToken();
@@ -182,7 +185,10 @@ class RefreshTokenConcurrencyIntegrationTest {
 
             RefreshToken storedToken =
                     refreshTokenRepository
-                            .findByUserId(user.getId())
+                            .findByUserIdAndDeviceId(
+                                    user.getId(),
+                                    "test-device-id"
+                            )
                             .orElseThrow();
 
             assertTrue(
@@ -216,6 +222,235 @@ class RefreshTokenConcurrencyIntegrationTest {
 
         boolean isSuccess() {
             return tokenPair != null;
+        }
+    }
+
+    @Test
+    @DisplayName("동일 사용자가 서로 다른 기기에서 동시에 로그인해도 세션이 각각 저장된다")
+    void concurrentLoginsFromDifferentDevicesCreateSeparateSessions()
+            throws Exception {
+
+        User user = userRepository.saveAndFlush(
+                User.builder()
+                        .kakaoId(67890L)
+                        .nickname("동시 로그인 사용자")
+                        .email("concurrent@example.com")
+                        .role(Role.USER)
+                        .build()
+        );
+
+        ExecutorService executor =
+                Executors.newFixedThreadPool(2);
+
+        CountDownLatch readyLatch =
+                new CountDownLatch(2);
+
+        CountDownLatch startLatch =
+                new CountDownLatch(1);
+
+        Callable<TokenService.TokenPair> firstLoginTask = () -> {
+            readyLatch.countDown();
+            startLatch.await();
+
+            return tokenService.issueToken(
+                    user,
+                    "device-1"
+            );
+        };
+
+        Callable<TokenService.TokenPair> secondLoginTask = () -> {
+            readyLatch.countDown();
+            startLatch.await();
+
+            return tokenService.issueToken(
+                    user,
+                    "device-2"
+            );
+        };
+
+        Future<TokenService.TokenPair> firstFuture =
+                executor.submit(firstLoginTask);
+
+        Future<TokenService.TokenPair> secondFuture =
+                executor.submit(secondLoginTask);
+
+        try {
+            assertTrue(
+                    readyLatch.await(5, TimeUnit.SECONDS),
+                    "두 로그인 요청이 실행 준비 상태에 도달하지 못했습니다."
+            );
+
+            startLatch.countDown();
+
+            TokenService.TokenPair firstTokenPair =
+                    firstFuture.get(10, TimeUnit.SECONDS);
+
+            TokenService.TokenPair secondTokenPair =
+                    secondFuture.get(10, TimeUnit.SECONDS);
+
+            assertNotNull(firstTokenPair);
+            assertNotNull(secondTokenPair);
+
+            assertNotEquals(
+                    firstTokenPair.refreshToken(),
+                    secondTokenPair.refreshToken(),
+                    "서로 다른 로그인 세션은 서로 다른 Refresh Token을 발급해야 합니다."
+            );
+
+            List<RefreshToken> sessions =
+                    refreshTokenRepository
+                            .findAllByUserId(user.getId());
+
+            assertEquals(
+                    2,
+                    sessions.size(),
+                    "두 기기의 로그인 세션이 모두 저장돼야 합니다."
+            );
+
+            RefreshToken firstSession = sessions.stream()
+                    .filter(session ->
+                            "device-1".equals(session.getDeviceId())
+                    )
+                    .findFirst()
+                    .orElseThrow();
+
+            RefreshToken secondSession = sessions.stream()
+                    .filter(session ->
+                            "device-2".equals(session.getDeviceId())
+                    )
+                    .findFirst()
+                    .orElseThrow();
+
+            assertNotEquals(
+                    firstSession.getSessionId(),
+                    secondSession.getSessionId(),
+                    "기기마다 별도의 sessionId가 생성돼야 합니다."
+            );
+
+            assertTrue(
+                    refreshTokenHasher.matches(
+                            firstSession.getTokenHash(),
+                            firstTokenPair.refreshToken()
+                    ),
+                    "첫 번째 기기의 Refresh Token이 DB 세션과 일치해야 합니다."
+            );
+
+            assertTrue(
+                    refreshTokenHasher.matches(
+                            secondSession.getTokenHash(),
+                            secondTokenPair.refreshToken()
+                    ),
+                    "두 번째 기기의 Refresh Token이 DB 세션과 일치해야 합니다."
+            );
+
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("동일 기기에서 동시에 로그인하면 하나의 세션만 유지하고 마지막 토큰만 유효하다")
+    void concurrentLoginsFromSameDeviceKeepSingleSession()
+            throws Exception {
+
+        User user = userRepository.saveAndFlush(
+                User.builder()
+                        .kakaoId(98765L)
+                        .nickname("동일 기기 사용자")
+                        .email("same-device@example.com")
+                        .role(Role.USER)
+                        .build()
+        );
+
+        String deviceId = "same-device-id";
+
+        ExecutorService executor =
+                Executors.newFixedThreadPool(2);
+
+        CountDownLatch readyLatch =
+                new CountDownLatch(2);
+
+        CountDownLatch startLatch =
+                new CountDownLatch(1);
+
+        Callable<TokenService.TokenPair> loginTask = () -> {
+            readyLatch.countDown();
+            startLatch.await();
+
+            return tokenService.issueToken(
+                    user,
+                    deviceId
+            );
+        };
+
+        Future<TokenService.TokenPair> firstFuture =
+                executor.submit(loginTask);
+
+        Future<TokenService.TokenPair> secondFuture =
+                executor.submit(loginTask);
+
+        try {
+            assertTrue(
+                    readyLatch.await(5, TimeUnit.SECONDS),
+                    "두 로그인 요청이 실행 준비 상태에 도달하지 못했습니다."
+            );
+
+            startLatch.countDown();
+
+            TokenService.TokenPair firstTokenPair =
+                    firstFuture.get(10, TimeUnit.SECONDS);
+
+            TokenService.TokenPair secondTokenPair =
+                    secondFuture.get(10, TimeUnit.SECONDS);
+
+            assertNotEquals(
+                    firstTokenPair.refreshToken(),
+                    secondTokenPair.refreshToken(),
+                    "각 로그인 요청은 서로 다른 Refresh Token을 발급해야 합니다."
+            );
+
+            List<RefreshToken> sessions =
+                    refreshTokenRepository
+                            .findAllByUserId(user.getId());
+
+            assertEquals(
+                    1,
+                    sessions.size(),
+                    "같은 기기의 동시 로그인은 하나의 세션만 유지해야 합니다."
+            );
+
+            RefreshToken storedSession = sessions.getFirst();
+
+            assertEquals(
+                    deviceId,
+                    storedSession.getDeviceId()
+            );
+
+            boolean firstTokenMatches =
+                    refreshTokenHasher.matches(
+                            storedSession.getTokenHash(),
+                            firstTokenPair.refreshToken()
+                    );
+
+            boolean secondTokenMatches =
+                    refreshTokenHasher.matches(
+                            storedSession.getTokenHash(),
+                            secondTokenPair.refreshToken()
+                    );
+
+            assertNotEquals(
+                    firstTokenMatches,
+                    secondTokenMatches,
+                    "두 토큰 중 마지막으로 저장된 하나만 유효해야 합니다."
+            );
+
+            assertTrue(
+                    firstTokenMatches || secondTokenMatches,
+                    "DB에는 두 로그인 요청 중 하나의 Refresh Token이 저장돼야 합니다."
+            );
+
+        } finally {
+            executor.shutdownNow();
         }
     }
 }

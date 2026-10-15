@@ -7,7 +7,29 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "refresh_tokens")
+@Table(
+        name = "refresh_tokens",
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "uk_refresh_tokens_session_id",
+                        columnNames = "session_id"
+                ),
+                @UniqueConstraint(
+                        name = "uk_refresh_tokens_user_device",
+                        columnNames = {"user_id", "device_id"}
+                ),
+                @UniqueConstraint(
+                        name = "uk_refresh_tokens_token_hash",
+                        columnNames = "token_hash"
+                )
+        },
+        indexes = {
+                @Index(
+                        name = "idx_refresh_tokens_user_last_used",
+                        columnList = "user_id,last_used_at"
+                )
+        }
+)
 @Getter
 @Builder
 @AllArgsConstructor
@@ -18,20 +40,42 @@ public class RefreshToken {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @OneToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(
             name = "user_id",
             nullable = false,
-            unique = true,
-            foreignKey = @ForeignKey(name = "fk_refresh_tokens_user")
+            foreignKey = @ForeignKey(
+                    name = "fk_refresh_tokens_user"
+            )
     )
     private User user;
 
-    @Column(name = "token_hash", unique = true, nullable = false)
+    @Column(
+            name = "session_id",
+            nullable = false,
+            length = 36
+    )
+    private String sessionId;
+
+    @Column(
+            name = "device_id",
+            nullable = false,
+            length = 36
+    )
+    private String deviceId;
+
+    @Column(
+            name = "token_hash",
+            nullable = false,
+            length = 64
+    )
     private String tokenHash;
 
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
+
+    @Column(name = "last_used_at", nullable = false)
+    private LocalDateTime lastUsedAt;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
@@ -42,8 +86,13 @@ public class RefreshToken {
     @PrePersist
     protected void onCreate() {
         LocalDateTime now = LocalDateTime.now();
+
         this.createdAt = now;
         this.updatedAt = now;
+
+        if (this.lastUsedAt == null) {
+            this.lastUsedAt = now;
+        }
     }
 
     @PreUpdate
@@ -57,5 +106,6 @@ public class RefreshToken {
     ) {
         this.tokenHash = tokenHash;
         this.expiresAt = expiresAt;
+        this.lastUsedAt = LocalDateTime.now();
     }
 }

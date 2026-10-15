@@ -4,14 +4,19 @@ import com.team3.backend.auth.domain.entity.RefreshToken;
 import com.team3.backend.auth.domain.repository.RefreshTokenRepository;
 import com.team3.backend.auth.exception.AuthErrorCode;
 import com.team3.backend.auth.jwt.*;
+import com.team3.backend.auth.session.AuthSessionProperties;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.user.domain.entity.User;
+import com.team3.backend.user.domain.repository.UserRepository;
+import com.team3.backend.user.exception.UserErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -21,43 +26,117 @@ public class TokenService {
     private final JwtProperties jwtProperties;
     private final RefreshTokenHasher refreshTokenHasher;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final UserRepository userRepository;
+    private final AuthSessionProperties sessionProperties;
 
     public record TokenPair(
             String accessToken,
             String refreshToken
     ) {}
 
-    // 토큰을 발급하는 서비스 메서드
     @Transactional
-    public TokenPair issueToken(User user) {
-        TokenPair tokenPair = generateTokenPair(user);
+    public TokenPair issueToken(
+            User user,
+            String deviceId
+    ) {
+        if (deviceId == null || deviceId.isBlank()) {
+            throw new IllegalArgumentException(
+                    "deviceId must not be blank"
+            );
+        }
 
-        saveOrUpdateRefreshToken(
-                user,
-                tokenPair.refreshToken()
-        );
+        User lockedUser = userRepository
+                .findByIdForUpdate(user.getId())
+                .orElseThrow(() ->
+                        new BusinessException(
+                                UserErrorCode.USER_NOT_FOUND
+                        )
+                );
+
+        removeExpiredSessions(lockedUser.getId());
+
+        Optional<RefreshToken> existingSession =
+                refreshTokenRepository
+                        .findByUserIdAndDeviceId(
+                                lockedUser.getId(),
+                                deviceId
+                        );
+
+        String sessionId = existingSession
+                .map(RefreshToken::getSessionId)
+                .orElseGet(() -> UUID.randomUUID().toString());
+
+        if (existingSession.isEmpty()) {
+            evictOldestSessionIfNecessary(
+                    lockedUser.getId()
+            );
+        }
+
+        TokenPair tokenPair =
+                generateTokenPair(
+                        lockedUser,
+                        sessionId
+                );
+
+        String tokenHash =
+                refreshTokenHasher.hash(
+                        tokenPair.refreshToken()
+                );
+
+        LocalDateTime expiresAt =
+                LocalDateTime.now().plus(
+                        jwtProperties.getRefreshTokenValidity()
+                );
+
+        if (existingSession.isPresent()) {
+            RefreshToken session =
+                    existingSession.get();
+
+            session.rotate(
+                    tokenHash,
+                    expiresAt
+            );
+
+            refreshTokenRepository.saveAndFlush(session);
+        } else {
+            RefreshToken newSession =
+                    RefreshToken.builder()
+                            .user(lockedUser)
+                            .sessionId(sessionId)
+                            .deviceId(deviceId)
+                            .tokenHash(tokenHash)
+                            .expiresAt(expiresAt)
+                            .lastUsedAt(LocalDateTime.now())
+                            .build();
+
+            refreshTokenRepository.saveAndFlush(newSession);
+        }
 
         return tokenPair;
     }
 
-    // access token을 갱신하는 서비스 메서드
-    // refresh 탈취 문제를 방지하기 위해 갱신 시 access token과 refresh token 줄 다 새로 발급
     @Transactional
     public TokenPair reissueToken(String refreshToken) {
-
         validateRefreshToken(refreshToken);
 
         Long userId =
                 tokenProvider.getUserId(refreshToken);
 
+        String sessionId =
+                tokenProvider.getSessionId(refreshToken);
+
         RefreshToken storedToken =
                 getAndValidateStoredRefreshTokenForUpdate(
                         userId,
+                        sessionId,
                         refreshToken
                 );
 
         TokenPair newTokenPair =
-                generateTokenPair(storedToken.getUser());
+                generateTokenPair(
+                        storedToken.getUser(),
+                        sessionId
+                );
 
         rotateRefreshToken(
                 storedToken,
@@ -67,58 +146,77 @@ public class TokenService {
         return newTokenPair;
     }
 
-    // 토큰 발급 비즈니스 로직
-    public TokenPair generateTokenPair(User user) {
-        String accessToken = tokenProvider.generateToken(
-                user,
-                jwtProperties.getAccessTokenValidity(),
-                TokenType.ACCESS
-        );
-        String refreshToken = tokenProvider.generateToken(
-                user,
-                jwtProperties.getRefreshTokenValidity(),
-                TokenType.REFRESH
-        );
+    public TokenPair generateTokenPair(
+            User user,
+            String sessionId
+    ) {
+        String accessToken =
+                tokenProvider.generateToken(
+                        user,
+                        sessionId,
+                        jwtProperties.getAccessTokenValidity(),
+                        TokenType.ACCESS
+                );
+
+        String refreshToken =
+                tokenProvider.generateToken(
+                        user,
+                        sessionId,
+                        jwtProperties.getRefreshTokenValidity(),
+                        TokenType.REFRESH
+                );
+
         return new TokenPair(
                 accessToken,
                 refreshToken
         );
     }
 
-    // 토큰을 저장 또는 갱신하는 코드
-    private void saveOrUpdateRefreshToken(
-            User user,
-            String refreshToken
-    ) {
+    private void removeExpiredSessions(Long userId) {
         LocalDateTime now = LocalDateTime.now();
 
-        String tokenHash =
-                refreshTokenHasher.hash(refreshToken);
+        List<RefreshToken> expiredSessions =
+                refreshTokenRepository
+                        .findAllByUserIdAndExpiresAtLessThanEqual(
+                                userId,
+                                now
+                        );
 
-        LocalDateTime expiresAt =
-                now.plus(jwtProperties.getRefreshTokenValidity());
-
-        Optional<RefreshToken> existingToken =
-                refreshTokenRepository.findByUserId(user.getId());
-
-        if (existingToken.isPresent()) {
-            existingToken.get().rotate(tokenHash, expiresAt);
-        } else {
-            RefreshToken newToken =
-                    RefreshToken.builder()
-                            .user(user)
-                            .tokenHash(tokenHash)
-                            .expiresAt(expiresAt)
-                            .build();
-
-            refreshTokenRepository.save(newToken);
+        if (expiredSessions.isEmpty()) {
+            return;
         }
+
+        refreshTokenRepository.deleteAll(expiredSessions);
+        refreshTokenRepository.flush();
     }
 
-    // 토큰 자체가 정상인지 검증하는 메서드
-    private void validateRefreshToken(String refreshToken) {
+    private void evictOldestSessionIfNecessary(
+            Long userId
+    ) {
+        long activeSessionCount =
+                refreshTokenRepository.countByUserId(userId);
 
-        // refreshToken이 비어있는 경우
+        if (activeSessionCount
+                < sessionProperties.getMaxActiveSessions()) {
+            return;
+        }
+
+        RefreshToken oldestSession =
+                refreshTokenRepository
+                        .findFirstByUserIdOrderByLastUsedAtAscCreatedAtAsc(
+                                userId
+                        )
+                        .orElseThrow(() ->
+                                new IllegalStateException(
+                                        "활성 세션 수와 세션 조회 결과가 일치하지 않습니다."
+                                )
+                        );
+
+        refreshTokenRepository.delete(oldestSession);
+        refreshTokenRepository.flush();
+    }
+
+    private void validateRefreshToken(String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
             throw new BusinessException(
                     AuthErrorCode.REFRESH_TOKEN_NOT_FOUND
@@ -131,14 +229,12 @@ public class TokenService {
                         TokenType.REFRESH
                 );
 
-        // 만료 되었는지 검증
         if (tokenStatus == TokenStatus.EXPIRED) {
             throw new BusinessException(
                     AuthErrorCode.EXPIRED_REFRESH_TOKEN
             );
         }
 
-        // tokenStatus가 valid인지 검증
         if (tokenStatus != TokenStatus.VALID) {
             throw new BusinessException(
                     AuthErrorCode.INVALID_REFRESH_TOKEN
@@ -146,21 +242,32 @@ public class TokenService {
         }
     }
 
-    private RefreshToken getAndValidateStoredRefreshTokenForUpdate(
+    private RefreshToken
+    getAndValidateStoredRefreshTokenForUpdate(
             Long userId,
+            String sessionId,
             String rawRefreshToken
     ) {
         RefreshToken storedToken =
-                refreshTokenRepository.findByUserIdForUpdate(userId)
+                refreshTokenRepository
+                        .findBySessionIdForUpdate(sessionId)
                         .orElseThrow(() ->
                                 new BusinessException(
-                                        AuthErrorCode.REFRESH_TOKEN_NOT_FOUND
+                                        AuthErrorCode
+                                                .REFRESH_TOKEN_NOT_FOUND
                                 )
                         );
 
-        LocalDateTime now = LocalDateTime.now();
+        if (!storedToken.getUser()
+                .getId()
+                .equals(userId)) {
+            throw new BusinessException(
+                    AuthErrorCode.REFRESH_TOKEN_MISMATCH
+            );
+        }
 
-        if (!storedToken.getExpiresAt().isAfter(now)) {
+        if (!storedToken.getExpiresAt()
+                .isAfter(LocalDateTime.now())) {
             throw new BusinessException(
                     AuthErrorCode.EXPIRED_REFRESH_TOKEN
             );
@@ -182,13 +289,11 @@ public class TokenService {
             RefreshToken storedToken,
             String newRefreshToken
     ) {
-        LocalDateTime now = LocalDateTime.now();
-
         String newTokenHash =
                 refreshTokenHasher.hash(newRefreshToken);
 
         LocalDateTime expiresAt =
-                now.plus(
+                LocalDateTime.now().plus(
                         jwtProperties.getRefreshTokenValidity()
                 );
 

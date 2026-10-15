@@ -28,6 +28,7 @@ public class TokenProvider {
 
     private static final String CLAIM_ROLE = "role";
     private static final String CLAIM_TOKEN_TYPE = "token_type";
+    private static final String CLAIM_SESSION_ID = "session_id";
 
     private final JwtProperties jwtProperties;
 
@@ -58,10 +59,14 @@ public class TokenProvider {
                         claims.get(CLAIM_ROLE, String.class)
                 );
 
+        String sessionId =
+                claims.get(CLAIM_SESSION_ID, String.class);
+
         CustomUserDetails principal =
                 new CustomUserDetails(
                         userId,
-                        role
+                        role,
+                        sessionId
                 );
 
         return new UsernamePasswordAuthenticationToken(
@@ -71,7 +76,12 @@ public class TokenProvider {
         );
     }
 
-    public String generateToken(User user, Duration validity, TokenType tokenType) {
+    public String generateToken(
+            User user,
+            String sessionId,
+            Duration validity,
+            TokenType tokenType
+    ) {
         Date now = new Date();
         Date expiration =
                 new Date(now.getTime() + validity.toMillis());
@@ -84,20 +94,19 @@ public class TokenProvider {
                 .issuer(jwtProperties.getIssuer())
                 .issuedAt(now)
                 .expiration(expiration)
-
-                // 우리 서비스의 User PK
                 .subject(String.valueOf(user.getId()))
-
                 .claim(
                         CLAIM_ROLE,
                         user.getRole().name()
                 )
-
                 .claim(
                         CLAIM_TOKEN_TYPE,
                         tokenType.name()
                 )
-
+                .claim(
+                        CLAIM_SESSION_ID,
+                        sessionId
+                )
                 .signWith(secretKey, Jwts.SIG.HS512)
                 .compact();
     }
@@ -122,6 +131,9 @@ public class TokenProvider {
             String issuer = claims.getIssuer();
             String tokenType =
                     claims.get(CLAIM_TOKEN_TYPE, String.class);
+            String sessionId =
+                    claims.get(CLAIM_SESSION_ID, String.class);
+            String subject = claims.getSubject();
 
             if (!jwtProperties.getIssuer().equals(issuer)) {
                 return TokenStatus.INVALID;
@@ -131,6 +143,16 @@ public class TokenProvider {
                 return TokenStatus.INVALID;
             }
 
+            if (sessionId == null || sessionId.isBlank()) {
+                return TokenStatus.INVALID;
+            }
+
+            if (subject == null || subject.isBlank()) {
+                return TokenStatus.INVALID;
+            }
+
+            Long.valueOf(subject);
+
             return TokenStatus.VALID;
 
         } catch (ExpiredJwtException e) {
@@ -138,6 +160,15 @@ public class TokenProvider {
         } catch (Exception e) {
             return TokenStatus.INVALID;
         }
+    }
+
+    public String getSessionId(String token) {
+        Claims claims = getClaims(token);
+
+        return claims.get(
+                CLAIM_SESSION_ID,
+                String.class
+        );
     }
 
     public Long getUserId(String token) {

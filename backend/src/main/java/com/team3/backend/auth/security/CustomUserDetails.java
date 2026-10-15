@@ -16,6 +16,7 @@ public class CustomUserDetails implements UserDetails {
 
     private final Long userId;
     private final Role role;
+    private final String sessionId;
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

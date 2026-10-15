@@ -48,10 +48,14 @@ app:
     same-site: ${AUTH_COOKIE_SAME_SITE:Lax}
     path: /
 
+  auth-session:
+    max-active-sessions: 3
+    device-cookie-validity: 365d
+
 jwt:
   issuer: yon
   secret-key: ${JWT_SECRET_KEY}
-  access-token-validity: 2h
+  access-token-validity: 30m
   refresh-token-validity: 7d
 
 internal:
