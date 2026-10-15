@@ -1,5 +1,6 @@
-package com.team3.backend.opportunity.region;
+package com.team3.backend.region.client;
 
+import com.team3.backend.region.dto.StanReginCdResponse;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;

@@ -1,4 +1,4 @@
-package com.team3.backend.opportunity.domain.entity;
+package com.team3.backend.region.domain.entity;
 
 import jakarta.persistence.*;
 import lombok.*;

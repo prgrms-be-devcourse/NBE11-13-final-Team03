@@ -1,7 +1,7 @@
 package com.team3.backend.eligibility.dto;
 
 import com.team3.backend.eligibility.domain.entity.*;
-import com.team3.backend.opportunity.domain.entity.Region;
+import com.team3.backend.region.domain.entity.Region;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

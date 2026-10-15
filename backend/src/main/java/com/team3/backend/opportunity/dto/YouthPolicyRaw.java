@@ -1,4 +1,4 @@
-package com.team3.backend.opportunity.normalization;
+package com.team3.backend.opportunity.dto;
 
 import lombok.Builder;
 

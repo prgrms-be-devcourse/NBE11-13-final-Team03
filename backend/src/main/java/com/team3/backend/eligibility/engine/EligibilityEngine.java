@@ -5,7 +5,7 @@ import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.OpportunityCondition;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.region.RegionIndex;
+import com.team3.backend.region.directory.RegionIndex;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;

@@ -1,7 +1,7 @@
-package com.team3.backend.opportunity.region;
+package com.team3.backend.region.directory;
 
-import com.team3.backend.opportunity.domain.entity.Region;
-import com.team3.backend.opportunity.domain.repository.RegionRepository;
+import com.team3.backend.region.domain.entity.Region;
+import com.team3.backend.region.domain.repository.RegionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;

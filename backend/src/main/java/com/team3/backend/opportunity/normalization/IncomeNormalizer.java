@@ -1,6 +1,7 @@
 package com.team3.backend.opportunity.normalization;
 
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
+import com.team3.backend.opportunity.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.official.OfficialText;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

@@ -1,9 +1,24 @@
-package com.team3.backend.opportunity.normalization;
+package com.team3.backend.opportunity.service;
 
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.*;
+import com.team3.backend.opportunity.dto.NormalizationCommand;
+import com.team3.backend.opportunity.dto.NormalizationResult;
+import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.AgeNormalization;
+import com.team3.backend.opportunity.normalization.AgeNormalizer;
+import com.team3.backend.opportunity.normalization.ApplicationPeriod;
+import com.team3.backend.opportunity.normalization.ApplicationPeriodNormalizer;
+import com.team3.backend.opportunity.normalization.CodeConditionNormalizer;
+import com.team3.backend.opportunity.normalization.CodeNormalization;
+import com.team3.backend.opportunity.normalization.IncomeNormalization;
+import com.team3.backend.opportunity.normalization.IncomeNormalizer;
+import com.team3.backend.opportunity.normalization.RegionNormalization;
+import com.team3.backend.opportunity.normalization.RegionNormalizer;
+import com.team3.backend.opportunity.normalization.RegionStatus;
 import com.team3.backend.opportunity.normalization.official.*;
-import com.team3.backend.opportunity.region.RegionDirectory;
+import com.team3.backend.region.directory.RegionDirectory;
+import com.team3.backend.region.domain.repository.RegionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

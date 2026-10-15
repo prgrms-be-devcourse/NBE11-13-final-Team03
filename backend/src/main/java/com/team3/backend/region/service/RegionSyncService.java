@@ -1,7 +1,11 @@
-package com.team3.backend.opportunity.region;
+package com.team3.backend.region.service;
 
-import com.team3.backend.opportunity.domain.entity.Region;
-import com.team3.backend.opportunity.domain.repository.RegionRepository;
+import com.team3.backend.region.client.RegionCodeApiClient;
+import com.team3.backend.region.directory.RegionDirectory;
+import com.team3.backend.region.domain.entity.Region;
+import com.team3.backend.region.domain.repository.RegionRepository;
+import com.team3.backend.region.dto.RegionSyncResult;
+import com.team3.backend.region.dto.StanReginCdResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

@@ -1,5 +1,6 @@
 package com.team3.backend.opportunity.domain.entity;
 
+import com.team3.backend.region.domain.entity.Region;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.Immutable;

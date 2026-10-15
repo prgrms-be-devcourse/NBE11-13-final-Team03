@@ -1,5 +1,6 @@
-package com.team3.backend.opportunity.region;
+package com.team3.backend.region.client;
 
+import com.team3.backend.region.dto.StanReginCdResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;

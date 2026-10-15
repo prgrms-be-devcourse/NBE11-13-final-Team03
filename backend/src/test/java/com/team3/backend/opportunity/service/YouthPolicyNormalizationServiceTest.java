@@ -1,9 +1,19 @@
-package com.team3.backend.opportunity.normalization;
+package com.team3.backend.opportunity.service;
 
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.*;
+import com.team3.backend.opportunity.dto.NormalizationCommand;
+import com.team3.backend.opportunity.dto.NormalizationResult;
+import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.AgeNormalizer;
+import com.team3.backend.opportunity.normalization.ApplicationPeriodNormalizer;
+import com.team3.backend.opportunity.normalization.CodeConditionNormalizer;
+import com.team3.backend.opportunity.normalization.IncomeNormalizer;
+import com.team3.backend.opportunity.normalization.RegionNormalizer;
+import com.team3.backend.opportunity.normalization.YouthPolicyCodeTable;
 import com.team3.backend.opportunity.normalization.official.*;
-import com.team3.backend.opportunity.region.RegionDirectory;
+import com.team3.backend.region.directory.RegionDirectory;
+import com.team3.backend.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;

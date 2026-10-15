@@ -2,13 +2,17 @@ package com.team3.backend.opportunity.service;
 
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.opportunity.domain.entity.*;
+import com.team3.backend.opportunity.dto.NormalizationCommand;
+import com.team3.backend.opportunity.dto.NormalizationResult;
 import com.team3.backend.opportunity.dto.NormalizationResultResponse;
+import com.team3.backend.opportunity.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.exception.OpportunityErrorCode;
 import com.team3.backend.opportunity.normalization.*;
 import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
 import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;
 import com.team3.backend.opportunity.normalization.official.PeriodEvidenceExtractor;
-import com.team3.backend.opportunity.region.RegionDirectory;
+import com.team3.backend.region.directory.RegionDirectory;
+import com.team3.backend.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;

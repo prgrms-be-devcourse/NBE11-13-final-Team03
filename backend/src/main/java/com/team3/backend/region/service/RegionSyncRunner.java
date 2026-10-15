@@ -1,5 +1,6 @@
-package com.team3.backend.opportunity.region;
+package com.team3.backend.region.service;
 
+import com.team3.backend.region.dto.RegionSyncResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;

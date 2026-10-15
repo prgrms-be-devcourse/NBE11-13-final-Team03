@@ -20,7 +20,7 @@ import com.team3.backend.opportunity.domain.repository.OpportunityRepository;
 import com.team3.backend.opportunity.normalization.ApplicationPeriod;
 import com.team3.backend.opportunity.normalization.ApplicationStatus;
 import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
-import com.team3.backend.opportunity.region.RegionDirectory;
+import com.team3.backend.region.directory.RegionDirectory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;

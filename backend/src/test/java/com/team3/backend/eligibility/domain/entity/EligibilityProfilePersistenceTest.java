@@ -1,6 +1,6 @@
 package com.team3.backend.eligibility.domain.entity;
 
-import com.team3.backend.opportunity.domain.entity.Region;
+import com.team3.backend.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;

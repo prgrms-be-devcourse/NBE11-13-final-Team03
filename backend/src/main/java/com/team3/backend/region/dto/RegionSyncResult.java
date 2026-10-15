@@ -1,4 +1,4 @@
-package com.team3.backend.opportunity.region;
+package com.team3.backend.region.dto;
 
 import java.util.List;
 

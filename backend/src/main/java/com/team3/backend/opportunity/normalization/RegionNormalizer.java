@@ -1,7 +1,7 @@
 package com.team3.backend.opportunity.normalization;
 
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.region.RegionIndex;
+import com.team3.backend.region.directory.RegionIndex;
 import org.springframework.stereotype.Component;
 
 import java.util.*;

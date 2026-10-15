@@ -5,9 +5,9 @@ import com.team3.backend.eligibility.domain.repository.EligibilityProfileReposit
 import com.team3.backend.eligibility.dto.EligibilityProfileResponse;
 import com.team3.backend.eligibility.dto.EligibilityProfileUpdateRequest;
 import com.team3.backend.global.exception.BusinessException;
-import com.team3.backend.opportunity.domain.entity.Region;
-import com.team3.backend.opportunity.domain.repository.RegionRepository;
-import com.team3.backend.opportunity.region.RegionDirectory;
+import com.team3.backend.region.directory.RegionDirectory;
+import com.team3.backend.region.domain.entity.Region;
+import com.team3.backend.region.domain.repository.RegionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
