@@ -7,6 +7,7 @@ import com.team3.backend.eligibility.engine.ConditionEvaluation;
 import com.team3.backend.eligibility.engine.EligibilityConditionInput;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.eligibility.engine.EligibilityEvaluation;
+import com.team3.backend.eligibility.service.EligibilityEvaluator;
 import com.team3.backend.eligibility.service.EligibilityQueryService;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.ApplicationWindowRepository;
@@ -92,7 +93,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "logging.level.org.hibernate.SQL=OFF"
 })
-@Import({EligibilityQueryService.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
+@Import({EligibilityQueryService.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
         YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
         YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
