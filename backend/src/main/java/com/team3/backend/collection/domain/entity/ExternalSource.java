@@ -1,4 +1,4 @@
-package com.team3.backend.collection.domain;
+package com.team3.backend.collection.domain.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

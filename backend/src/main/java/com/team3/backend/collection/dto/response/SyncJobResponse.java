@@ -1,7 +1,7 @@
 package com.team3.backend.collection.dto.response;
 
 import com.team3.backend.collection.domain.SyncJobStatus;
-import com.team3.backend.collection.domain.SyncHistory;
+import com.team3.backend.collection.domain.entity.SyncHistory;
 import java.time.OffsetDateTime;
 import java.util.List;
 

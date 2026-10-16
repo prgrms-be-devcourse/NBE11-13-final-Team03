@@ -1,12 +1,12 @@
 package com.team3.backend.collection.controller;
 
-import com.team3.backend.collection.domain.ExternalSource;
-import com.team3.backend.collection.domain.SyncHistory;
+import com.team3.backend.collection.domain.entity.ExternalSource;
+import com.team3.backend.collection.domain.entity.SyncHistory;
 import com.team3.backend.collection.domain.SyncJobStatus;
 import com.team3.backend.collection.dto.request.RawRecordSaveRequest;
-import com.team3.backend.collection.repository.ExternalSourceRepository;
-import com.team3.backend.collection.repository.RawExternalRecordRepository;
-import com.team3.backend.collection.repository.SyncHistoryRepository;
+import com.team3.backend.collection.domain.repository.ExternalSourceRepository;
+import com.team3.backend.collection.domain.repository.RawExternalRecordRepository;
+import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
 import com.team3.backend.collection.service.RawRecordService;
 import java.time.OffsetDateTime;
 import java.util.concurrent.Callable;

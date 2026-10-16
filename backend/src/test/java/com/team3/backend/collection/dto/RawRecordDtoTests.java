@@ -1,8 +1,8 @@
 package com.team3.backend.collection.dto;
 
-import com.team3.backend.collection.domain.ExternalSource;
-import com.team3.backend.collection.domain.RawExternalRecord;
-import com.team3.backend.collection.domain.SyncHistory;
+import com.team3.backend.collection.domain.entity.ExternalSource;
+import com.team3.backend.collection.domain.entity.RawExternalRecord;
+import com.team3.backend.collection.domain.entity.SyncHistory;
 import com.team3.backend.collection.dto.request.RawRecordSaveRequest;
 import com.team3.backend.collection.dto.response.RawRecordResponse;
 import java.time.OffsetDateTime;

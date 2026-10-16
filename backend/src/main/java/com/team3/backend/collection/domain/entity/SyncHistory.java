@@ -1,5 +1,7 @@
-package com.team3.backend.collection.domain;
+package com.team3.backend.collection.domain.entity;
 
+import com.team3.backend.collection.domain.RecordResultType;
+import com.team3.backend.collection.domain.SyncJobStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;

@@ -1,7 +1,7 @@
 package com.team3.backend.collection.service;
 
 import com.team3.backend.collection.domain.CollectionSource;
-import com.team3.backend.collection.domain.SyncHistory;
+import com.team3.backend.collection.domain.entity.SyncHistory;
 import com.team3.backend.collection.domain.SyncJobStatus;
 import com.team3.backend.collection.domain.RecordProcessStatus;
 import com.team3.backend.collection.dto.response.Employment24PageFailureResponse;
@@ -9,8 +9,8 @@ import com.team3.backend.collection.dto.response.SyncJobResponse;
 import com.team3.backend.collection.dto.response.SyncPageFailureResponse;
 import com.team3.backend.collection.dto.response.SyncRecordResultResponse;
 import com.team3.backend.collection.dto.response.SyncStartResponse;
-import com.team3.backend.collection.repository.ExternalSourceRepository;
-import com.team3.backend.collection.repository.SyncHistoryRepository;
+import com.team3.backend.collection.domain.repository.ExternalSourceRepository;
+import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.OffsetDateTime;
 import java.util.List;

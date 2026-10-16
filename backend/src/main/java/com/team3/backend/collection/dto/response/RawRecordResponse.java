@@ -1,6 +1,6 @@
 package com.team3.backend.collection.dto.response;
 
-import com.team3.backend.collection.domain.RawExternalRecord;
+import com.team3.backend.collection.domain.entity.RawExternalRecord;
 import java.time.OffsetDateTime;
 import tools.jackson.databind.JsonNode;
 

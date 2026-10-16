@@ -1,6 +1,6 @@
-package com.team3.backend.collection.repository;
+package com.team3.backend.collection.domain.repository;
 
-import com.team3.backend.collection.domain.SyncHistory;
+import com.team3.backend.collection.domain.entity.SyncHistory;
 import com.team3.backend.collection.domain.SyncJobStatus;
 import jakarta.persistence.LockModeType;
 import java.util.Optional;
