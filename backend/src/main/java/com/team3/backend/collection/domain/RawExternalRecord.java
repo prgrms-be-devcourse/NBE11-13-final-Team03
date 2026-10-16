@@ -6,6 +6,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -19,7 +20,9 @@ import tools.jackson.databind.JsonNode;
 
 /** 변경 시점의 원본 스냅샷. syncHistory는 이 스냅샷을 생성한 실행이다. */
 @Entity
-@Table(name = "raw_external_record")
+@Table(name = "raw_external_record", indexes = {
+        @Index(name = "idx_raw_source_external_id", columnList = "source_id, external_id, id")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RawExternalRecord {
@@ -59,6 +62,13 @@ public class RawExternalRecord {
         this.payloadHash = payloadHash;
         this.payload = payload.deepCopy();
         this.firstSeenAt = observedAt;
+        this.lastSeenAt = observedAt;
+    }
+
+    public void markSeenAt(OffsetDateTime observedAt) {
+        if (observedAt.isBefore(lastSeenAt)) {
+            throw new IllegalArgumentException("마지막 관측 시각 이전의 원본은 적용할 수 없습니다.");
+        }
         this.lastSeenAt = observedAt;
     }
 }
