@@ -7,6 +7,7 @@ import com.team3.backend.collection.dto.response.SyncPageFailureResponse;
 import com.team3.backend.collection.exception.YouthPolicyClientException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 
@@ -30,6 +31,9 @@ public class YouthPolicyCollectionService {
         List<SyncPageFailureResponse> failures = new ArrayList<>();
         Integer totalCount = null;
         for (int pageNumber = 1; ; pageNumber++) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new CancellationException("수집 실행이 중단되었습니다.");
+            }
             try {
                 YouthPolicyPage page = client.fetchPage(pageNumber, pageSize);
                 records.addAll(page.records());
@@ -42,6 +46,9 @@ public class YouthPolicyCollectionService {
             } catch (YouthPolicyClientException exception) {
                 failures.add(new SyncPageFailureResponse(pageNumber,
                         exception.getErrorCode(), exception.getMessage(), exception.isRetryable()));
+                if (exception.getErrorCode().equals("HTTP_401") || exception.getErrorCode().equals("HTTP_403")) {
+                    return new YouthPolicyCollectionResult(records, failures, false);
+                }
             }
             if (totalCount != null && (long) pageNumber * pageSize >= totalCount) {
                 return new YouthPolicyCollectionResult(records, failures, true);

@@ -2,6 +2,7 @@ package com.team3.backend.collection.service;
 
 import com.team3.backend.collection.domain.RawExternalRecord;
 import com.team3.backend.collection.domain.SyncJobStatus;
+import com.team3.backend.collection.domain.RecordResultType;
 import com.team3.backend.collection.dto.request.RawRecordSaveRequest;
 import com.team3.backend.collection.dto.response.RawRecordResponse;
 import com.team3.backend.collection.repository.ExternalSourceRepository;
@@ -19,9 +20,19 @@ public class RawRecordService {
     private final SyncHistoryRepository syncHistories;
     private final ExternalSourceRepository sources;
     private final RawExternalRecordRepository records;
+    private final RawRecordFingerprint fingerprint;
 
     @Transactional
     public RawRecordResponse save(RawRecordSaveRequest request) {
+        return saveInternal(request, false);
+    }
+
+    @Transactional
+    public void saveForSync(RawRecordSaveRequest request) {
+        saveInternal(request, true);
+    }
+
+    private RawRecordResponse saveInternal(RawRecordSaveRequest request, boolean recordProgress) {
         Objects.requireNonNull(request, "원본 저장 요청이 필요합니다.");
         var sync = syncHistories.findByIdForUpdate(request.syncId())
                 .orElseThrow(() -> new EntityNotFoundException("수집 실행을 찾을 수 없습니다."));
@@ -41,14 +52,25 @@ public class RawRecordService {
             if (request.collectedAt().isBefore(latest.getLastSeenAt())) {
                 throw new IllegalArgumentException("마지막 관측 시각 이전의 원본은 적용할 수 없습니다.");
             }
-            if (latest.getPayloadHash().equals(request.payloadHash())) {
+            // 수동 최신화는 과거 해시 규칙이 달라도 원본을 현재 규칙으로 비교한다.
+            boolean unchanged = recordProgress
+                    ? fingerprint.hash(latest.getPayload()).equals(request.payloadHash())
+                    : latest.getPayloadHash().equals(request.payloadHash());
+            if (unchanged) {
                 latest.markSeenAt(request.collectedAt());
+                if (recordProgress) {
+                    sync.recordSuccess(RecordResultType.UNCHANGED);
+                }
                 return RawRecordResponse.from(latest);
             }
         }
         var snapshot = new RawExternalRecord(sync, request.externalId(), request.payloadHash(),
                 request.payload(), request.collectedAt());
-        return RawRecordResponse.from(records.save(snapshot));
+        var saved = records.save(snapshot);
+        if (recordProgress) {
+            sync.recordSuccess(previous.isPresent() ? RecordResultType.UPDATED : RecordResultType.CREATED);
+        }
+        return RawRecordResponse.from(saved);
     }
 
     @Transactional(readOnly = true)

@@ -25,7 +25,7 @@ class RawRecordServiceTests {
     private final SyncHistoryRepository syncHistories = mock(SyncHistoryRepository.class);
     private final ExternalSourceRepository sources = mock(ExternalSourceRepository.class);
     private final RawExternalRecordRepository records = mock(RawExternalRecordRepository.class);
-    private final RawRecordService service = new RawRecordService(syncHistories, sources, records);
+    private final RawRecordService service = new RawRecordService(syncHistories, sources, records, new RawRecordFingerprint());
     private final OffsetDateTime startedAt = OffsetDateTime.parse("2026-10-16T10:00:00+09:00");
     private final ExternalSource source = new ExternalSource("YOUTH_POLICY", "온통청년", "https://example.com", true, startedAt);
     private final SyncHistory sync = new SyncHistory(source, "FULL", startedAt);

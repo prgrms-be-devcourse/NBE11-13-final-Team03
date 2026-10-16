@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 
@@ -80,6 +81,9 @@ public class Employment24CollectionService {
 
     private Employment24Page fetchWithRetry(Employment24SearchRequest request) {
         for (int attempt = 1; ; attempt++) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new CancellationException("수집 실행이 중단되었습니다.");
+            }
             try {
                 return client.fetchPage(request);
             } catch (Employment24ClientException exception) {
