@@ -184,6 +184,64 @@ class OpportunityPersistenceTest {
         assertThat(foundGangnam.getParent().getRegionCode()).isEqualTo("11");
     }
 
+    @Test
+    void 훈련과정_회차_상세를_버전별로_저장하고_과정ID로_묶어_조회한다() {
+        Opportunity round115 = persistOpportunity();
+        OpportunityVersion v115 = persistVersion(round115, 1, Map.of("title", "굴삭기 면허취득과정"));
+        Opportunity round116 = persistOpportunity();
+        OpportunityVersion v116 = persistVersion(round116, 1, Map.of("title", "굴삭기 면허취득과정"));
+        em.persist(trainingDetail(v115, 115, LocalDate.of(2026, 10, 1)));
+        em.persist(trainingDetail(v116, 116, LocalDate.of(2026, 10, 15)));
+        em.flush();
+        em.clear();
+
+        List<TrainingCourseDetail> rounds = em.createQuery(
+                        "select d from TrainingCourseDetail d where d.courseId = :courseId order by d.courseRound",
+                        TrainingCourseDetail.class)
+                .setParameter("courseId", "AIG20250000502773")
+                .getResultList();
+        assertThat(rounds).extracting(TrainingCourseDetail::getCourseRound).containsExactly(115, 116);
+        assertThat(rounds.getFirst().getVersion().getId()).isEqualTo(v115.getId());
+        assertThat(rounds.getFirst().getTrainingStartDate()).isEqualTo(LocalDate.of(2026, 10, 1));
+        assertThat(rounds.getFirst().getActualTrainingCost()).isEqualTo(330_000L);
+    }
+
+    @Test
+    void 버전_하나에_훈련_상세는_하나만_저장된다() {
+        Opportunity opportunity = persistOpportunity();
+        OpportunityVersion v1 = persistVersion(opportunity, 1, Map.of("title", "v1"));
+        em.persist(trainingDetail(v1, 115, LocalDate.of(2026, 10, 1)));
+        em.flush();
+
+        // IDENTITY 키라 persist 시점에 INSERT가 나가므로 persist부터 감싼다
+        assertThatThrownBy(() -> {
+            em.persist(trainingDetail(v1, 115, LocalDate.of(2026, 10, 1)));
+            em.flush();
+        }).isInstanceOf(org.hibernate.exception.ConstraintViolationException.class);
+    }
+
+    private TrainingCourseDetail trainingDetail(OpportunityVersion version, int round, LocalDate start) {
+        return TrainingCourseDetail.builder()
+                .version(version)
+                .courseId("AIG20250000502773")
+                .courseRound(round)
+                .institutionName("포천건설중장비운전학원")
+                .institutionCode("202004027")
+                .institutionCustomerId("500038675869")
+                .trainingStartDate(start)
+                .trainingEndDate(start.plusDays(1))
+                .actualTrainingCost(330_000L)
+                .courseFee(116_160L)
+                .capacity(2)
+                .ncsCode("14070106")
+                .trainingTargetCode("C0061")
+                .trainingTargetName("국민내일배움카드(일반)")
+                .weekendTypeCode("3")
+                .address("경기 포천시")
+                .telNo("031-531-1002")
+                .build();
+    }
+
     private Opportunity persistOpportunity() {
         Opportunity opportunity = Opportunity.builder()
                 .opportunityType(OpportunityType.YOUTH_POLICY)
