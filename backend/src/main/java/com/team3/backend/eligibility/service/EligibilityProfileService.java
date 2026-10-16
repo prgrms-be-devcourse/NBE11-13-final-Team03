@@ -2,6 +2,7 @@ package com.team3.backend.eligibility.service;
 
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
 import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
+import com.team3.backend.eligibility.dto.EligibilityProfilePatchRequest;
 import com.team3.backend.eligibility.dto.EligibilityProfileResponse;
 import com.team3.backend.eligibility.dto.EligibilityProfileUpdateRequest;
 import com.team3.backend.global.exception.BusinessException;
@@ -9,11 +10,13 @@ import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
 import com.team3.backend.region.domain.repository.RegionRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Optional;
 
 import static com.team3.backend.eligibility.exception.EligibilityErrorCode.INVALID_REGION_CODE;
 import static com.team3.backend.eligibility.exception.EligibilityErrorCode.PROFILE_NOT_FOUND;
@@ -34,11 +37,24 @@ public class EligibilityProfileService {
     private final RegionRepository regionRepository;
     private final RegionDirectory regionDirectory;
     private final EligibilityProfileValidator validator;
+    private final ApplicationEventPublisher eventPublisher;
 
     public EligibilityProfileResponse get(Long userId) {
         return profileRepository.findByUserId(userId)
                 .map(EligibilityProfileResponse::from)
                 .orElseThrow(() -> new BusinessException(PROFILE_NOT_FOUND));
+    }
+
+    /**
+     * 부분 수정 (JSON Merge Patch). 보내지 않은 필드는 유지하고, 명시적 null은 미입력으로 바꾼다.
+     * 현재 프로필에 덮어쓴 결과 전체를 PUT과 같은 절차로 검증·저장한다. 프로필이 없으면 PROFILE_NOT_FOUND.
+     */
+    @Transactional
+    public EligibilityProfileResponse patch(Long userId, EligibilityProfilePatchRequest request) {
+        EligibilityProfileResponse current = profileRepository.findByUserId(userId)
+                .map(EligibilityProfileResponse::from)
+                .orElseThrow(() -> new BusinessException(PROFILE_NOT_FOUND));
+        return put(userId, request.mergeInto(current));
     }
 
     @Transactional
@@ -54,12 +70,20 @@ public class EligibilityProfileService {
         Region school = schoolCode == null ? null : findRegion(schoolCode);
 
         EligibilityProfile source = request.toEntity(userId, residence, school);
-        EligibilityProfile saved = profileRepository.findByUserId(userId)
-                .map(existing -> {
-                    existing.overwrite(source);
-                    return existing;
-                })
-                .orElseGet(() -> profileRepository.save(source));
+        Optional<EligibilityProfile> existing = profileRepository.findByUserId(userId);
+        EligibilityProfile saved;
+        boolean changed;
+        if (existing.isPresent()) {
+            saved = existing.get();
+            changed = saved.overwrite(source);
+        } else {
+            saved = profileRepository.save(source);
+            changed = true;
+        }
+        if (changed) {
+            // 커밋 후 판정 결과 비동기 최신화 (EligibilityResultRefresher)
+            eventPublisher.publishEvent(new EligibilityProfileChangedEvent(userId));
+        }
         // updatedAt(@PrePersist/@PreUpdate)이 응답에 반영되도록 즉시 flush
         profileRepository.flush();
         return EligibilityProfileResponse.from(saved);

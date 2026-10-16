@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -160,6 +161,14 @@ public class EligibilityProfile {
     @Column(name = "other_training_participation", length = 20)
     private TrainingParticipation otherTrainingParticipation;
 
+    /**
+     * 판정 입력 버전. 판정에 쓰이는 값이 실제로 바뀔 때만 1씩 올라간다 (ERD USER_PROFILE.profile_version).
+     * 저장된 판정 결과(eligibility_results)가 최신인지 판단하는 기준.
+     */
+    @Builder.Default
+    @Column(name = "profile_version", nullable = false)
+    private Long profileVersion = 1L;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -167,10 +176,13 @@ public class EligibilityProfile {
     private LocalDateTime updatedAt;
 
     /**
-     * PUT(전체 교체) 반영. id·userId·createdAt은 유지하고 나머지는 source 값으로 덮어쓴다.
-     * 요청에서 빠진 항목은 미입력(NULL)이 된다.
+     * 전체 교체 반영. id·userId·createdAt은 유지하고 나머지는 source 값으로 덮어쓴다.
+     * 요청에서 빠진 항목은 미입력(NULL)이 된다. 판정에 쓰이는 값이 실제로 바뀐 경우에만 profileVersion을 올린다.
+     *
+     * @return 값이 바뀌었으면 true
      */
-    public void overwrite(EligibilityProfile source) {
+    public boolean overwrite(EligibilityProfile source) {
+        boolean changed = !sameJudgmentInput(source);
         this.birthDate = source.birthDate;
         this.residenceRegion = source.residenceRegion;
         this.employmentStatus = source.employmentStatus;
@@ -197,10 +209,64 @@ public class EligibilityProfile {
         this.trainingCardStatus = source.trainingCardStatus;
         this.kdtParticipation = source.kdtParticipation;
         this.otherTrainingParticipation = source.otherTrainingParticipation;
+        if (changed) {
+            this.profileVersion = this.profileVersion + 1;
+        }
+        return changed;
+    }
+
+    /** 판정 입력이 같은지 (금액·비율은 숫자 값으로, 지역은 코드로 비교) */
+    private boolean sameJudgmentInput(EligibilityProfile o) {
+        return Objects.equals(birthDate, o.birthDate)
+                && Objects.equals(regionCode(residenceRegion), regionCode(o.residenceRegion))
+                && employmentStatus == o.employmentStatus
+                && educationLevel == o.educationLevel
+                && enrollmentStatus == o.enrollmentStatus
+                && Objects.equals(regionCode(schoolRegion), regionCode(o.schoolRegion))
+                && maritalStatus == o.maritalStatus
+                && housingStatus == o.housingStatus
+                && homelessStatus == o.homelessStatus
+                && sameIncome(personalIncome, o.personalIncome)
+                && sameIncome(householdIncome, o.householdIncome)
+                && medianIncomeStatus == o.medianIncomeStatus
+                && sameNumber(medianIncomePercent, o.medianIncomePercent)
+                && studentLoanBracketStatus == o.studentLoanBracketStatus
+                && Objects.equals(studentLoanBracket, o.studentLoanBracket)
+                && Objects.equals(householdSize, o.householdSize)
+                && householderStatus == o.householderStatus
+                && majorField == o.majorField
+                && specialTargetStatus == o.specialTargetStatus
+                && Objects.equals(new HashSet<>(specialTargets), new HashSet<>(o.specialTargets))
+                && militaryServiceStatus == o.militaryServiceStatus
+                && Objects.equals(militaryServiceMonths, o.militaryServiceMonths)
+                && trainingCardStatus == o.trainingCardStatus
+                && kdtParticipation == o.kdtParticipation
+                && otherTrainingParticipation == o.otherTrainingParticipation;
+    }
+
+    private static String regionCode(Region region) {
+        return region == null ? null : region.getRegionCode();
+    }
+
+    private static boolean sameIncome(IncomeAnswer a, IncomeAnswer b) {
+        AnswerStatus as = a == null ? null : a.getStatus();
+        AnswerStatus bs = b == null ? null : b.getStatus();
+        if (as != bs) {
+            return false;
+        }
+        return a == null || b == null
+                || sameNumber(a.getAmount(), b.getAmount()) && a.getPeriod() == b.getPeriod();
+    }
+
+    private static boolean sameNumber(BigDecimal a, BigDecimal b) {
+        return a == null ? b == null : b != null && a.compareTo(b) == 0;
     }
 
     @PrePersist
     protected void onCreate() {
+        if (this.profileVersion == null) {
+            this.profileVersion = 1L;
+        }
         LocalDateTime now = LocalDateTime.now();
         this.createdAt = now;
         this.updatedAt = now;
