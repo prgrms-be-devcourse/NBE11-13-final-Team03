@@ -22,7 +22,9 @@ import static com.team3.backend.eligibility.domain.entity.ConditionMatchResult.*
  * - 우대조건(PREFERRED)은 판정하지 않는다.
  * - 정책 조건 원문(UNSTRUCTURED)은 사용자 확인 필요(CHECK_REQUIRED).
  * - 정책 데이터에 조건이 비어 있으면 NOT_SPECIFIED (집계 제외). 단 연령·지역이 비어 있으면 ELIGIBLE을 확정하지 않도록 CHECK_REQUIRED.
- * - 조건 검증 상태가 INVALID·DATA_CONFLICT면 DATA_UNCLEAR. NEEDS_REVIEW 조건은 사용자 값과 일치하면 MATCHED, 아니면 DATA_UNCLEAR.
+ * - 조건 검증 상태가 INVALID·DATA_CONFLICT면 결과와 관계없이 가장 먼저 DATA_UNCLEAR. NEEDS_REVIEW 조건은 사용자 값과 일치하면 MATCHED, 아니면 DATA_UNCLEAR.
+ * - 조건이 하나도 없으면 UNKNOWN. 정규화는 버전마다 연령·지역·코드·소득 조건 행을 항상 만들고 "제한 없음"도 NO_LIMIT 행으로 저장하므로,
+ *   조건이 없다는 것은 제한이 없다는 뜻이 아니라 정규화 데이터 누락이다.
  * - 사용자 값이 없거나 "모름"이면 USER_INFO_MISSING.
  * 기준일(today)은 한국 시간 날짜로 넘긴다. 만 나이는 기준일로 계산한다.
  */
@@ -33,6 +35,9 @@ public class EligibilityEngine {
 
     public EligibilityEvaluation evaluate(EligibilityProfile profile, List<EligibilityConditionInput> conditions,
                                           Collection<String> residenceRegionCodes, RegionIndex regionIndex, LocalDate today) {
+        if (conditions.isEmpty()) {
+            return new EligibilityEvaluation(EligibilityStatus.UNKNOWN, List.of(), "정규화된 조건이 없어 판정할 수 없습니다.");
+        }
         List<ConditionEvaluation> results = new ArrayList<>();
         for (EligibilityConditionInput c : conditions) {
             if (c.requirement() == RequirementType.PREFERRED) {
@@ -71,14 +76,14 @@ public class EligibilityEngine {
         return new EligibilityEvaluation(EligibilityStatus.ELIGIBLE, results, "확인된 필수조건을 모두 충족합니다.");
     }
 
-    /** 조건 검증 상태 반영 */
-    private static ConditionEvaluation applyValidation(EligibilityConditionInput c, ConditionEvaluation e) {
+    /** 조건 검증 상태 반영. 오류·모순(INVALID·DATA_CONFLICT)은 조건별 결과와 관계없이 가장 먼저 반영한다 */
+    static ConditionEvaluation applyValidation(EligibilityConditionInput c, ConditionEvaluation e) {
         ValidationStatus v = c.validationStatus();
-        if (e.result() == NOT_SPECIFIED || e.result() == CHECK_REQUIRED && UNSTRUCTURED.equals(status(c))) {
-            return e;
-        }
         if (v == ValidationStatus.INVALID || v == ValidationStatus.DATA_CONFLICT) {
             return with(e, DATA_UNCLEAR, "정책 조건에 오류·모순이 있어 판정할 수 없습니다.");
+        }
+        if (e.result() == NOT_SPECIFIED || e.result() == CHECK_REQUIRED && UNSTRUCTURED.equals(status(c))) {
+            return e;
         }
         if (v == ValidationStatus.NEEDS_REVIEW && e.result() != MATCHED && e.result() != CHECK_REQUIRED) {
             return with(e, DATA_UNCLEAR, "정책 조건이 검토 중이어서 판정할 수 없습니다.");
