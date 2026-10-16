@@ -52,24 +52,88 @@ class Employment24CollectionServiceTests {
     }
 
     @Test
-    void stopsCategoryAfterExhaustingRetriesOnLaterPage() {
+    void continuesAfterExhaustingRetriesOnLaterPage() {
         when(client.fetchPage(request("01", 1))).thenReturn(page(3, 1));
         when(client.fetchPage(request("01", 2))).thenThrow(new Employment24ClientException("HTTP_503", true));
+        when(client.fetchPage(request("01", 3))).thenReturn(page(3, 3));
 
         var result = service.collect(today, 1, 5);
 
-        assertEquals(1, result.records().size());
+        assertEquals(2, result.records().size());
         assertEquals(1, result.pageFailures().size());
         var failure = result.pageFailures().getFirst();
         assertEquals(request("01", 2), failure.request());
         assertEquals("HTTP_503", failure.errorCode());
         assertTrue(failure.retryable());
-        assertFalse(result.completed());
-        assertEquals(List.of("01"), result.incompleteNcsCodes());
+        assertTrue(result.completed());
+        assertTrue(result.incompleteNcsCodes().isEmpty());
         verify(client, times(3)).fetchPage(request("01", 2));
-        verify(client, never()).fetchPage(request("01", 3));
+        verify(client).fetchPage(request("01", 3));
         verify(client).fetchPage(request("02", 1));
         verify(client, never()).fetchPage(request("01", 4));
+    }
+
+    @Test
+    void nonRetryableMiddlePageFailureStillContinues() {
+        when(client.fetchPage(request("01", 1))).thenReturn(page(3, 1));
+        when(client.fetchPage(request("01", 2))).thenThrow(new Employment24ClientException("INVALID_RESPONSE", false));
+        when(client.fetchPage(request("01", 3))).thenReturn(page(3, 3));
+        var result = service.collect(today, 1, 5);
+        assertEquals(2, result.records().size());
+        assertTrue(result.completed());
+        assertEquals(1, result.pageFailures().size());
+        verify(client, times(1)).fetchPage(request("01", 2));
+        verify(client).fetchPage(request("01", 3));
+    }
+
+    @Test
+    void failedLastPageCompletesTraversalButPreservesFailure() {
+        when(client.fetchPage(request("01", 1))).thenReturn(page(2, 1));
+        when(client.fetchPage(request("01", 2))).thenThrow(new Employment24ClientException("HTTP_503", true));
+        var result = service.collect(today, 1, 5);
+        assertTrue(result.completed());
+        assertEquals(1, result.pageFailures().size());
+        verify(client, times(3)).fetchPage(request("01", 2));
+        verify(client, never()).fetchPage(request("01", 3));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {401, 403})
+    void authenticationFailureOnMiddlePageStillStopsEverything(int status) {
+        when(client.fetchPage(request("01", 1))).thenReturn(page(3, 1));
+        when(client.fetchPage(request("01", 2))).thenThrow(new Employment24ClientException("HTTP_" + status, false));
+        var result = service.collect(today, 1, 5);
+        assertFalse(result.completed());
+        assertEquals(24, result.incompleteNcsCodes().size());
+        assertEquals(1, result.records().size());
+        assertEquals(1, result.pageFailures().size());
+        verify(client, times(1)).fetchPage(request("01", 2));
+        verify(client, never()).fetchPage(request("01", 3));
+        verify(client, never()).fetchPage(request("02", 1));
+    }
+
+    @Test
+    void listGrowthUsesLatestCountAndPreservesRepeatedRawRecords() {
+        when(client.fetchPage(request("01", 1))).thenReturn(page(2, 1));
+        when(client.fetchPage(request("01", 2))).thenReturn(new Employment24Page(3, "2", "1", page(3, 1).srchList()));
+        when(client.fetchPage(request("01", 3))).thenReturn(page(3, 3));
+        var result = service.collect(today, 1, 5);
+        assertEquals(3, result.records().size());
+        assertEquals(result.records().get(0), result.records().get(1));
+        assertTrue(result.completed());
+        verify(client).fetchPage(request("01", 3));
+        verify(client, never()).fetchPage(request("01", 4));
+    }
+
+    @Test
+    void laterPageFailureAtLimitDoesNotHideIncompleteTraversal() {
+        when(client.fetchPage(request("01", 1))).thenReturn(page(3, 1));
+        when(client.fetchPage(request("01", 2))).thenThrow(new Employment24ClientException("HTTP_503", true));
+        var result = service.collect(today, 1, 2);
+        assertFalse(result.completed());
+        assertEquals(List.of("01"), result.incompleteNcsCodes());
+        assertEquals(1, result.pageFailures().size());
+        verify(client, never()).fetchPage(request("01", 3));
     }
 
     @ParameterizedTest

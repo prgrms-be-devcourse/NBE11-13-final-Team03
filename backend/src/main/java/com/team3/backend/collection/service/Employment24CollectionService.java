@@ -62,7 +62,9 @@ public class Employment24CollectionService {
                         }
                         return new Employment24CollectionResult(records, failures, incompleteNcsCodes);
                     }
-                    break;
+                    if (pageNum == 1) {
+                        break;
+                    }
                 }
                 if (totalCount != null && (long) pageNum * pageSize >= totalCount) {
                     completed = true;
