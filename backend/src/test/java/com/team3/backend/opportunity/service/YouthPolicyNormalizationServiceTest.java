@@ -79,6 +79,10 @@ class YouthPolicyNormalizationServiceTest {
         assertThat(result.newOpportunity()).isTrue();
         assertThat(result.versionNo()).isEqualTo(1);
 
+        Opportunity opportunity = em.find(Opportunity.class, result.opportunityId());
+        assertThat(opportunity.getCategory()).isEqualTo("주거");
+        assertThat(opportunity.getSubCategory()).isEqualTo("주거지원");
+
         OpportunityCondition age = condition(result.versionId(), ConditionType.AGE);
         assertThat(age.getConditionType()).isEqualTo(ConditionType.AGE);
         assertThat(age.getExpression()).containsEntry("status", "RANGE").containsEntry("min", 19).containsEntry("max", 34);
