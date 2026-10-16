@@ -1,6 +1,7 @@
 package com.team3.backend.opportunity.domain.repository;
 
 import com.team3.backend.opportunity.domain.entity.Opportunity;
+import com.team3.backend.opportunity.dto.OpportunityInfoRow;
 import com.team3.backend.opportunity.dto.OpportunitySummaryRow;
 import com.team3.backend.opportunity.dto.OpportunityVersionRef;
 import org.springframework.data.domain.Page;
@@ -31,4 +32,10 @@ public interface OpportunityRepository extends JpaRepository<Opportunity, Long> 
             + "from Opportunity o where o.currentVersion is not null",
             countQuery = "select count(o) from Opportunity o where o.currentVersion is not null")
     Page<OpportunityVersionRef> findAllCurrentVersionRefs(Pageable pageable);
+
+    /** 주어진 기회 중 정규화된 것의 요약 (다른 영역 제공용) */
+    @Query("select new com.team3.backend.opportunity.dto.OpportunityInfoRow("
+            + "o.id, o.currentVersion.id, o.opportunityType, o.title, o.category, o.subCategory, o.detailUrl, o.createdAt) "
+            + "from Opportunity o where o.id in :ids and o.currentVersion is not null")
+    List<OpportunityInfoRow> findInfoRows(@Param("ids") Collection<Long> ids);
 }

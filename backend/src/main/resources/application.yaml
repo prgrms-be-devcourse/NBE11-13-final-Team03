@@ -9,3 +9,8 @@ region-code-api:
   service-key: ${REGION_CODE_API_KEY:}
   page-size: 1000
   sync-on-startup: ${REGION_CODE_SYNC_ON_STARTUP:false}
+
+yon:
+  eligibility:
+    # 판정 결과 제공 방식. local: 같은 애플리케이션 안에서 직접 호출 (MSA 전환 시 원격 구현을 추가하고 값을 바꾼다)
+    provider: ${YON_ELIGIBILITY_PROVIDER:local}
