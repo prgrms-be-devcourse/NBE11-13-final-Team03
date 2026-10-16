@@ -94,4 +94,26 @@ class YouthPolicyCollectionServiceTests {
             Thread.interrupted();
         }
     }
+
+    @Test
+    void processesEachPageBeforeFetchingTheNextOne() {
+        var processedOffsets = new java.util.ArrayList<Integer>();
+        when(client.fetchPage(1, 1)).thenReturn(page(2));
+        when(client.fetchPage(2, 1)).thenAnswer(invocation -> {
+            assertEquals(List.of(0), processedOffsets);
+            return page(2);
+        });
+        var summary = service.collectPages(1, 2, (offset, rows) -> processedOffsets.add(offset));
+        assertEquals(List.of(0, 1), processedOffsets);
+        assertEquals(2, summary.fetchedCount());
+        assertTrue(summary.completed());
+    }
+
+    @Test
+    void pageProcessingFailureStopsBeforeFetchingAnotherPage() {
+        when(client.fetchPage(1, 1)).thenReturn(page(2));
+        assertThrows(IllegalStateException.class, () -> service.collectPages(1, 2,
+                (offset, rows) -> { throw new IllegalStateException("processing failed"); }));
+        verify(client, never()).fetchPage(2, 1);
+    }
 }

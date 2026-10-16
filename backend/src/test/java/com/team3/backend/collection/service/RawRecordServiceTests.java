@@ -8,6 +8,7 @@ import com.team3.backend.collection.dto.request.RawRecordSaveRequest;
 import com.team3.backend.collection.domain.repository.ExternalSourceRepository;
 import com.team3.backend.collection.domain.repository.RawExternalRecordRepository;
 import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
+import com.team3.backend.collection.domain.repository.RawNormalizationRequestRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -25,7 +26,8 @@ class RawRecordServiceTests {
     private final SyncHistoryRepository syncHistories = mock(SyncHistoryRepository.class);
     private final ExternalSourceRepository sources = mock(ExternalSourceRepository.class);
     private final RawExternalRecordRepository records = mock(RawExternalRecordRepository.class);
-    private final RawRecordService service = new RawRecordService(syncHistories, sources, records, new RawRecordFingerprint());
+    private final RawRecordService service = new RawRecordService(syncHistories, sources, records, new RawRecordFingerprint(),
+            mock(RawNormalizationRequestRepository.class));
     private final OffsetDateTime startedAt = OffsetDateTime.parse("2026-10-16T10:00:00+09:00");
     private final ExternalSource source = new ExternalSource("YOUTH_POLICY", "온통청년", "https://example.com", true, startedAt);
     private final SyncHistory sync = new SyncHistory(source, "FULL", startedAt);

@@ -121,6 +121,11 @@ public class SyncHistory {
         this.incompleteNcsCodes = new ArrayList<>(incompleteNcsCodes);
     }
 
+    public void recordFetchedPage(int count) {
+        requireRunning();
+        collectedCount += count;
+    }
+
     public void recordSuccess(RecordResultType result) {
         requireRunning();
         switch (result) {

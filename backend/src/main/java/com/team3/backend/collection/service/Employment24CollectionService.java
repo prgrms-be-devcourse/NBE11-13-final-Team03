@@ -2,6 +2,7 @@ package com.team3.backend.collection.service;
 
 import com.team3.backend.collection.client.Employment24Client;
 import com.team3.backend.collection.dto.external.Employment24CollectionResult;
+import com.team3.backend.collection.dto.external.CollectionSummary;
 import com.team3.backend.collection.dto.external.Employment24SearchRequest;
 import com.team3.backend.collection.dto.external.Employment24Page;
 import com.team3.backend.collection.dto.response.Employment24PageFailureResponse;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.function.BiConsumer;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 
@@ -31,11 +33,19 @@ public class Employment24CollectionService {
     }
 
     public Employment24CollectionResult collect(LocalDate today, int pageSize, int maxPages) {
+        List<JsonNode> records = new ArrayList<>();
+        var summary = collectPages(today, pageSize, maxPages, (offset, page) -> records.addAll(page));
+        return new Employment24CollectionResult(records, summary.employment24PageFailures(), summary.incompleteNcsCodes());
+    }
+
+    public CollectionSummary collectPages(LocalDate today, int pageSize, int maxPages,
+                                          BiConsumer<Integer, List<JsonNode>> pageHandler) {
         Objects.requireNonNull(today, "수집 기준일이 필요합니다.");
+        Objects.requireNonNull(pageHandler, "페이지 처리기가 필요합니다.");
         if (pageSize < 1 || pageSize > 100 || maxPages < 1 || maxPages > 1000) {
             throw new IllegalArgumentException("페이지 크기는 1~100, 최대 조회 페이지 수는 1~1000이어야 합니다.");
         }
-        List<JsonNode> records = new ArrayList<>();
+        int fetchedCount = 0;
         List<Employment24PageFailureResponse> failures = new ArrayList<>();
         List<String> incompleteNcsCodes = new ArrayList<>();
         for (int code = 1; code <= 24; code++) {
@@ -44,16 +54,9 @@ public class Employment24CollectionService {
             boolean completed = false;
             for (int pageNum = 1; pageNum <= maxPages; pageNum++) {
                 var request = Employment24SearchRequest.forNextSixMonths(ncsCode, today, pageNum, pageSize);
+                Employment24Page page = null;
                 try {
-                    var page = fetchWithRetry(request);
-                    records.addAll(page.srchList());
-                    if (page.totalCount() != null) {
-                        totalCount = page.totalCount();
-                    }
-                    if (page.srchList().isEmpty()) {
-                        completed = true;
-                        break;
-                    }
+                    page = fetchWithRetry(request);
                 } catch (Employment24ClientException exception) {
                     failures.add(new Employment24PageFailureResponse(request, exception.getErrorCode(),
                             exception.getMessage(), exception.isRetryable()));
@@ -61,9 +64,20 @@ public class Employment24CollectionService {
                         for (int remaining = code; remaining <= 24; remaining++) {
                             incompleteNcsCodes.add(String.format(Locale.ROOT, "%02d", remaining));
                         }
-                        return new Employment24CollectionResult(records, failures, incompleteNcsCodes);
+                        return new CollectionSummary(fetchedCount, false, List.of(), failures, incompleteNcsCodes);
                     }
                     if (pageNum == 1) {
+                        break;
+                    }
+                }
+                if (page != null) {
+                    pageHandler.accept(fetchedCount, page.srchList());
+                    fetchedCount += page.srchList().size();
+                    if (page.totalCount() != null) {
+                        totalCount = page.totalCount();
+                    }
+                    if (page.srchList().isEmpty()) {
+                        completed = true;
                         break;
                     }
                 }
@@ -76,7 +90,7 @@ public class Employment24CollectionService {
                 incompleteNcsCodes.add(ncsCode);
             }
         }
-        return new Employment24CollectionResult(records, failures, incompleteNcsCodes);
+        return new CollectionSummary(fetchedCount, incompleteNcsCodes.isEmpty(), List.of(), failures, incompleteNcsCodes);
     }
 
     private Employment24Page fetchWithRetry(Employment24SearchRequest request) {

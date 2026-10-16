@@ -67,6 +67,11 @@ public class SyncJobService {
     }
 
     @Transactional
+    public void recordFetchedPage(Long jobId, int count) {
+        locked(jobId).recordFetchedPage(count);
+    }
+
+    @Transactional
     public void recordCollection(Long jobId, int count, List<SyncPageFailureResponse> pageFailures,
                                  List<Employment24PageFailureResponse> employment24PageFailures,
                                  List<String> incompleteNcsCodes) {

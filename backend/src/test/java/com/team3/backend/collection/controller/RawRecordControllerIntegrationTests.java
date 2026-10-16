@@ -7,6 +7,7 @@ import com.team3.backend.collection.dto.request.RawRecordSaveRequest;
 import com.team3.backend.collection.domain.repository.ExternalSourceRepository;
 import com.team3.backend.collection.domain.repository.RawExternalRecordRepository;
 import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
+import com.team3.backend.collection.domain.repository.RawNormalizationRequestRepository;
 import com.team3.backend.collection.service.RawRecordService;
 import java.time.OffsetDateTime;
 import java.util.concurrent.Callable;
@@ -51,6 +52,7 @@ class RawRecordControllerIntegrationTests {
     @Autowired private MockMvc mvc;
     @Autowired private ExternalSourceRepository sources;
     @Autowired private SyncHistoryRepository syncHistories;
+    @Autowired private RawNormalizationRequestRepository normalizationRequests;
     @Autowired private RawExternalRecordRepository records;
     @Autowired private RawRecordService service;
     @Autowired private JdbcTemplate jdbc;
@@ -59,6 +61,7 @@ class RawRecordControllerIntegrationTests {
 
     @BeforeEach
     void setUp() {
+        normalizationRequests.deleteAllInBatch();
         records.deleteAllInBatch();
         syncHistories.deleteAllInBatch();
         sources.deleteAllInBatch();

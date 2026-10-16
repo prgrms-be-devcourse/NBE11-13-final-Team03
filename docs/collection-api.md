@@ -58,4 +58,4 @@ $env:SPRING_JPA_OPEN_IN_VIEW = 'false'
 .\gradlew.bat test --rerun-tasks
 ```
 
-이 원본 저장 API는 원본 저장 HTTP 요청부터 DB 저장·응답까지 제공한다. 외부 API 수집과 원본 저장·실행 집계 연결은 별도의 [수동 최신화 API](manual-sync-api.md)에서 제공한다. 정제 요청 등록은 아직 연결하지 않는다.
+이 원본 저장 API는 원본 저장 HTTP 요청부터 DB 저장·응답까지 제공한다. 외부 API 수집, 페이지별 원본·정제 요청 저장과 실행 집계 연결은 별도의 [수동 최신화 API](manual-sync-api.md)에서 제공한다. 이 단건 API 자체는 정제 요청을 등록하지 않는다.

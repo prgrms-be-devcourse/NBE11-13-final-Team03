@@ -8,6 +8,9 @@ import com.team3.backend.collection.dto.response.RawRecordResponse;
 import com.team3.backend.collection.domain.repository.ExternalSourceRepository;
 import com.team3.backend.collection.domain.repository.RawExternalRecordRepository;
 import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
+import com.team3.backend.collection.domain.entity.RawNormalizationRequest;
+import com.team3.backend.collection.domain.repository.RawNormalizationRequestRepository;
+import java.time.OffsetDateTime;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +24,7 @@ public class RawRecordService {
     private final ExternalSourceRepository sources;
     private final RawExternalRecordRepository records;
     private final RawRecordFingerprint fingerprint;
+    private final RawNormalizationRequestRepository normalizationRequests;
 
     @Transactional
     public RawRecordResponse save(RawRecordSaveRequest request) {
@@ -68,7 +72,9 @@ public class RawRecordService {
                 request.payload(), request.collectedAt());
         var saved = records.save(snapshot);
         if (recordProgress) {
-            sync.recordSuccess(previous.isPresent() ? RecordResultType.UPDATED : RecordResultType.CREATED);
+            var resultType = previous.isPresent() ? RecordResultType.UPDATED : RecordResultType.CREATED;
+            normalizationRequests.save(new RawNormalizationRequest(saved, previous.orElse(null), resultType, OffsetDateTime.now()));
+            sync.recordSuccess(resultType);
         }
         return RawRecordResponse.from(saved);
     }

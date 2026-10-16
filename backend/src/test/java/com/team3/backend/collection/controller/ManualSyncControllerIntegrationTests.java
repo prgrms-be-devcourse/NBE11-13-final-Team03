@@ -8,6 +8,7 @@ import com.team3.backend.collection.dto.response.SyncJobResponse;
 import com.team3.backend.collection.domain.repository.ExternalSourceRepository;
 import com.team3.backend.collection.domain.repository.RawExternalRecordRepository;
 import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
+import com.team3.backend.collection.domain.repository.RawNormalizationRequestRepository;
 import com.team3.backend.collection.service.SyncJobService;
 import com.team3.backend.collection.service.RawRecordService;
 import com.team3.backend.collection.service.RawRecordFingerprint;
@@ -66,6 +67,8 @@ class ManualSyncControllerIntegrationTests {
     private static final java.util.concurrent.ExecutorService HTTP_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
     private static final HttpServer UPSTREAM = server();
     private static volatile String youthRecords = "[]";
+    private static volatile String youthSecondRecords = "[]";
+    private static volatile int blockedYouthPage;
     private static volatile String employmentRecords = "[]";
     private static volatile int youthFailurePage;
     private static volatile int employmentFailureCode;
@@ -77,6 +80,7 @@ class ManualSyncControllerIntegrationTests {
     @Autowired private MockMvc mvc;
     @Autowired private SyncJobService jobs;
     @Autowired private SyncHistoryRepository histories;
+    @Autowired private RawNormalizationRequestRepository normalizationRequests;
     @Autowired private RawExternalRecordRepository records;
     @Autowired private ExternalSourceRepository sources;
     @Autowired private JdbcTemplate jdbc;
@@ -94,6 +98,7 @@ class ManualSyncControllerIntegrationTests {
 
     @BeforeEach
     void setUp() {
+        normalizationRequests.deleteAllInBatch();
         records.deleteAllInBatch();
         histories.deleteAllInBatch();
         sources.deleteAllInBatch();
@@ -102,6 +107,8 @@ class ManualSyncControllerIntegrationTests {
         youthFailurePage = 0;
         employmentFailureCode = 0;
         youthTotalOverride = -1;
+        youthSecondRecords = "[]";
+        blockedYouthPage = 0;
         youthRelease = new CountDownLatch(0);
         youthEntered = new CountDownLatch(0);
         EMPLOYMENT_CALLS.set(0);
@@ -123,8 +130,12 @@ class ManualSyncControllerIntegrationTests {
     }
 
     private long start(String source) throws Exception {
+        return start(source, 100);
+    }
+
+    private long start(String source, int pageSize) throws Exception {
         var result = mvc.perform(post(PATH + "/" + source).with(csrf())
-                        .param("pageSize", "100").param("maxPages", "2"))
+                        .param("pageSize", String.valueOf(pageSize)).param("maxPages", "2"))
                 .andExpect(status().isAccepted()).andExpect(jsonPath("$.status").value("PENDING"))
                 .andReturn();
         long id = body(result).path("jobId").asLong();
@@ -174,13 +185,26 @@ class ManualSyncControllerIntegrationTests {
     @Test
     void canonicalRecollectionAndTwoChangesPreserveThreeSnapshots() throws Exception {
         assertEquals(1, awaitDone(start("YOUTH_POLICY")).newCount());
+        assertEquals(1, normalizationRequests.count());
         youthRecords = "[{\"nested\":{\"a\":1,\"z\":2},\"title\":\"A\",\"plcyNo\":\"p1\"}]";
         assertEquals(1, awaitDone(start("YOUTH_POLICY")).unchangedCount());
+        assertEquals(1, normalizationRequests.count());
         youthRecords = youthRecords.replace("\"A\"", "\"B\"");
         assertEquals(1, awaitDone(start("YOUTH_POLICY")).updatedCount());
         youthRecords = youthRecords.replace("\"B\"", "\"A\"");
         assertEquals(1, awaitDone(start("YOUTH_POLICY")).updatedCount());
         assertEquals(3, records.count());
+        var requests = normalizationRequests.findAll().stream()
+                .sorted(java.util.Comparator.comparing(com.team3.backend.collection.domain.entity.RawNormalizationRequest::getId))
+                .toList();
+        assertEquals(List.of(com.team3.backend.collection.domain.RecordResultType.CREATED,
+                        com.team3.backend.collection.domain.RecordResultType.UPDATED,
+                        com.team3.backend.collection.domain.RecordResultType.UPDATED),
+                requests.stream().map(com.team3.backend.collection.domain.entity.RawNormalizationRequest::getEventType).toList());
+        assertTrue(requests.stream().allMatch(request -> request.getStatus().equals("PENDING")));
+        assertNull(requests.getFirst().getPreviousRawRecord());
+        assertEquals(requests.get(0).getRawRecord().getId(), requests.get(1).getPreviousRawRecord().getId());
+        assertEquals(requests.get(1).getRawRecord().getId(), requests.get(2).getPreviousRawRecord().getId());
         assertEquals("p1", records.findAll().getFirst().getExternalId());
     }
 
@@ -203,6 +227,7 @@ class ManualSyncControllerIntegrationTests {
         var result = awaitDone(start("EMPLOYMENT24"));
         assertEquals(SyncJobStatus.SUCCESS, result.status());
         assertEquals(2, result.newCount());
+        assertEquals(2, normalizationRequests.count());
         assertEquals(24, EMPLOYMENT_CALLS.get());
         assertEquals(2, records.count());
         assertEquals(2, records.findAll().stream().map(record -> record.getExternalId()).distinct().count());
@@ -267,9 +292,52 @@ class ManualSyncControllerIntegrationTests {
             assertEquals(1, result.failedRecordCount());
             assertEquals("STORAGE_FAILED", result.recordFailures().getFirst().errorCode());
             assertEquals(1, records.count());
+            assertEquals(1, normalizationRequests.count());
         } finally {
             jdbc.execute("alter table raw_external_record drop constraint reject_manual_test");
         }
+    }
+
+    @Test
+    void firstPageIsCommittedAndQueuedWhileSecondPageIsStillLoading() throws Exception {
+        youthRelease = new CountDownLatch(1);
+        youthEntered = new CountDownLatch(1);
+        blockedYouthPage = 2;
+        youthTotalOverride = 2;
+        youthSecondRecords = "[{\"plcyNo\":\"p2\",\"title\":\"second\"}]";
+        long id = start("YOUTH_POLICY", 1);
+        try {
+            assertTrue(youthEntered.await(5, TimeUnit.SECONDS));
+            assertEquals(SyncJobStatus.RUNNING, jobs.get(id).status());
+            assertEquals(1, jobs.get(id).fetchedCount());
+            assertEquals(1, jobs.get(id).successCount());
+            assertEquals(1, records.count());
+            assertEquals(1, normalizationRequests.count());
+            var queued = normalizationRequests.findAll().getFirst();
+            assertEquals("PENDING", queued.getStatus());
+            assertEquals(records.findAll().getFirst().getId(), queued.getRawRecord().getId());
+        } finally {
+            youthRelease.countDown();
+        }
+        assertEquals(SyncJobStatus.SUCCESS, awaitDone(id).status());
+        assertEquals(2, normalizationRequests.count());
+    }
+
+    @Test
+    void requestInsertionFailureRollsBackRawAndCounterAndAllowsRetry() throws Exception {
+        jdbc.execute("alter table raw_normalization_request add constraint reject_queue_test check (event_type <> 'CREATED')");
+        try {
+            var result = awaitDone(start("YOUTH_POLICY"));
+            assertEquals(SyncJobStatus.FAILED, result.status());
+            assertEquals(0, result.newCount());
+            assertEquals(1, result.failedRecordCount());
+            assertEquals(0, records.count());
+            assertEquals(0, normalizationRequests.count());
+        } finally {
+            jdbc.execute("alter table raw_normalization_request drop constraint reject_queue_test");
+        }
+        assertEquals(1, awaitDone(start("YOUTH_POLICY")).newCount());
+        assertEquals(1, normalizationRequests.count());
     }
 
     @Test
@@ -355,16 +423,18 @@ class ManualSyncControllerIntegrationTests {
     private static void youth(HttpExchange exchange) throws IOException {
         var query = query(exchange);
         int page = Integer.parseInt(query.get("pageNum"));
-        youthEntered.countDown();
-        try {
-            if (!youthRelease.await(10, TimeUnit.SECONDS)) {
-                respond(exchange, 503, "{}");
+        if (blockedYouthPage == 0 || page == blockedYouthPage) {
+            youthEntered.countDown();
+            try {
+                if (!youthRelease.await(10, TimeUnit.SECONDS)) {
+                    respond(exchange, 503, "{}");
+                    return;
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                exchange.close();
                 return;
             }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            exchange.close();
-            return;
         }
         if (page == youthFailurePage) {
             respond(exchange, 503, "{}");
@@ -372,7 +442,7 @@ class ManualSyncControllerIntegrationTests {
         }
         int count = youthTotalOverride >= 0 ? youthTotalOverride : MAPPER.readTree(youthRecords).size();
         respond(exchange, 200, "{\"resultCode\":200,\"result\":{\"youthPolicyList\":"
-                + (page == 1 ? youthRecords : "[]") + ",\"pagging\":{\"pageNum\":" + page
+                + (page == 1 ? youthRecords : youthSecondRecords) + ",\"pagging\":{\"pageNum\":" + page
                 + ",\"pageSize\":" + query.get("pageSize") + ",\"totCount\":" + count + "}}}");
     }
 
