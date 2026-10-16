@@ -195,6 +195,35 @@ class EligibilityEngineTest {
         assertThat(r.conditions()).extracting(ConditionEvaluation::result).containsExactly(MATCHED, CHECK_REQUIRED, CHECK_REQUIRED);
     }
 
+    @Test
+    void 조건이_하나도_없으면_ELIGIBLE이_아니라_UNKNOWN() {
+        EligibilityEvaluation r = evaluate(profile(), List.of(), List.of());
+
+        assertThat(r.status()).isEqualTo(EligibilityStatus.UNKNOWN);
+        assertThat(r.conditions()).isEmpty();
+    }
+
+    @Test
+    void 검증_오류는_원문_확인_필요보다_먼저_반영된다() {
+        EligibilityConditionInput conflicted = condition(ConditionType.OTHER, RequirementType.REQUIRED,
+                Map.of("status", "UNSTRUCTURED"), ValidationStatus.DATA_CONFLICT);
+
+        EligibilityEvaluation r = evaluate(profile(), List.of(age(19, 34), conflicted), List.of());
+
+        assertThat(r.status()).isEqualTo(EligibilityStatus.UNKNOWN);
+        assertThat(r.conditions()).extracting(ConditionEvaluation::result).containsExactly(MATCHED, DATA_UNCLEAR);
+    }
+
+    @Test
+    void 검증_오류는_NOT_SPECIFIED보다_먼저_반영된다() {
+        EligibilityConditionInput invalid = condition(ConditionType.MARITAL, RequirementType.REQUIRED,
+                Map.of("status", "UNKNOWN"), ValidationStatus.INVALID);
+        ConditionEvaluation notSpecified = new ConditionEvaluation(ConditionType.MARITAL, "marital",
+                RequirementType.REQUIRED, null, null, null, NOT_SPECIFIED, "정책 데이터에 이 조건 정보가 없습니다.");
+
+        assertThat(EligibilityEngine.applyValidation(invalid, notSpecified).result()).isEqualTo(DATA_UNCLEAR);
+    }
+
     // ── 보조 ──
 
     private EligibilityEvaluation evaluate(EligibilityProfile p, List<EligibilityConditionInput> conditions, List<String> regionCodes) {
