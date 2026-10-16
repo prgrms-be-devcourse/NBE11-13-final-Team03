@@ -114,6 +114,7 @@ public class YouthPolicyNormalizationService {
                     .opportunityType(OpportunityType.YOUTH_POLICY)
                     .title(raw.plcyNm().trim())
                     .category(blankToNull(raw.lclsfNm()))
+                    .subCategory(blankToNull(raw.mclsfNm()))
                     .build());
             sourceRepository.save(OpportunitySource.builder()
                     .opportunity(opportunity)
@@ -152,7 +153,8 @@ public class YouthPolicyNormalizationService {
         opportunityRegionRepository.saveAll(regions(version, region));
 
         opportunity.changeCurrentVersion(version);
-        opportunity.updateSummary(raw.plcyNm().trim(), blankToNull(raw.lclsfNm()), opportunity.getDetailUrl());
+        opportunity.updateSummary(raw.plcyNm().trim(), blankToNull(raw.lclsfNm()), blankToNull(raw.mclsfNm()),
+                opportunity.getDetailUrl());
 
         return new NormalizationResult(opportunity.getId(), version.getId(), version.getVersionNo(),
                 existing.isEmpty(), true, age.outcome(), periods.outcome());

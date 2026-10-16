@@ -25,8 +25,13 @@ public class Opportunity {
     @Column(name = "title", nullable = false, length = 500)
     private String title;
 
+    /** 대분류 (온통청년 분류 체계 기준) */
     @Column(name = "category", length = 100)
     private String category;
+
+    /** 중분류 (온통청년 분류 체계 기준) */
+    @Column(name = "sub_category", length = 100)
+    private String subCategory;
 
     @Column(name = "detail_url", length = 2000)
     private String detailUrl;
@@ -71,9 +76,10 @@ public class Opportunity {
         this.currentVersion = version;
     }
 
-    public void updateSummary(String title, String category, String detailUrl) {
+    public void updateSummary(String title, String category, String subCategory, String detailUrl) {
         this.title = Objects.requireNonNull(title, "title");
         this.category = category;
+        this.subCategory = subCategory;
         this.detailUrl = detailUrl;
     }
 }
