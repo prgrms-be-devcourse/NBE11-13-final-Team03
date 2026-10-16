@@ -10,8 +10,8 @@ import java.time.LocalDate;
 import java.util.Map;
 
 /**
- * 버전별 신청기간(복수 가능). aplyPrdSeCd/aplyYmd만 근거로 하며,
- * 사업기간(bizPrdBgngYmd/bizPrdEndYmd)과 직업훈련기간은 저장하지 않는다.
+ * 버전별 신청기간(복수 가능). 청년정책은 aplyPrdSeCd/aplyYmd만 근거로 하며 사업기간(bizPrdBgngYmd/bizPrdEndYmd)은 저장하지 않는다.
+ * 직업훈련의 훈련기간은 신청기간이 아니므로 TrainingCourseDetail에 둔다.
  * 날짜는 미확인일 수 있으므로 nullable이다. 날짜 파싱 실패·시작일 > 종료일은 validationStatus=INVALID,
  * 출처 간 불일치는 DATA_CONFLICT, 미확인은 UNKNOWN으로 구분한다.
  * 현재 신청 상태는 저장하지 않고 조회 시점에 계산한다.
