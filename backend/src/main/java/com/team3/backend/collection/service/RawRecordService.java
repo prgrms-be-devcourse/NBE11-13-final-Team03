@@ -7,6 +7,7 @@ import com.team3.backend.collection.dto.response.RawRecordResponse;
 import com.team3.backend.collection.repository.ExternalSourceRepository;
 import com.team3.backend.collection.repository.RawExternalRecordRepository;
 import com.team3.backend.collection.repository.SyncHistoryRepository;
+import jakarta.persistence.EntityNotFoundException;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -23,7 +24,7 @@ public class RawRecordService {
     public RawRecordResponse save(RawRecordSaveRequest request) {
         Objects.requireNonNull(request, "원본 저장 요청이 필요합니다.");
         var sync = syncHistories.findByIdForUpdate(request.syncId())
-                .orElseThrow(() -> new IllegalArgumentException("수집 실행을 찾을 수 없습니다."));
+                .orElseThrow(() -> new EntityNotFoundException("수집 실행을 찾을 수 없습니다."));
         if (sync.getStatus() != SyncJobStatus.RUNNING) {
             throw new IllegalStateException("진행 중인 수집 실행에만 원본을 저장할 수 있습니다.");
         }
@@ -32,7 +33,7 @@ public class RawRecordService {
         }
         // ponytail: 출처 단위로 직렬화한다. 병목이 확인되면 외부 키별 현재 상태 행 잠금으로 변경한다.
         var source = sources.findByIdForUpdate(sync.getSource().getId())
-                .orElseThrow(() -> new IllegalArgumentException("수집 출처를 찾을 수 없습니다."));
+                .orElseThrow(() -> new EntityNotFoundException("수집 출처를 찾을 수 없습니다."));
         var previous = records.findFirstBySourceIdAndExternalIdOrderByIdDesc(
                 source.getId(), request.externalId());
         if (previous.isPresent()) {
@@ -48,5 +49,14 @@ public class RawRecordService {
         var snapshot = new RawExternalRecord(sync, request.externalId(), request.payloadHash(),
                 request.payload(), request.collectedAt());
         return RawRecordResponse.from(records.save(snapshot));
+    }
+
+    @Transactional(readOnly = true)
+    public RawRecordResponse get(Long rawRecordId) {
+        if (rawRecordId == null || rawRecordId < 1) {
+            throw new IllegalArgumentException("원본 레코드 ID는 1 이상이어야 합니다.");
+        }
+        return RawRecordResponse.from(records.findById(rawRecordId)
+                .orElseThrow(() -> new EntityNotFoundException("원본 레코드를 찾을 수 없습니다.")));
     }
 }

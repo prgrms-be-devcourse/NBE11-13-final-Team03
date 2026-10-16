@@ -8,6 +8,7 @@ import com.team3.backend.collection.dto.request.RawRecordSaveRequest;
 import com.team3.backend.collection.repository.ExternalSourceRepository;
 import com.team3.backend.collection.repository.RawExternalRecordRepository;
 import com.team3.backend.collection.repository.SyncHistoryRepository;
+import jakarta.persistence.EntityNotFoundException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -96,7 +97,7 @@ class RawRecordServiceTests {
     @Test
     void rejectsMissingOrFinishedExecution() {
         when(syncHistories.findByIdForUpdate(10L)).thenReturn(Optional.empty());
-        assertThrows(IllegalArgumentException.class, () -> service.save(request("A", 1)));
+        assertThrows(EntityNotFoundException.class, () -> service.save(request("A", 1)));
         when(syncHistories.findByIdForUpdate(10L)).thenReturn(Optional.of(sync));
         ReflectionTestUtils.setField(sync, "status", SyncJobStatus.SUCCESS);
         assertThrows(IllegalStateException.class, () -> service.save(request("A", 1)));
@@ -107,7 +108,7 @@ class RawRecordServiceTests {
     void rejectsObservationBeforeExecutionAndMissingSource() {
         assertThrows(IllegalArgumentException.class, () -> service.save(request("A", -1)));
         when(sources.findByIdForUpdate(1L)).thenReturn(Optional.empty());
-        assertThrows(IllegalArgumentException.class, () -> service.save(request("A", 1)));
+        assertThrows(EntityNotFoundException.class, () -> service.save(request("A", 1)));
         verifyNoInteractions(records);
     }
 
