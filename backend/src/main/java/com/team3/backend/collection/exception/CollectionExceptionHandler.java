@@ -5,41 +5,55 @@ import com.team3.backend.collection.controller.RawRecordController;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.core.task.TaskRejectedException;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ProblemDetail;
+import com.team3.backend.global.exception.BusinessException;
+import com.team3.backend.global.exception.ErrorResponse;
+import com.team3.backend.global.exception.GlobalExceptionHandler;
+import lombok.RequiredArgsConstructor;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice(assignableTypes = {RawRecordController.class, ManualSyncController.class})
+@Order(Ordered.HIGHEST_PRECEDENCE)
+@RequiredArgsConstructor
 public class CollectionExceptionHandler {
+    private final GlobalExceptionHandler global;
+
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> accessDenied() {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.ACCESS_DENIED));
+    }
+
     @ExceptionHandler(TaskRejectedException.class)
-    public ProblemDetail executorUnavailable() {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "최신화 실행기를 사용할 수 없습니다.");
+    public ResponseEntity<ErrorResponse> executorUnavailable() {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.EXECUTOR_UNAVAILABLE));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ProblemDetail invalidBody() {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "요청 JSON의 필수값과 형식을 확인하세요.");
+    public ResponseEntity<ErrorResponse> invalidBody() {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.INVALID_BODY));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ProblemDetail invalidArgument(IllegalArgumentException exception) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, exception.getMessage());
+    public ResponseEntity<ErrorResponse> invalidArgument(IllegalArgumentException exception) {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.INVALID_ARGUMENT));
     }
 
     @ExceptionHandler(EntityNotFoundException.class)
-    public ProblemDetail notFound(EntityNotFoundException exception) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, exception.getMessage());
+    public ResponseEntity<ErrorResponse> notFound(EntityNotFoundException exception) {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.NOT_FOUND));
     }
 
     @ExceptionHandler(IllegalStateException.class)
-    public ProblemDetail invalidState(IllegalStateException exception) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, exception.getMessage());
+    public ResponseEntity<ErrorResponse> invalidState(IllegalStateException exception) {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.INVALID_STATE));
     }
 
     @ExceptionHandler(DataAccessException.class)
-    public ProblemDetail storageFailure() {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "원본 데이터 저장소 처리에 실패했습니다.");
+    public ResponseEntity<ErrorResponse> storageFailure() {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.STORAGE_FAILURE));
     }
 }

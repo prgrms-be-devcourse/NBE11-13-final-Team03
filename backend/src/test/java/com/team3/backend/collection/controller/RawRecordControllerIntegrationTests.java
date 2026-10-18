@@ -43,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.jpa.open-in-view=false"
 })
 @AutoConfigureMockMvc
-@WithMockUser(roles = "ADMIN")
+@WithMockUser(authorities = "ADMIN")
 class RawRecordControllerIntegrationTests {
     private static final String PATH = "/api/admin/collection/raw-records";
     private final OffsetDateTime startedAt = OffsetDateTime.parse("2026-10-16T10:00:00+09:00");
@@ -123,7 +123,7 @@ class RawRecordControllerIntegrationTests {
     @Test
     void rejectsInvalidBodyWithoutWriting() throws Exception {
         mvc.perform(post(PATH).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.status").value(400));
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("COLLECTION_002"));
         mvc.perform(post(PATH).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{"))
                 .andExpect(status().isBadRequest());
         assertEquals(0, records.count());
@@ -163,10 +163,10 @@ class RawRecordControllerIntegrationTests {
         String json = mapper.writeValueAsString(request(sync.getId(), "A", 1));
         mvc.perform(post(PATH).with(anonymous()).with(csrf()).accept(MediaType.APPLICATION_JSON)
                         .contentType(MediaType.APPLICATION_JSON).content(json)).andExpect(status().isUnauthorized());
-        mvc.perform(post(PATH).with(user("member").roles("USER")).with(csrf())
+        mvc.perform(post(PATH).with(user("member").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("USER"))).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content(json)).andExpect(status().isForbidden());
         mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON).content(json)).andExpect(status().isForbidden());
-        mvc.perform(get(PATH + "/1").with(user("member").roles("USER"))).andExpect(status().isForbidden());
+        mvc.perform(get(PATH + "/1").with(user("member").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("USER")))).andExpect(status().isForbidden());
         assertEquals(0, records.count());
     }
 
@@ -177,7 +177,7 @@ class RawRecordControllerIntegrationTests {
             mvc.perform(post(PATH).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                             .content(mapper.writeValueAsString(request(sync.getId(), "rejected", 1))))
                     .andExpect(status().isInternalServerError())
-                    .andExpect(jsonPath("$.detail").value("원본 데이터 저장소 처리에 실패했습니다."));
+                    .andExpect(jsonPath("$.message").value("원본 데이터 저장소 처리에 실패했습니다."));
             assertEquals(0, records.count());
         } finally {
             jdbc.execute("alter table raw_external_record drop constraint reject_test_payload");

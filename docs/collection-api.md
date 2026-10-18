@@ -1,6 +1,6 @@
 # 원본 저장·조회 API
 
-관리자(`ROLE_ADMIN`)만 사용할 수 있다. Spring Security의 기존 인증과 CSRF 보호를 유지한다. 세션 인증으로 POST를 호출할 때는 유효한 CSRF 토큰도 전달해야 한다.
+관리자(`ADMIN`)만 사용할 수 있다. Spring Security의 기존 인증과 CSRF 보호를 유지한다. 세션 인증으로 POST를 호출할 때는 유효한 CSRF 토큰도 전달해야 한다.
 
 ## 원본 저장
 
@@ -37,7 +37,7 @@
 | 409 | RUNNING 상태가 아닌 수집 실행 |
 | 500 | DB 처리 실패. SQL·원본 예외 메시지는 응답에 포함하지 않음 |
 
-애플리케이션에서 처리하는 400·404·409·500 오류는 `ProblemDetail` 형식이다. 인증·CSRF 오류는 Spring Security가 처리한다.
+수집 도메인 오류코드는 전역 예외 처리기가 `code`, `message`, `fieldErrors` 형식으로 반환한다. 수집 예외 변환기는 기존 예외를 `CollectionErrorCode`에 매핑해 전역 처리기에 전달한다. 인증·CSRF 오류는 Spring Security가 처리한다.
 
 ## 검증 및 실행 범위
 

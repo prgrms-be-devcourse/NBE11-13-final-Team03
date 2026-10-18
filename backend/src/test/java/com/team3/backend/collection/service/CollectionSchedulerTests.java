@@ -7,6 +7,7 @@ import java.time.ZonedDateTime;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -15,6 +16,19 @@ class CollectionSchedulerTests {
     private final ManualSyncService sync = mock(ManualSyncService.class);
     private final SyncHistoryRepository histories = mock(SyncHistoryRepository.class);
     private final CollectionScheduler scheduler = new CollectionScheduler(sync, histories);
+
+    @Test
+    void eitherSchedulingSwitchDisablesCollectionBean() {
+        var runner = new ApplicationContextRunner()
+                .withBean(ManualSyncService.class, () -> sync)
+                .withBean(SyncHistoryRepository.class, () -> histories)
+                .withUserConfiguration(CollectionScheduler.class);
+        runner.withPropertyValues("app.scheduling.enabled=false").run(context ->
+                assertEquals(0, context.getBeansOfType(CollectionScheduler.class).size()));
+        runner.withPropertyValues("collection.schedule.enabled=false").run(context ->
+                assertEquals(0, context.getBeansOfType(CollectionScheduler.class).size()));
+        runner.run(context -> assertEquals(1, context.getBeansOfType(CollectionScheduler.class).size()));
+    }
 
     @Test
     void cronRunsAtNineThirtyKoreanTime() throws Exception {

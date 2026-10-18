@@ -61,7 +61,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.jpa.open-in-view=false"
 })
 @AutoConfigureMockMvc
-@WithMockUser(roles = "ADMIN")
+@WithMockUser(authorities = "ADMIN")
 class ManualSyncControllerIntegrationTests {
     private static final String PATH = "/api/admin/collection/syncs";
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
@@ -395,10 +395,10 @@ class ManualSyncControllerIntegrationTests {
     void requiresAdminAndCsrfBeforeStartingJobs() throws Exception {
         mvc.perform(post(PATH + "/YOUTH_POLICY").with(anonymous()).with(csrf()).accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isUnauthorized());
-        mvc.perform(post(PATH + "/YOUTH_POLICY").with(user("member").roles("USER")).with(csrf()))
+        mvc.perform(post(PATH + "/YOUTH_POLICY").with(user("member").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("USER"))).with(csrf()))
                 .andExpect(status().isForbidden());
         mvc.perform(post(PATH + "/YOUTH_POLICY")).andExpect(status().isForbidden());
-        mvc.perform(get(PATH + "/1").with(user("member").roles("USER"))).andExpect(status().isForbidden());
+        mvc.perform(get(PATH + "/1").with(user("member").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("USER")))).andExpect(status().isForbidden());
         assertEquals(0, histories.count());
     }
 

@@ -1,0 +1,16 @@
+spring:
+  jpa:
+    properties:
+      hibernate.type.json_format_mapper: org.hibernate.type.format.jackson.Jackson3JsonFormatMapper
+
+collection:
+  employment24:
+    url: https://www.work24.go.kr/cm/openApi/call/hr/callOpenApiSvcInfo310L01.do
+    api-key: ${EMPLOYMENT24_API_KEY:}
+    connect-timeout: 5s
+    read-timeout: 20s
+  youth-policy:
+    url: https://www.youthcenter.go.kr/go/ythip/getPlcy
+    api-key: ${YOUTH_POLICY_API_KEY:}
+    connect-timeout: 5s
+    read-timeout: 20s
