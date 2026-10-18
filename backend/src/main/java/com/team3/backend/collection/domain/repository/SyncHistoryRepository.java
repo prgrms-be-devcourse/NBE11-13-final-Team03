@@ -12,6 +12,10 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface SyncHistoryRepository extends JpaRepository<SyncHistory, Long> {
+    List<SyncHistory> findByStatusInAndStartedAtBefore(List<SyncJobStatus> statuses, OffsetDateTime startedBefore);
+
+    boolean existsBySourceSourceCodeAndStatusAndStartedAtGreaterThanEqualAndStartedAtLessThan(
+            String sourceCode, SyncJobStatus status, OffsetDateTime from, OffsetDateTime until);
     boolean existsBySourceIdAndStatusIn(Long sourceId, List<SyncJobStatus> statuses);
 
     List<SyncHistory> findBySyncTypeAndStatusIn(String syncType, List<SyncJobStatus> statuses);
