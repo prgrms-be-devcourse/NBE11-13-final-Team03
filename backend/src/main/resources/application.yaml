@@ -5,6 +5,8 @@ spring:
     import: optional:classpath:youth-policy-codes.yaml
 
   jpa:
+    properties:
+      hibernate.type.json_format_mapper: org.hibernate.type.format.jackson.Jackson3JsonFormatMapper
     hibernate:
       ddl-auto: update
     open-in-view: false
