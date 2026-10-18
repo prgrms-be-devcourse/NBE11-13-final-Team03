@@ -99,7 +99,11 @@ public class SyncHistory {
     }
 
     public static SyncHistory pendingManual(ExternalSource source, OffsetDateTime acceptedAt) {
-        var history = new SyncHistory(source, "MANUAL", acceptedAt);
+        return pending(source, "MANUAL", acceptedAt);
+    }
+
+    public static SyncHistory pending(ExternalSource source, String syncType, OffsetDateTime acceptedAt) {
+        var history = new SyncHistory(source, syncType, acceptedAt);
         history.status = SyncJobStatus.PENDING;
         return history;
     }
