@@ -17,6 +17,19 @@ class ManualSyncServiceTests {
     private final ManualSyncService service = new ManualSyncService(jobs, worker, executor);
 
     @Test
+    void scheduledCollectionUsesScheduledHistoryAndExistingWorker() {
+        when(jobs.createScheduled(CollectionSource.YOUTH_POLICY)).thenReturn(
+                new SyncStartResponse(2L, "YOUTH_POLICY", SyncJobStatus.PENDING, "accepted"));
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(executor).execute(any(Runnable.class));
+        service.startScheduled(CollectionSource.YOUTH_POLICY);
+        verify(worker).run(2L, CollectionSource.YOUTH_POLICY, 100, 1000);
+        verify(jobs, never()).create(any());
+    }
+
+    @Test
     void invalidLimitsDoNotCreateJobs() {
         assertThrows(IllegalArgumentException.class, () -> service.start(CollectionSource.YOUTH_POLICY, 0, 1));
         assertThrows(IllegalArgumentException.class, () -> service.start(CollectionSource.YOUTH_POLICY, 101, 1));

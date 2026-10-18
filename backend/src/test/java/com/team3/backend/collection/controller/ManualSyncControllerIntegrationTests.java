@@ -53,6 +53,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** 외부 API만 로컬 HTTP 서버로 대체한다. 나머지는 실제 Spring 빈과 전용 PostgreSQL을 사용한다. */
 @EnabledIfEnvironmentVariable(named = "YON_TEST_DATABASE_URL", matches = "jdbc:postgresql:.*")
 @SpringBootTest(properties = {
+        "collection.schedule.enabled=false",
         "spring.datasource.url=${YON_TEST_DATABASE_URL}",
         "spring.datasource.username=${YON_TEST_DATABASE_USERNAME:yon_test}",
         "spring.datasource.password=${YON_TEST_DATABASE_PASSWORD:}",
