@@ -6,16 +6,16 @@ spring:
       - optional:classpath:youth-policy-codes.yaml
       - classpath:application-collection.yaml
 
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/yon}
     driver-class-name: org.postgresql.Driver
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:1234}
-
-  jpa:
-    hibernate:
-      ddl-auto: update
-    open-in-view: false
 
   security:
     oauth2:
