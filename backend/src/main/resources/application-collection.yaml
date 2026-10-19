@@ -4,6 +4,8 @@ spring:
       hibernate.type.json_format_mapper: org.hibernate.type.format.jackson.Jackson3JsonFormatMapper
 
 collection:
+  normalization:
+    enabled: ${NORMALIZATION_ENABLED:true}
   employment24:
     url: https://www.work24.go.kr/cm/openApi/call/hr/callOpenApiSvcInfo310L01.do
     api-key: ${EMPLOYMENT24_API_KEY:}
