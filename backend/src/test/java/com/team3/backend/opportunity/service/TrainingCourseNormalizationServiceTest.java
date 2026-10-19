@@ -195,7 +195,8 @@ class TrainingCourseNormalizationServiceTest {
 
         assertThat(conditionRepository.findByVersionId(opportunityOf("A1:1").getCurrentVersion().getId()))
                 .extracting(c -> c.getConditionType() + ":" + c.getExpression().get("status") + ":" + c.getValidationStatus())
-                .containsExactlyInAnyOrder("PARTICIPATION_HISTORY:ONCE_ONLY:VALID", "TRAINING_CARD:UNSTRUCTURED:NEEDS_REVIEW");
+                .containsExactlyInAnyOrder("PARTICIPATION_HISTORY:ONCE_ONLY:VALID", "REGION:NATIONAL:VALID",
+                        "TRAINING_CARD:UNSTRUCTURED:NEEDS_REVIEW");
         assertThat(conditionRepository.findByVersionId(opportunityOf("A2:1").getCurrentVersion().getId()))
                 .extracting(c -> c.getConditionType() + ":" + c.getExpression().get("status") + ":" + c.getValidationStatus())
                 .containsExactly("TRAINING_CARD:UNSTRUCTURED:NEEDS_REVIEW");
@@ -217,6 +218,10 @@ class TrainingCourseNormalizationServiceTest {
                 .evaluation().status()).isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
         assertThat(evaluator.judge(none, List.of(versionId), LocalDate.of(2026, 10, 16)).get(versionId)
                 .evaluation().status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
+        assertThat(evaluator.judge(none, List.of(versionId), LocalDate.of(2026, 10, 16)).get(versionId)
+                .evaluation().conditions())
+                .filteredOn(c -> c.type() == ConditionType.REGION).singleElement()
+                .satisfies(c -> assertThat(c.result()).isEqualTo(ConditionMatchResult.MATCHED));
     }
 
     @Test
