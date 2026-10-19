@@ -1,17 +1,19 @@
 spring:
   application:
     name: backend
+  config:
+    import: optional:classpath:youth-policy-codes.yaml
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
 
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/yon}
     driver-class-name: org.postgresql.Driver
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:1234}
-
-  jpa:
-    hibernate:
-      ddl-auto: update
-    open-in-view: false
 
   security:
     oauth2:
@@ -64,3 +66,26 @@ internal:
 logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [traceId=%X{traceId:-no-trace}] %logger{36} - %msg%n"
+
+collection:
+  employment24:
+    url: https://www.work24.go.kr/cm/openApi/call/hr/callOpenApiSvcInfo310L01.do
+    api-key: ${EMPLOYMENT24_API_KEY:}
+    connect-timeout: 5s
+    read-timeout: 20s
+
+  youth-policy:
+    url: https://www.youthcenter.go.kr/go/ythip/getPlcy
+    api-key: ${YOUTH_POLICY_API_KEY:}
+    connect-timeout: 5s
+    read-timeout: 20s
+region-code-api:
+  base-url: https://apis.data.go.kr/1741000/StanReginCd/getStanReginCdList
+  service-key: ${REGION_CODE_API_KEY:}
+  page-size: 1000
+  sync-on-startup: ${REGION_CODE_SYNC_ON_STARTUP:false}
+
+yon:
+  eligibility:
+    # 판정 결과 제공 방식. local: 같은 애플리케이션 안에서 직접 호출 (MSA 전환 시 원격 구현을 추가하고 값을 바꾼다)
+    provider: ${YON_ELIGIBILITY_PROVIDER:local}
