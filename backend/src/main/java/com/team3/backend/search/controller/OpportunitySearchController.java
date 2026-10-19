@@ -21,10 +21,11 @@ public class OpportunitySearchController {
             @RequestParam(required = false) OpportunityType type,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String subCategory,
+            @RequestParam(required = false) String region,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
         return ResponseEntity.ok(searchService.search(
-                keyword, type, category, subCategory, page, size));
+                keyword, type, category, subCategory, region, page, size));
     }
 }

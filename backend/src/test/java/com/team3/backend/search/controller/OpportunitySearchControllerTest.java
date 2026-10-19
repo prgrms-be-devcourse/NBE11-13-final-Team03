@@ -1,13 +1,23 @@
 package com.team3.backend.search.controller;
 
+import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
+import com.team3.backend.opportunity.domain.entity.OpportunityCondition;
+import com.team3.backend.opportunity.domain.entity.OpportunityRegion;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
 import com.team3.backend.opportunity.domain.entity.PersonalizationStatus;
+import com.team3.backend.opportunity.domain.entity.RegionRole;
+import com.team3.backend.opportunity.domain.entity.RequirementType;
+import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
+import com.team3.backend.region.directory.RegionDirectory;
+import com.team3.backend.region.domain.entity.Region;
 import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -34,6 +44,171 @@ class OpportunitySearchControllerTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private RegionDirectory regionDirectory;
+
+    @BeforeEach
+    void registerJsonFunction() {
+        entityManager.createNativeQuery("CREATE ALIAS IF NOT EXISTS JSONB_EXTRACT_PATH_TEXT FOR "
+                + "\"com.team3.backend.search.controller.H2JsonFunctions.extract\"")
+                .executeUpdate();
+    }
+
+    @AfterEach
+    void clearRegionIndex() {
+        regionDirectory.refresh();
+    }
+
+    @Test
+    void policyRegionMatchesHierarchyAndNationalButNotUnknown() throws Exception {
+        Region province = createRegion("1100000000", null);
+        Region district = createRegion("1168000000", province);
+        Region otherProvince = createRegion("2600000000", null);
+        Opportunity specificDistrict = createOpportunity("V1-2 policy district", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity specificProvince = createOpportunity("V1-2 policy province", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity national = createOpportunity("V1-2 policy national", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity unknown = createOpportunity("V1-2 policy unknown", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity other = createOpportunity("V1-2 policy other", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        addRegion(specificDistrict, district, RegionRole.RESIDENCE);
+        addRegion(specificProvince, province, RegionRole.RESIDENCE);
+        addPolicyRegionCondition(national, "NATIONAL");
+        addPolicyRegionCondition(unknown, "UNKNOWN");
+        addRegion(other, otherProvince, RegionRole.RESIDENCE);
+        entityManager.flush();
+        entityManager.clear();
+        regionDirectory.refresh();
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("region", province.getRegionCode())
+                        .param("keyword", "V1-2 policy")
+                        .param("type", "YOUTH_POLICY")
+                        .param("category", "career")
+                        .param("subCategory", "job"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(3))
+                .andExpect(jsonPath("$.totalElements").value(3));
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("region", district.getRegionCode())
+                        .param("keyword", "V1-2 policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(3))
+                .andExpect(jsonPath("$.totalElements").value(3));
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("region", otherProvince.getRegionCode())
+                        .param("keyword", "V1-2 policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.totalElements").value(2));
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("region", province.getRegionCode())
+                        .param("keyword", "V1-2 policy")
+                        .param("category", "housing"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+
+        mockMvc.perform(get("/api/opportunities").param("keyword", "V1-2 policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(5));
+    }
+
+    @Test
+    void trainingUsesImplementationOnlyAndDoesNotTreatNationalAsTrainingLocation() throws Exception {
+        Region province = createRegion("1100000000", null);
+        Region district = createRegion("1168000000", province);
+        Region otherProvince = createRegion("2600000000", null);
+        Opportunity localTraining = createOpportunity("V1-2 training local", OpportunityType.VOCATIONAL_TRAINING,
+                null, null, true);
+        Opportunity elsewhereTraining = createOpportunity("V1-2 training elsewhere", OpportunityType.VOCATIONAL_TRAINING,
+                null, null, true);
+        Opportunity unknownTraining = createOpportunity("V1-2 training unknown", OpportunityType.VOCATIONAL_TRAINING,
+                null, null, true);
+        addRegion(localTraining, district, RegionRole.IMPLEMENTATION);
+        addRegion(elsewhereTraining, otherProvince, RegionRole.IMPLEMENTATION);
+        addRegion(elsewhereTraining, district, RegionRole.RESIDENCE);
+        addPolicyRegionCondition(elsewhereTraining, "NATIONAL");
+        entityManager.flush();
+        entityManager.clear();
+        regionDirectory.refresh();
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("region", province.getRegionCode())
+                        .param("keyword", "V1-2 training"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(localTraining.getId()))
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("region", otherProvince.getRegionCode())
+                        .param("keyword", "V1-2 training"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].opportunityId").value(elsewhereTraining.getId()))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void regionFilterUsesOnlyCurrentVersionAndCountsEachOpportunityOnce() throws Exception {
+        Region province = createRegion("1100000000", null);
+        Region firstDistrict = createRegion("1168000000", province);
+        Region secondDistrict = createRegion("1171000000", province);
+        Opportunity current = createOpportunity("V1-2 version current", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        Opportunity former = createOpportunity("V1-2 version former", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        Opportunity another = createOpportunity("V1-2 version another", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        addRegion(current, firstDistrict, RegionRole.RESIDENCE);
+        addRegion(current, secondDistrict, RegionRole.RESIDENCE);
+        addPolicyRegionCondition(current, "NATIONAL");
+        addRegion(former, firstDistrict, RegionRole.RESIDENCE);
+        addRegion(another, province, RegionRole.RESIDENCE);
+        OpportunityVersion replacement = OpportunityVersion.builder()
+                .opportunity(former).versionNo(2)
+                .normalizedSnapshot(Map.of("title", former.getTitle()))
+                .personalizationStatus(PersonalizationStatus.UNKNOWN)
+                .normalizationVersion("1").build();
+        entityManager.persist(replacement);
+        former.changeCurrentVersion(replacement);
+        entityManager.flush();
+        entityManager.clear();
+        regionDirectory.refresh();
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("region", province.getRegionCode())
+                        .param("keyword", "V1-2 version")
+                        .param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(another.getId()))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.hasNext").value(true));
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("region", province.getRegionCode())
+                        .param("keyword", "V1-2 version")
+                        .param("page", "1").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].opportunityId").value(current.getId()))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.hasNext").value(false));
+    }
+
+    @Test
+    void invalidRegionReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/opportunities").param("region", "9999999999"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+    }
 
     @Test
     void anonymousSearchCombinesFiltersAndExcludesUnnormalizedOpportunities() throws Exception {
@@ -208,5 +383,28 @@ class OpportunitySearchControllerTest {
                 .setParameter("createdAt", createdAt)
                 .setParameter("id", opportunity.getId())
                 .executeUpdate();
+    }
+
+    private Region createRegion(String code, Region parent) {
+        Region region = Region.builder().regionCode(code).regionName(code).parent(parent).build();
+        entityManager.persist(region);
+        return region;
+    }
+
+    private void addRegion(Opportunity opportunity, Region region, RegionRole role) {
+        entityManager.persist(OpportunityRegion.builder()
+                .version(opportunity.getCurrentVersion())
+                .region(region).regionRole(role).build());
+    }
+
+    private void addPolicyRegionCondition(Opportunity opportunity, String status) {
+        entityManager.persist(OpportunityCondition.builder()
+                .version(opportunity.getCurrentVersion())
+                .conditionType(ConditionType.REGION)
+                .requirementType(RequirementType.REQUIRED)
+                .conditionField("residenceRegion")
+                .expression(Map.of("status", status, "role", "RESIDENCE"))
+                .validationStatus(ValidationStatus.VALID)
+                .build());
     }
 }
