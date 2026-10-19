@@ -1,6 +1,7 @@
 package com.team3.backend.search.controller;
 
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
+import com.team3.backend.opportunity.normalization.ApplicationStatus;
 import com.team3.backend.search.dto.OpportunitySearchResponseDto;
 import com.team3.backend.search.service.OpportunitySearchService;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +17,7 @@ public class OpportunitySearchController {
 
     private final OpportunitySearchService searchService;
 
-    /** 공통 공고 조건으로 검색하고 페이지 결과를 반환한다. */
+    /** 공고 조건과 선택한 모집 상태로 검색하고 페이지 결과를 반환한다. */
     @GetMapping("/api/opportunities")
     public ResponseEntity<OpportunitySearchResponseDto> search(
             @RequestParam(required = false) String keyword,
@@ -24,10 +25,11 @@ public class OpportunitySearchController {
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String subCategory,
             @RequestParam(required = false) String region,
+            @RequestParam(required = false) ApplicationStatus applicationStatus,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
         return ResponseEntity.ok(searchService.search(
-                keyword, type, category, subCategory, region, page, size));
+                keyword, type, category, subCategory, region, applicationStatus, page, size));
     }
 }

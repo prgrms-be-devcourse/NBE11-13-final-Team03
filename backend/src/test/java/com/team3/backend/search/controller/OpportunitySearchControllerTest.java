@@ -1,15 +1,18 @@
 package com.team3.backend.search.controller;
 
 import com.team3.backend.opportunity.domain.entity.ConditionType;
+import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityCondition;
 import com.team3.backend.opportunity.domain.entity.OpportunityRegion;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
 import com.team3.backend.opportunity.domain.entity.PersonalizationStatus;
+import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
+import com.team3.backend.opportunity.normalization.ApplicationStatus;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
@@ -26,7 +29,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -208,6 +213,80 @@ class OpportunitySearchControllerTest {
         mockMvc.perform(get("/api/opportunities").param("region", "9999999999"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
+    }
+
+    @Test
+    void applicationStatusUsesCommonRulesAndCombinesWithExistingFilters() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Region province = createRegion("1100000000", null);
+        Opportunity open = createOpportunity("V1-3 open policy", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity always = createOpportunity("V1-3 always policy", OpportunityType.YOUTH_POLICY,
+                "housing", "support", true);
+        Opportunity upcoming = createOpportunity("V1-3 upcoming training", OpportunityType.VOCATIONAL_TRAINING,
+                "career", "course", true);
+        Opportunity closed = createOpportunity("V1-3 closed policy", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity unknown = createOpportunity("V1-3 unknown training", OpportunityType.VOCATIONAL_TRAINING,
+                "career", "course", true);
+        Opportunity openTraining = createOpportunity("V1-3 open training", OpportunityType.VOCATIONAL_TRAINING,
+                "career", "course", true);
+        addRegion(open, province, RegionRole.RESIDENCE);
+        addRegion(openTraining, province, RegionRole.IMPLEMENTATION);
+        addWindow(open, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        addWindow(open, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        addWindow(open, PeriodType.FIXED, today.minusDays(10), today.minusDays(5), ValidationStatus.VALID);
+        addWindow(always, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        addWindow(upcoming, PeriodType.FIXED, today.plusDays(1), today.plusDays(10), ValidationStatus.VALID);
+        addWindow(closed, PeriodType.CLOSED, null, null, ValidationStatus.VALID);
+        addWindow(unknown, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.INVALID);
+        addWindow(openTraining, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        entityManager.flush();
+        entityManager.clear();
+        regionDirectory.refresh();
+
+        mockMvc.perform(get("/api/opportunities").param("keyword", "V1-3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(6));
+
+        for (Object[] expected : new Object[][]{
+                {ApplicationStatus.ALWAYS_OPEN, always.getId()},
+                {ApplicationStatus.UPCOMING, upcoming.getId()},
+                {ApplicationStatus.CLOSED, closed.getId()},
+                {ApplicationStatus.UNKNOWN, unknown.getId()}
+        }) {
+            mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "V1-3")
+                            .param("applicationStatus", ((ApplicationStatus) expected[0]).name()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].opportunityId").value(expected[1]));
+        }
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-3").param("applicationStatus", "OPEN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-3")
+                        .param("applicationStatus", "OPEN")
+                        .param("type", "YOUTH_POLICY")
+                        .param("category", "career")
+                        .param("subCategory", "job")
+                        .param("region", province.getRegionCode()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(open.getId()));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-3")
+                        .param("applicationStatus", "OPEN")
+                        .param("type", "VOCATIONAL_TRAINING")
+                        .param("region", province.getRegionCode()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(openTraining.getId()));
+        mockMvc.perform(get("/api/opportunities").param("applicationStatus", "INVALID"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -395,6 +474,14 @@ class OpportunitySearchControllerTest {
         entityManager.persist(OpportunityRegion.builder()
                 .version(opportunity.getCurrentVersion())
                 .region(region).regionRole(role).build());
+    }
+
+    private void addWindow(Opportunity opportunity, PeriodType type, LocalDate start, LocalDate end,
+                           ValidationStatus validationStatus) {
+        entityManager.persist(ApplicationWindow.builder()
+                .version(opportunity.getCurrentVersion())
+                .periodType(type).startDate(start).endDate(end)
+                .validationStatus(validationStatus).build());
     }
 
     private void addPolicyRegionCondition(Opportunity opportunity, String status) {

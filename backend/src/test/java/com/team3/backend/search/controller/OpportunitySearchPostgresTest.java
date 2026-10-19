@@ -1,12 +1,14 @@
 package com.team3.backend.search.controller;
 
 import com.team3.backend.opportunity.domain.entity.ConditionType;
+import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityCondition;
 import com.team3.backend.opportunity.domain.entity.OpportunityRegion;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
 import com.team3.backend.opportunity.domain.entity.PersonalizationStatus;
+import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
@@ -29,6 +31,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.util.ArrayList;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -191,6 +195,98 @@ class OpportunitySearchPostgresTest {
         assertEquals(List.of(provinceSpecific.getId()), opportunityIds(parentResult));
     }
 
+    @Test
+    void applicationStatusUsesPostgresWithMultipleWindowsAndExactPageCounts() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Region province = Region.builder().regionCode("1100000000")
+                .regionName("Seoul").build();
+        entityManager.persist(province);
+
+        Opportunity policy = opportunity("PG status open policy", OpportunityType.YOUTH_POLICY);
+        Opportunity training = opportunity("PG status open training", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity upcoming = opportunity("PG status upcoming policy", OpportunityType.YOUTH_POLICY);
+        Opportunity always = opportunity("PG status always policy", OpportunityType.YOUTH_POLICY);
+        Opportunity closed = opportunity("PG status closed policy", OpportunityType.YOUTH_POLICY);
+        Opportunity unknown = opportunity("PG status unknown training", OpportunityType.VOCATIONAL_TRAINING);
+        policy.updateSummary(policy.getTitle(), "career", "job", null);
+        training.updateSummary(training.getTitle(), "career", "course", null);
+        entityManager.persist(OpportunityRegion.builder()
+                .version(policy.getCurrentVersion()).region(province)
+                .regionRole(RegionRole.RESIDENCE).build());
+        entityManager.persist(OpportunityRegion.builder()
+                .version(training.getCurrentVersion()).region(province)
+                .regionRole(RegionRole.IMPLEMENTATION).build());
+        window(policy, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(policy, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        window(policy, PeriodType.FIXED, today.minusDays(10), today.minusDays(5), ValidationStatus.VALID);
+        window(training, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(upcoming, PeriodType.FIXED, today.plusDays(1), today.plusDays(10), ValidationStatus.VALID);
+        window(always, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        window(closed, PeriodType.CLOSED, null, null, ValidationStatus.VALID);
+        window(unknown, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.INVALID);
+        entityManager.flush();
+        entityManager.clear();
+        regionDirectory.refresh();
+
+        MvcResult unfiltered = mockMvc.perform(get("/api/opportunities").param("keyword", "PG status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(6))
+                .andReturn();
+        assertEquals(Set.of(policy.getId(), training.getId(), upcoming.getId(), always.getId(),
+                closed.getId(), unknown.getId()), new HashSet<>(opportunityIds(unfiltered)));
+
+        List<Long> openIds = new ArrayList<>();
+        for (int page = 0; page < 2; page++) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG status")
+                            .param("applicationStatus", "OPEN")
+                            .param("page", String.valueOf(page))
+                            .param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content.length()").value(1))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andReturn();
+            openIds.addAll(opportunityIds(result));
+        }
+        assertEquals(Set.of(policy.getId(), training.getId()), new HashSet<>(openIds));
+        assertEquals(openIds.size(), new HashSet<>(openIds).size());
+
+        for (Object[] expected : new Object[][]{
+                {"ALWAYS_OPEN", always.getId()}, {"UPCOMING", upcoming.getId()},
+                {"CLOSED", closed.getId()}, {"UNKNOWN", unknown.getId()}
+        }) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG status")
+                            .param("applicationStatus", (String) expected[0]))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andReturn();
+            assertEquals(List.of(expected[1]), opportunityIds(result));
+        }
+
+        MvcResult combined = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG status")
+                        .param("applicationStatus", "OPEN")
+                        .param("type", "YOUTH_POLICY")
+                        .param("category", "career")
+                        .param("region", province.getRegionCode()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andReturn();
+        assertEquals(List.of(policy.getId()), opportunityIds(combined));
+
+        MvcResult trainingResult = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG status")
+                        .param("applicationStatus", "OPEN")
+                        .param("type", "VOCATIONAL_TRAINING")
+                        .param("region", province.getRegionCode()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andReturn();
+        assertEquals(List.of(training.getId()), opportunityIds(trainingResult));
+    }
+
     private static List<Long> opportunityIds(MvcResult result) throws Exception {
         List<Number> ids = JsonPath.read(result.getResponse().getContentAsString(),
                 "$.content[*].opportunityId");
@@ -220,5 +316,13 @@ class OpportunitySearchPostgresTest {
                 .expression(Map.of("status", regionStatus, "role", "RESIDENCE"))
                 .validationStatus(ValidationStatus.VALID)
                 .build());
+    }
+
+    private void window(Opportunity opportunity, PeriodType type, LocalDate start, LocalDate end,
+                        ValidationStatus validationStatus) {
+        entityManager.persist(ApplicationWindow.builder()
+                .version(opportunity.getCurrentVersion())
+                .periodType(type).startDate(start).endDate(end)
+                .validationStatus(validationStatus).build());
     }
 }

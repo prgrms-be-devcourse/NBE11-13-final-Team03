@@ -8,6 +8,8 @@ import com.team3.backend.opportunity.domain.entity.OpportunityCondition;
 import com.team3.backend.opportunity.domain.entity.OpportunityRegion;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
+import com.team3.backend.opportunity.domain.repository.ApplicationStatusSpecifications;
+import com.team3.backend.opportunity.normalization.ApplicationStatus;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.directory.RegionIndex;
 import com.team3.backend.search.domain.repository.OpportunitySearchRepository;
@@ -28,6 +30,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -39,14 +43,16 @@ import java.util.TreeSet;
 @RequiredArgsConstructor
 public class OpportunitySearchService {
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
     private final OpportunitySearchRepository searchRepository;
     private final RegionDirectory regionDirectory;
 
-    /** 선택한 조건을 DB에서 결합해 최신순 공고 페이지를 조회한다. */
+    /** 공고 조건과 선택한 모집 상태를 DB에서 결합해 최신순 페이지를 조회한다. */
     @Transactional(readOnly = true)
     public OpportunitySearchResponseDto search(
             String keyword, OpportunityType type, String category, String subCategory,
-            String region,
+            String region, ApplicationStatus applicationStatus,
             int page, int size
     ) {
         if (page < 0 || size < 1 || size > 100) {
@@ -90,6 +96,11 @@ public class OpportunitySearchService {
             }
             return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
         };
+        if (applicationStatus != null) {
+            // 모집 상태는 공통 Specification을 AND로 결합해 재계산 없이 페이지와 전체 건수에 반영한다.
+            filters = filters.and(ApplicationStatusSpecifications.hasStatus(
+                    applicationStatus, LocalDate.now(KST)));
+        }
 
         Sort sort = Sort.by(Sort.Direction.DESC, "createdAt")
                 .and(Sort.by(Sort.Direction.DESC, "id"));
