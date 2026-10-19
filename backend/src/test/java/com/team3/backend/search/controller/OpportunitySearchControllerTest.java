@@ -406,6 +406,160 @@ class OpportunitySearchControllerTest {
     }
 
     @Test
+    void latestAndOldestSortUseCreatedAtThenId() throws Exception {
+        Opportunity oldest = createOpportunity("V1-5 basic oldest", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        Opportunity tiedFirst = createOpportunity("V1-5 basic tied first", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        Opportunity tiedSecond = createOpportunity("V1-5 basic tied second", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        setCreatedAt(oldest, LocalDateTime.of(2025, 1, 1, 0, 0));
+        setCreatedAt(tiedFirst, LocalDateTime.of(2025, 2, 1, 0, 0));
+        setCreatedAt(tiedSecond, LocalDateTime.of(2025, 2, 1, 0, 0));
+        entityManager.clear();
+
+        for (String sort : new String[]{"", "LATEST"}) {
+            var request = get("/api/opportunities").param("keyword", "V1-5 basic");
+            if (!sort.isEmpty()) {
+                request.param("sort", sort);
+            }
+            mockMvc.perform(request)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].opportunityId").value(tiedSecond.getId()))
+                    .andExpect(jsonPath("$.content[1].opportunityId").value(tiedFirst.getId()))
+                    .andExpect(jsonPath("$.content[2].opportunityId").value(oldest.getId()))
+                    .andExpect(jsonPath("$.totalElements").value(3));
+        }
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-5 basic").param("sort", "OLDEST"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].opportunityId").value(oldest.getId()))
+                .andExpect(jsonPath("$.content[1].opportunityId").value(tiedFirst.getId()))
+                .andExpect(jsonPath("$.content[2].opportunityId").value(tiedSecond.getId()))
+                .andExpect(jsonPath("$.totalElements").value(3));
+    }
+
+    @Test
+    void typeSpecificDateSortsKeepMissingDatesLastAndCombineWithFilters() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Region province = createRegion("1100000000", null);
+        Opportunity near = createOpportunity("V1-5 deadline near", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity tied = createOpportunity("V1-5 deadline tied", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity multi = createOpportunity("V1-5 deadline multi", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity past = createOpportunity("V1-5 deadline past", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        Opportunity upcoming = createOpportunity("V1-5 deadline upcoming", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        Opportunity always = createOpportunity("V1-5 deadline always", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        Opportunity unknown = createOpportunity("V1-5 deadline unknown", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        for (Opportunity opportunity : new Opportunity[]{near, tied, multi}) {
+            addRegion(opportunity, province, RegionRole.RESIDENCE);
+        }
+        addWindow(near, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        addWindow(tied, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        addWindow(multi, PeriodType.FIXED, today.minusDays(1), today.plusDays(5), ValidationStatus.VALID);
+        addWindow(multi, PeriodType.FIXED, today.minusDays(1), today.plusDays(2), ValidationStatus.VALID);
+        addWindow(past, PeriodType.FIXED, today.minusDays(5), today.minusDays(1), ValidationStatus.VALID);
+        addWindow(upcoming, PeriodType.FIXED, today.plusDays(1), today.plusDays(3), ValidationStatus.VALID);
+        addWindow(always, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        addWindow(unknown, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.INVALID);
+        addWindow(unknown, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        OpportunityVersion replacement = OpportunityVersion.builder()
+                .opportunity(unknown).versionNo(2)
+                .normalizedSnapshot(Map.of("title", unknown.getTitle()))
+                .personalizationStatus(PersonalizationStatus.UNKNOWN)
+                .normalizationVersion("1").build();
+        entityManager.persist(replacement);
+        unknown.changeCurrentVersion(replacement);
+
+        Opportunity trainingNear = createOpportunity("V1-5 start near", OpportunityType.VOCATIONAL_TRAINING,
+                "career", "course", true);
+        Opportunity trainingTied = createOpportunity("V1-5 start tied", OpportunityType.VOCATIONAL_TRAINING,
+                "career", "course", true);
+        Opportunity trainingLate = createOpportunity("V1-5 start late", OpportunityType.VOCATIONAL_TRAINING,
+                null, null, true);
+        Opportunity trainingUnknown = createOpportunity("V1-5 start unknown", OpportunityType.VOCATIONAL_TRAINING,
+                null, null, true);
+        addRegion(trainingNear, province, RegionRole.IMPLEMENTATION);
+        addWindow(trainingNear, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        addTrainingDetail(trainingNear, today.plusDays(1));
+        addTrainingDetail(trainingTied, today.plusDays(1));
+        addTrainingDetail(trainingLate, today.plusDays(3));
+        addTrainingDetail(trainingUnknown, null);
+        entityManager.flush();
+        entityManager.clear();
+        regionDirectory.refresh();
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-5 deadline").param("type", "YOUTH_POLICY")
+                        .param("sort", "DEADLINE_ASC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(7))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(tied.getId()))
+                .andExpect(jsonPath("$.content[1].opportunityId").value(near.getId()))
+                .andExpect(jsonPath("$.content[2].opportunityId").value(multi.getId()))
+                .andExpect(jsonPath("$.content[3].opportunityId").value(unknown.getId()))
+                .andExpect(jsonPath("$.content[4].opportunityId").value(always.getId()))
+                .andExpect(jsonPath("$.content[5].opportunityId").value(upcoming.getId()))
+                .andExpect(jsonPath("$.content[6].opportunityId").value(past.getId()));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-5 deadline").param("type", "YOUTH_POLICY")
+                        .param("sort", "DEADLINE_ASC").param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].opportunityId").value(multi.getId()))
+                .andExpect(jsonPath("$.content[1].opportunityId").value(unknown.getId()))
+                .andExpect(jsonPath("$.totalElements").value(7))
+                .andExpect(jsonPath("$.totalPages").value(4));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-5 deadline").param("type", "YOUTH_POLICY")
+                        .param("sort", "DEADLINE_ASC")
+                        .param("category", "career")
+                        .param("region", province.getRegionCode())
+                        .param("applicationStatus", "OPEN")
+                        .param("deadlineFrom", today.plusDays(1).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.content[2].opportunityId").value(multi.getId()));
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-5 start").param("type", "VOCATIONAL_TRAINING")
+                        .param("sort", "START_DATE_ASC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(trainingTied.getId()))
+                .andExpect(jsonPath("$.content[1].opportunityId").value(trainingNear.getId()))
+                .andExpect(jsonPath("$.content[2].opportunityId").value(trainingLate.getId()))
+                .andExpect(jsonPath("$.content[3].opportunityId").value(trainingUnknown.getId()));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-5 start").param("type", "VOCATIONAL_TRAINING")
+                        .param("sort", "START_DATE_ASC")
+                        .param("category", "career")
+                        .param("region", province.getRegionCode())
+                        .param("applicationStatus", "OPEN")
+                        .param("startDateTo", today.plusDays(1).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(trainingNear.getId()));
+
+        for (String[] invalid : new String[][]{
+                {"DEADLINE_ASC", ""}, {"DEADLINE_ASC", "VOCATIONAL_TRAINING"},
+                {"START_DATE_ASC", ""}, {"START_DATE_ASC", "YOUTH_POLICY"},
+                {"INVALID", "YOUTH_POLICY"}
+        }) {
+            var request = get("/api/opportunities").param("sort", invalid[0]);
+            if (!invalid[1].isEmpty()) {
+                request.param("type", invalid[1]);
+            }
+            mockMvc.perform(request).andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
     void anonymousSearchCombinesFiltersAndExcludesUnnormalizedOpportunities() throws Exception {
         Opportunity match = createOpportunity("V1-1 training policy", OpportunityType.YOUTH_POLICY,
                 "employment", "training", true);

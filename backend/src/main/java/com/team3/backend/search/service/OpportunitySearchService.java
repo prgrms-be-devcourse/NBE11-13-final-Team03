@@ -19,6 +19,7 @@ import com.team3.backend.region.directory.RegionIndex;
 import com.team3.backend.search.domain.repository.OpportunitySearchRepository;
 import com.team3.backend.search.dto.OpportunitySearchItemDto;
 import com.team3.backend.search.dto.OpportunitySearchResponseDto;
+import com.team3.backend.search.dto.OpportunitySearchSort;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Expression;
@@ -52,13 +53,14 @@ public class OpportunitySearchService {
     private final OpportunitySearchRepository searchRepository;
     private final RegionDirectory regionDirectory;
 
-    /** 공고 조건과 모집 상태·유형별 날짜 범위를 DB에서 결합해 최신순 페이지를 조회한다. */
+    /** 공고 조건을 DB에서 결합하고 선택한 정렬 기준으로 페이지를 조회한다. */
     @Transactional(readOnly = true)
     public OpportunitySearchResponseDto search(
             String keyword, OpportunityType type, String category, String subCategory,
             String region, ApplicationStatus applicationStatus,
             LocalDate deadlineFrom, LocalDate deadlineTo,
             LocalDate startDateFrom, LocalDate startDateTo,
+            OpportunitySearchSort sort,
             int page, int size
     ) {
         if (page < 0 || size < 1 || size > 100) {
@@ -69,7 +71,9 @@ public class OpportunitySearchService {
         if ((deadlineFrom != null && deadlineTo != null && deadlineFrom.isAfter(deadlineTo))
                 || (startDateFrom != null && startDateTo != null && startDateFrom.isAfter(startDateTo))
                 || (hasDeadlineRange && type != OpportunityType.YOUTH_POLICY)
-                || (hasStartRange && type != OpportunityType.VOCATIONAL_TRAINING)) {
+                || (hasStartRange && type != OpportunityType.VOCATIONAL_TRAINING)
+                || (sort == OpportunitySearchSort.DEADLINE_ASC && type != OpportunityType.YOUTH_POLICY)
+                || (sort == OpportunitySearchSort.START_DATE_ASC && type != OpportunityType.VOCATIONAL_TRAINING)) {
             throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
         }
 
@@ -125,10 +129,29 @@ public class OpportunitySearchService {
                     startDateMatches(root, query, criteriaBuilder, startDateFrom, startDateTo));
         }
 
-        Sort sort = Sort.by(Sort.Direction.DESC, "createdAt")
-                .and(Sort.by(Sort.Direction.DESC, "id"));
+        Sort pageSort = switch (sort) {
+            case LATEST -> Sort.by(Sort.Direction.DESC, "createdAt", "id");
+            case OLDEST -> Sort.by(Sort.Direction.ASC, "createdAt", "id");
+            case DEADLINE_ASC, START_DATE_ASC -> Sort.unsorted();
+        };
+        if (sort == OpportunitySearchSort.DEADLINE_ASC) {
+            filters = filters.and((root, query, criteriaBuilder) -> {
+                if (!Long.class.equals(query.getResultType())) {
+                    orderByDeadline(root, query, criteriaBuilder, LocalDate.now(KST));
+                }
+                return criteriaBuilder.conjunction();
+            });
+        } else if (sort == OpportunitySearchSort.START_DATE_ASC) {
+            filters = filters.and((root, query, criteriaBuilder) -> {
+                if (!Long.class.equals(query.getResultType())) {
+                    orderByTrainingStart(root, query, criteriaBuilder);
+                }
+                return criteriaBuilder.conjunction();
+            });
+        }
+        // DB에서 대표 날짜를 정렬한 뒤 페이지를 잘라야 결과 순서와 전체 건수가 유지된다.
         Page<OpportunitySearchItemDto> results = searchRepository
-                .findAll(filters, PageRequest.of(page, size, sort))
+                .findAll(filters, PageRequest.of(page, size, pageSort))
                 .map(OpportunitySearchItemDto::from);
 
         return new OpportunitySearchResponseDto(
@@ -183,6 +206,48 @@ public class OpportunitySearchService {
         }
         subquery.select(detail.get("id")).where(predicates.toArray(Predicate[]::new));
         return criteriaBuilder.exists(subquery);
+    }
+
+    private static void orderByDeadline(
+            Root<Opportunity> root, CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder, LocalDate today
+    ) {
+        Subquery<LocalDate> deadline = query.subquery(LocalDate.class);
+        Root<ApplicationWindow> window = deadline.from(ApplicationWindow.class);
+        // 현재 열려 있는 유효 기간이 여러 개면 가장 가까운 마감일 하나만 대표값으로 삼는다.
+        deadline.select(criteriaBuilder.least(window.<LocalDate>get("endDate"))).where(
+                criteriaBuilder.equal(window.get("version"), root.get("currentVersion")),
+                criteriaBuilder.equal(window.get("validationStatus"), ValidationStatus.VALID),
+                criteriaBuilder.equal(window.get("periodType"), PeriodType.FIXED),
+                criteriaBuilder.or(criteriaBuilder.isNull(window.get("startDate")),
+                        criteriaBuilder.lessThanOrEqualTo(window.get("startDate"), today)),
+                criteriaBuilder.greaterThanOrEqualTo(window.get("endDate"), today)
+        );
+        orderByNullableDate(root, query, criteriaBuilder, deadline);
+    }
+
+    private static void orderByTrainingStart(
+            Root<Opportunity> root, CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder
+    ) {
+        Subquery<LocalDate> startDate = query.subquery(LocalDate.class);
+        Root<TrainingCourseDetail> detail = startDate.from(TrainingCourseDetail.class);
+        startDate.select(detail.get("trainingStartDate")).where(
+                criteriaBuilder.equal(detail.get("version"), root.get("currentVersion"))
+        );
+        orderByNullableDate(root, query, criteriaBuilder, startDate);
+    }
+
+    private static void orderByNullableDate(
+            Root<Opportunity> root, CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder, Subquery<LocalDate> date
+    ) {
+        // 날짜 미확인 공고는 유지하되 뒤로 보내고, 동률은 ID로 고정한다.
+        query.orderBy(
+                criteriaBuilder.asc(criteriaBuilder.selectCase()
+                        .when(criteriaBuilder.isNull(date), 1).otherwise(0)),
+                criteriaBuilder.asc(date),
+                criteriaBuilder.desc(root.get("id"))
+        );
     }
 
     private static Predicate regionMatches(

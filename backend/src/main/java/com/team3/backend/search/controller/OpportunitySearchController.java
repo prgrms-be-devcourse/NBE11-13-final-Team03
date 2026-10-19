@@ -3,6 +3,7 @@ package com.team3.backend.search.controller;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.normalization.ApplicationStatus;
 import com.team3.backend.search.dto.OpportunitySearchResponseDto;
+import com.team3.backend.search.dto.OpportunitySearchSort;
 import com.team3.backend.search.service.OpportunitySearchService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -20,7 +21,7 @@ public class OpportunitySearchController {
 
     private final OpportunitySearchService searchService;
 
-    /** 공고 조건과 유형별 날짜 범위로 검색하고 페이지 결과를 반환한다. */
+    /** 공고 조건과 유형별 날짜 범위·정렬 기준으로 검색하고 페이지 결과를 반환한다. */
     @GetMapping("/api/opportunities")
     public ResponseEntity<OpportunitySearchResponseDto> search(
             @RequestParam(required = false) String keyword,
@@ -33,11 +34,12 @@ public class OpportunitySearchController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate deadlineTo,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDateFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDateTo,
+            @RequestParam(defaultValue = "LATEST") OpportunitySearchSort sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
         return ResponseEntity.ok(searchService.search(
                 keyword, type, category, subCategory, region, applicationStatus,
-                deadlineFrom, deadlineTo, startDateFrom, startDateTo, page, size));
+                deadlineFrom, deadlineTo, startDateFrom, startDateTo, sort, page, size));
     }
 }
