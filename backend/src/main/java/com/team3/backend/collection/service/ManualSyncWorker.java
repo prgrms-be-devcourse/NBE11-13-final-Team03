@@ -62,7 +62,7 @@ public class ManualSyncWorker {
             try {
                 var payload = records.get(index);
                 externalId = fingerprint.externalId(source, payload);
-                rawRecords.saveForSync(new RawRecordSaveRequest(jobId, externalId, fingerprint.hash(payload),
+                rawRecords.saveForSync(new RawRecordSaveRequest(jobId, externalId,
                         payload, OffsetDateTime.now()));
             } catch (IllegalArgumentException exception) {
                 jobs.recordFailure(jobId, offset + index, externalId, "INVALID_RECORD");

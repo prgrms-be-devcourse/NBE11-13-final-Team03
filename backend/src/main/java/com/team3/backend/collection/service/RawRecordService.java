@@ -51,15 +51,15 @@ public class RawRecordService {
                 .orElseThrow(() -> new EntityNotFoundException("수집 출처를 찾을 수 없습니다."));
         var previous = records.findFirstBySourceIdAndExternalIdOrderByIdDesc(
                 source.getId(), request.externalId());
+        var payload = request.payload();
+        var payloadHash = fingerprint.hash(payload);
         if (previous.isPresent()) {
             var latest = previous.get();
             if (request.collectedAt().isBefore(latest.getLastSeenAt())) {
                 throw new IllegalArgumentException("마지막 관측 시각 이전의 원본은 적용할 수 없습니다.");
             }
-            // 수동 최신화는 과거 해시 규칙이 달라도 원본을 현재 규칙으로 비교한다.
-            boolean unchanged = recordProgress
-                    ? fingerprint.hash(latest.getPayload()).equals(request.payloadHash())
-                    : latest.getPayloadHash().equals(request.payloadHash());
+            // 과거에 요청자가 지정한 해시를 저장했더라도 원본을 현재 서버 규칙으로 비교한다.
+            boolean unchanged = fingerprint.hash(latest.getPayload()).equals(payloadHash);
             if (unchanged) {
                 latest.markSeenAt(request.collectedAt());
                 if (recordProgress) {
@@ -68,8 +68,8 @@ public class RawRecordService {
                 return RawRecordResponse.from(latest);
             }
         }
-        var snapshot = new RawExternalRecord(sync, request.externalId(), request.payloadHash(),
-                request.payload(), request.collectedAt());
+        var snapshot = new RawExternalRecord(sync, request.externalId(), payloadHash,
+                payload, request.collectedAt());
         var saved = records.save(snapshot);
         if (recordProgress) {
             var resultType = previous.isPresent() ? RecordResultType.UPDATED : RecordResultType.CREATED;

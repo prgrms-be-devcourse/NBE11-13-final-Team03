@@ -82,9 +82,36 @@ class RawRecordServiceTests {
         service.save(request("A", 1));
         service.save(request("B", 2));
         service.save(request("A", 3));
-        assertEquals(List.of("hash-A", "hash-B", "hash-A"),
+        assertEquals(List.of(hash("A"), hash("B"), hash("A")),
                 snapshots.stream().map(RawExternalRecord::getPayloadHash).toList());
         assertEquals("A", snapshots.getFirst().getPayload().path("title").asString());
+    }
+
+    private String hash(String content) {
+        return new RawRecordFingerprint().hash(request(content, 1).payload());
+    }
+
+    @Test
+    void ignoresClientHashesAndDetectsChangesFromPayload() {
+        var first = service.save(request("A", 1));
+        var samePayload = request("A", 2);
+        var repeated = service.save(new RawRecordSaveRequest(10L, "policy-1", "different-client-hash",
+                samePayload.payload(), samePayload.collectedAt()));
+        assertEquals(first.rawRecordId(), repeated.rawRecordId());
+        var changedPayload = request("B", 3);
+        service.save(new RawRecordSaveRequest(10L, "policy-1", "hash-A",
+                changedPayload.payload(), changedPayload.collectedAt()));
+        assertEquals(List.of(hash("A"), hash("B")),
+                snapshots.stream().map(RawExternalRecord::getPayloadHash).toList());
+    }
+
+    @Test
+    void comparesLegacyHashesUsingOriginalJson() {
+        service.save(request("A", 1));
+        ReflectionTestUtils.setField(snapshots.getFirst(), "payloadHash", "legacy-hash");
+        service.save(request("A", 2));
+        assertEquals(1, snapshots.size());
+        assertEquals(startedAt.plusMinutes(2), snapshots.getFirst().getLastSeenAt());
     }
 
     @Test
