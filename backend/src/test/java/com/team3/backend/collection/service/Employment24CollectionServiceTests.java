@@ -36,6 +36,33 @@ class Employment24CollectionServiceTests {
     }
 
     @Test
+    void processesPagesBeforeFetchingAnotherPageOrNcs() {
+        var processed = new java.util.ArrayList<String>();
+        when(client.fetchPage(request("01", 1))).thenReturn(page(2, 1));
+        when(client.fetchPage(request("01", 2))).thenAnswer(invocation -> {
+            assertEquals(List.of("course-1"), processed);
+            return page(2, 2);
+        });
+        when(client.fetchPage(request("02", 1))).thenAnswer(invocation -> {
+            assertEquals(List.of("course-1", "course-2"), processed);
+            return new Employment24Page(0, "1", "1", List.of());
+        });
+        var summary = service.collectPages(today, 1, 2,
+                (offset, rows) -> rows.forEach(row -> processed.add(row.path("trprId").asString())));
+        assertEquals(2, summary.fetchedCount());
+        assertTrue(summary.completed());
+    }
+
+    @Test
+    void doesNotRetryPageProcessingAsAnHttpFailure() {
+        when(client.fetchPage(request("01", 1))).thenReturn(page(2, 1));
+        assertThrows(Employment24ClientException.class, () -> service.collectPages(today, 1, 2,
+                (offset, rows) -> { throw new Employment24ClientException("processing failed", true); }));
+        verify(client, times(1)).fetchPage(request("01", 1));
+        verify(client, never()).fetchPage(request("01", 2));
+    }
+
+    @Test
     void queriesAll24CodesWithOneFixedSixMonthWindow() {
         var result = service.collect(today, 1, 3);
         var captor = ArgumentCaptor.forClass(Employment24SearchRequest.class);

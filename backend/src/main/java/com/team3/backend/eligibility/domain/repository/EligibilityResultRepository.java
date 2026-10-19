@@ -12,7 +12,8 @@ import org.springframework.data.repository.query.Param;
 import java.util.Collection;
 import java.util.List;
 
-public interface EligibilityResultRepository extends JpaRepository<EligibilityResult, Long> {
+public interface EligibilityResultRepository extends JpaRepository<EligibilityResult, Long>,
+        EligibilityResultUpsertRepository {
 
     List<EligibilityResult> findByUserIdAndOpportunityIdIn(Long userId, Collection<Long> opportunityIds);
 

@@ -8,8 +8,7 @@ import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import java.util.Map;
 
 /**
- * 판정 엔진의 조건 입력. 엔진이 조건에서 읽는 값만 담고 JPA 엔티티에 의존하지 않는다.
- * (판정 프로필은 아직 EligibilityProfile 엔티티를 그대로 받는다 — 2단계에서 분리 예정)
+ * 판정 엔진의 조건 입력. 엔진이 조건에서 읽는 값만 담고 JPA 엔티티에 의존하지 않는다. 프로필 입력은 EligibilityProfileInput.
  */
 public record EligibilityConditionInput(
         ConditionType type,

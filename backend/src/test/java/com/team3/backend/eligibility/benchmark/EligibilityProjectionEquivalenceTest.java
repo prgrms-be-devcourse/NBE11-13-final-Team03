@@ -1,5 +1,6 @@
 package com.team3.backend.eligibility.benchmark;
 
+import com.team3.backend.eligibility.engine.EligibilityProfileInput;
 import com.team3.backend.eligibility.benchmark.BenchmarkData.Complexity;
 import com.team3.backend.eligibility.benchmark.BenchmarkData.ProfileKind;
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
@@ -151,7 +152,7 @@ class EligibilityProjectionEquivalenceTest {
                         .map(w -> new ApplicationPeriod(w.getPeriodType(), w.getStartDate(), w.getEndDate(),
                                 w.getValidationStatus(), w.getPeriodText()))
                         .toList();
-                EligibilityEvaluation evaluation = engine.evaluate(profile, conditions, residence, regionDirectory.index(), TODAY);
+                EligibilityEvaluation evaluation = engine.evaluate(EligibilityProfileInput.from(profile), conditions, residence, regionDirectory.index(), TODAY);
                 ApplicationStatus app = applicationStatusCalculator.calculate(periods, TODAY);
                 String conditionResults = evaluation.conditions().stream()
                         .map(c -> c.type() + "|" + c.field() + "|" + c.requirement() + "|" + c.result())

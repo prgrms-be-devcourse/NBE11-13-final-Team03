@@ -1,5 +1,6 @@
 package com.team3.backend.eligibility.benchmark;
 
+import com.team3.backend.eligibility.engine.EligibilityProfileInput;
 import com.team3.backend.eligibility.benchmark.BenchmarkData.Complexity;
 import com.team3.backend.eligibility.benchmark.BenchmarkData.ProfileKind;
 import com.team3.backend.eligibility.benchmark.BenchmarkData.Template;
@@ -394,10 +395,11 @@ class EligibilityBottleneckBenchmarkTest {
             Loaded loaded = loadProjection(versionIds);
             Mapped mapped = mapProjection(loaded);
             RegionIndex index = regionDirectory.index();
+            EligibilityProfileInput input = EligibilityProfileInput.from(profile);
             List<String> items = new ArrayList<>();
             for (Object[] r : rows) {
                 Long versionId = (Long) r[1];
-                EligibilityEvaluation evaluation = engine.evaluate(profile, mapped.conditions.getOrDefault(versionId, List.of()),
+                EligibilityEvaluation evaluation = engine.evaluate(input, mapped.conditions.getOrDefault(versionId, List.of()),
                         mapped.residence.getOrDefault(versionId, List.of()), index, TODAY);
                 ApplicationStatus app = applicationStatusCalculator.calculate(mapped.periods.getOrDefault(versionId, List.of()), TODAY);
                 items.add(r[0] + "|" + versionId + "|" + r[2] + "|" + r[3] + "|" + r[4] + "|" + evaluation.status()
@@ -621,7 +623,7 @@ class EligibilityBottleneckBenchmarkTest {
 
     private void judge(Run run, Long opportunityId, EligibilityProfile profile, List<EligibilityConditionInput> conditions,
                        List<String> residence, List<ApplicationPeriod> periods, RegionIndex index) {
-        EligibilityEvaluation evaluation = engine.evaluate(profile, conditions, residence, index, TODAY);
+        EligibilityEvaluation evaluation = engine.evaluate(EligibilityProfileInput.from(profile), conditions, residence, index, TODAY);
         ApplicationStatus app = applicationStatusCalculator.calculate(periods, TODAY);
         run.distribution.merge(evaluation.status(), 1L, Long::sum);
         run.evaluated++;
