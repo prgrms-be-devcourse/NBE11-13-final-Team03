@@ -9,12 +9,14 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/** 비로그인 공고 검색 요청을 받는 API다. */
 @RestController
 @RequiredArgsConstructor
 public class OpportunitySearchController {
 
     private final OpportunitySearchService searchService;
 
+    /** 공통 공고 조건으로 검색하고 페이지 결과를 반환한다. */
     @GetMapping("/api/opportunities")
     public ResponseEntity<OpportunitySearchResponseDto> search(
             @RequestParam(required = false) String keyword,

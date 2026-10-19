@@ -34,6 +34,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
 
+/** 정규화된 공고의 검색 조건과 페이지 조회를 구성한다. */
 @Service
 @RequiredArgsConstructor
 public class OpportunitySearchService {
@@ -41,6 +42,7 @@ public class OpportunitySearchService {
     private final OpportunitySearchRepository searchRepository;
     private final RegionDirectory regionDirectory;
 
+    /** 선택한 조건을 DB에서 결합해 최신순 공고 페이지를 조회한다. */
     @Transactional(readOnly = true)
     public OpportunitySearchResponseDto search(
             String keyword, OpportunityType type, String category, String subCategory,
@@ -57,6 +59,7 @@ public class OpportunitySearchService {
             if (!index.contains(region)) {
                 throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
             }
+            // 상위로 지정된 정책과 하위 지역의 공고를 모두 선택 지역에 매칭한다.
             regionCodes = new TreeSet<>(index.ancestorsAndSelf(region));
             addDescendants(index, region, regionCodes);
         }
@@ -114,11 +117,13 @@ public class OpportunitySearchService {
     ) {
         Predicate youthPolicy = criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.YOUTH_POLICY);
         Predicate training = criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.VOCATIONAL_TRAINING);
+        // 정책의 거주지 조건과 훈련의 실제 시행 지역은 서로 다른 역할로 조회한다.
         Subquery<Long> residence = regionExists(root, query, criteriaBuilder, regionCodes, RegionRole.RESIDENCE);
         Subquery<Long> implementation = regionExists(root, query, criteriaBuilder, regionCodes, RegionRole.IMPLEMENTATION);
 
         Subquery<Long> national = query.subquery(Long.class);
         Root<OpportunityCondition> condition = national.from(OpportunityCondition.class);
+        // 전국 거주 가능 여부는 현재 버전의 REGION 조건 JSON에만 기록된다.
         Expression<String> status = criteriaBuilder.function(
                 "jsonb_extract_path_text", String.class,
                 condition.get("expression"), criteriaBuilder.literal("status"));
@@ -129,6 +134,7 @@ public class OpportunitySearchService {
                 criteriaBuilder.equal(status, "NATIONAL")
         );
 
+        // EXISTS로 복수 지역 행의 중복을 막고, NATIONAL은 정책에만 적용한다.
         return criteriaBuilder.or(
                 criteriaBuilder.and(youthPolicy, criteriaBuilder.or(
                         criteriaBuilder.exists(residence), criteriaBuilder.exists(national))),

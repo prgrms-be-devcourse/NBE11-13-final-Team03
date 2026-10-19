@@ -6,6 +6,7 @@ import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 
 import java.time.LocalDateTime;
 
+/** 저장 목록에 표시할 공고 정보와 저장 시각이다. */
 public record SavedOpportunityResponseDto(
         Long opportunityId,
         OpportunityType type,
@@ -14,6 +15,7 @@ public record SavedOpportunityResponseDto(
         String subCategory,
         LocalDateTime savedAt
 ) {
+    /** 저장 상태와 연결된 공고를 목록 항목으로 변환한다. */
     public static SavedOpportunityResponseDto from(
             UserOpportunityPreference preference
     ) {

@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
+/** 사용자별 저장·숨김 상태와 저장 목록 조회를 관리한다. */
 @Service
 @RequiredArgsConstructor
 public class PreferenceService {
@@ -29,6 +30,7 @@ public class PreferenceService {
     private final UserOpportunityPreferenceRepository preferenceRepository;
     private final EntityManager entityManager;
 
+    /** 사용자 잠금 아래 공고를 멱등하게 저장한다. */
     @Transactional
     public void save(Long userId, Long opportunityId) {
         User user = getLockedUser(userId);
@@ -48,6 +50,7 @@ public class PreferenceService {
         preferenceRepository.save(preference);
     }
 
+    /** 저장 상태를 해제하고 두 상태가 꺼지면 행을 삭제한다. */
     @Transactional
     public void unsave(Long userId, Long opportunityId) {
         getLockedUser(userId);
@@ -59,6 +62,7 @@ public class PreferenceService {
                 });
     }
 
+    /** 사용자 잠금 아래 공고를 멱등하게 숨긴다. */
     @Transactional
     public void hide(Long userId, Long opportunityId) {
         User user = getLockedUser(userId);
@@ -78,6 +82,7 @@ public class PreferenceService {
         preferenceRepository.save(preference);
     }
 
+    /** 숨김 상태를 해제하고 두 상태가 꺼지면 행을 삭제한다. */
     @Transactional
     public void unhide(Long userId, Long opportunityId) {
         getLockedUser(userId);
@@ -89,6 +94,7 @@ public class PreferenceService {
                 });
     }
 
+    /** 저장 시각과 ID의 내림차순으로 저장 공고 페이지를 조회한다. */
     @Transactional(readOnly = true)
     public SavedOpportunitiesResponseDto getSavedOpportunities(
             Long userId, int page, int size
@@ -118,6 +124,7 @@ public class PreferenceService {
     }
 
     private User getLockedUser(Long userId) {
+        // 동일 사용자의 동시 변경을 직렬화해 상태 덮어쓰기와 중복 행을 막는다.
         return userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
     }

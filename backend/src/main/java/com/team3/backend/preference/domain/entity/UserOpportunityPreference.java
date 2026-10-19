@@ -7,6 +7,7 @@ import lombok.*;
 
 import java.time.LocalDateTime;
 
+/** 사용자와 공고 사이의 독립적인 저장·숨김 상태를 보관한다. */
 @Entity
 @Table(
         name = "user_opportunity_preferences",
@@ -60,6 +61,7 @@ public class UserOpportunityPreference {
         this.updatedAt = now;
     }
 
+    /** 저장 상태로 전환할 때만 저장·수정 시각을 갱신한다. */
     public void markSaved() {
         if (!isSaved) {
             LocalDateTime now = LocalDateTime.now();
@@ -69,6 +71,7 @@ public class UserOpportunityPreference {
         }
     }
 
+    /** 저장 상태를 해제할 때만 저장 시각을 비운다. */
     public void clearSaved() {
         if (isSaved) {
             this.isSaved = false;
@@ -77,6 +80,7 @@ public class UserOpportunityPreference {
         }
     }
 
+    /** 숨김 상태로 전환할 때만 숨김·수정 시각을 갱신한다. */
     public void markHidden() {
         if (!isHidden) {
             LocalDateTime now = LocalDateTime.now();
@@ -86,6 +90,7 @@ public class UserOpportunityPreference {
         }
     }
 
+    /** 숨김 상태를 해제할 때만 숨김 시각을 비운다. */
     public void clearHidden() {
         if (isHidden) {
             this.isHidden = false;
@@ -95,10 +100,12 @@ public class UserOpportunityPreference {
     }
 
     private void touchUpdatedAt(LocalDateTime now) {
+        // 연속 상태 변경이 같은 시각에 발생해도 수정 시각을 단조 증가시킨다.
         this.updatedAt = updatedAt == null || now.isAfter(updatedAt)
                 ? now : updatedAt.plusNanos(1_000);
     }
 
+    /** 저장과 숨김이 모두 해제되어 삭제 대상인지 확인한다. */
     public boolean isInactive() {
         return !isSaved && !isHidden;
     }

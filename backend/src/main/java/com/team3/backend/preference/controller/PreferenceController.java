@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/** 인증 사용자의 공고 저장·숨김과 저장 목록 API를 제공한다. */
 @Tag(name = "Preference", description = "공고 저장·숨김 API")
 @SecurityRequirement(name = "cookieAuth")
 @RestController
@@ -23,6 +24,7 @@ public class PreferenceController {
 
     private final PreferenceService preferenceService;
 
+    /** 공고를 저장하고 본문 없이 응답한다. */
     @PostMapping("/api/opportunities/{id}/save")
     public ResponseEntity<Void> save(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -32,6 +34,7 @@ public class PreferenceController {
         return ResponseEntity.noContent().build();
     }
 
+    /** 공고 저장을 해제하고 본문 없이 응답한다. */
     @DeleteMapping("/api/opportunities/{id}/save")
     public ResponseEntity<Void> unsave(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -41,6 +44,7 @@ public class PreferenceController {
         return ResponseEntity.noContent().build();
     }
 
+    /** 공고를 숨기고 본문 없이 응답한다. */
     @PostMapping("/api/opportunities/{id}/hide")
     public ResponseEntity<Void> hide(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -50,6 +54,7 @@ public class PreferenceController {
         return ResponseEntity.noContent().build();
     }
 
+    /** 공고 숨김을 해제하고 본문 없이 응답한다. */
     @DeleteMapping("/api/opportunities/{id}/hide")
     public ResponseEntity<Void> unhide(
             @AuthenticationPrincipal CustomUserDetails userDetails,
@@ -59,6 +64,7 @@ public class PreferenceController {
         return ResponseEntity.noContent().build();
     }
 
+    /** 인증 사용자의 저장 공고를 페이지로 조회한다. */
     @GetMapping("/api/users/me/saved-opportunities")
     public ResponseEntity<SavedOpportunitiesResponseDto> getSavedOpportunities(
             @AuthenticationPrincipal CustomUserDetails userDetails,

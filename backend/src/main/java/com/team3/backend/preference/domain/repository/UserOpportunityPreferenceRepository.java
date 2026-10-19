@@ -11,17 +11,21 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
+/** 사용자별 공고 상태와 저장 목록을 조회한다. */
 @Repository
 public interface UserOpportunityPreferenceRepository
         extends JpaRepository<UserOpportunityPreference, Long> {
 
+    /** 사용자와 공고의 현재 저장·숨김 상태를 조회한다. */
     Optional<UserOpportunityPreference> findByUserIdAndOpportunityId(
             Long userId,
             Long opportunityId
     );
 
+    /** 사용자와 공고 조합의 행 수를 확인한다. */
     long countByUserIdAndOpportunityId(Long userId, Long opportunityId);
 
+    /** 숨김 여부와 관계없이 저장된 행을 조회한다. */
     @Query("""
         select preference
         from UserOpportunityPreference preference
@@ -32,6 +36,7 @@ public interface UserOpportunityPreferenceRepository
             @Param("userId") Long userId
     );
 
+    /** 공고를 함께 읽어 저장 목록과 정확한 전체 건수를 페이지로 반환한다. */
     @Query(value = """
         select preference
         from UserOpportunityPreference preference

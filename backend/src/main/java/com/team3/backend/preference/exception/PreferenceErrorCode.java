@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 
+/** 저장·숨김 API에서 사용하는 도메인 오류를 정의한다. */
 @Getter
 @RequiredArgsConstructor
 public enum PreferenceErrorCode implements ErrorCode {
