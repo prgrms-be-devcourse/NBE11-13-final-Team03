@@ -116,8 +116,8 @@ class TrainingCourseNormalizationServiceTest {
         });
         assertThat(conditionRepository.findByVersionId(versionId)).singleElement().satisfies(c -> {
             assertThat(c.getConditionType()).isEqualTo(ConditionType.TRAINING_CARD);
-            assertThat(c.getExpression()).containsEntry("status", "UNSTRUCTURED");
-            assertThat(c.getValidationStatus()).isEqualTo(ValidationStatus.NEEDS_REVIEW);
+            assertThat(c.getExpression()).containsEntry("status", "CARD_REQUIRED");
+            assertThat(c.getValidationStatus()).isEqualTo(ValidationStatus.VALID);
         });
         assertThat(windowRepository.findByVersionId(versionId)).singleElement()
                 .extracting(ApplicationWindow::getPeriodType).isEqualTo(PeriodType.UNKNOWN);
@@ -188,7 +188,52 @@ class TrainingCourseNormalizationServiceTest {
     }
 
     @Test
-    void 훈련_자격은_원문_확인_필요로_판정되고_신청_상태는_미확인이다() {
+    void 훈련유형별로_자격_조건을_만든다() {
+        service.normalizePage(page(DAY1, withTarget("A1", "K-디지털 트레이닝", "C0104"),
+                withTarget("A2", "실업자원격훈련", "C0055"), withTarget("A3", "국민내일배움카드(주 훈련대상 : 구직자)", "C0061S")));
+        flushAndClear();
+
+        assertThat(conditionRepository.findByVersionId(opportunityOf("A1:1").getCurrentVersion().getId()))
+                .extracting(c -> c.getConditionType() + ":" + c.getExpression().get("status") + ":" + c.getValidationStatus())
+                .containsExactlyInAnyOrder("PARTICIPATION_HISTORY:ONCE_ONLY:VALID", "TRAINING_CARD:UNSTRUCTURED:NEEDS_REVIEW");
+        assertThat(conditionRepository.findByVersionId(opportunityOf("A2:1").getCurrentVersion().getId()))
+                .extracting(c -> c.getConditionType() + ":" + c.getExpression().get("status") + ":" + c.getValidationStatus())
+                .containsExactly("TRAINING_CARD:UNSTRUCTURED:NEEDS_REVIEW");
+        assertThat(conditionRepository.findByVersionId(opportunityOf("A3:1").getCurrentVersion().getId()))
+                .extracting(c -> c.getConditionType() + ":" + c.getExpression().get("status") + ":" + c.getValidationStatus())
+                .containsExactly("TRAINING_CARD:CARD_REQUIRED:VALID");
+    }
+
+    @Test
+    void KDT_과정은_참여_이력이_있으면_NOT_ELIGIBLE이고_없으면_원문_확인_필요() {
+        service.normalizePage(page(DAY1, withTarget("A1", "K-디지털 트레이닝", "C0104")));
+        flushAndClear();
+        Long versionId = opportunityOf("A1:1").getCurrentVersion().getId();
+
+        EligibilityProfile completed = profileBuilder().kdtParticipation(TrainingParticipation.COMPLETED).build();
+        EligibilityProfile none = profileBuilder().kdtParticipation(TrainingParticipation.NONE).build();
+
+        assertThat(evaluator.judge(completed, List.of(versionId), LocalDate.of(2026, 10, 16)).get(versionId)
+                .evaluation().status()).isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
+        assertThat(evaluator.judge(none, List.of(versionId), LocalDate.of(2026, 10, 16)).get(versionId)
+                .evaluation().status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
+    }
+
+    @Test
+    void 내일배움카드_과정은_카드를_발급받았으면_ELIGIBLE() {
+        service.normalizePage(page(DAY1, excavator("2026-10-01", "2026-10-02")));
+        flushAndClear();
+        Long versionId = opportunityOf("AIG20250000502773:115").getCurrentVersion().getId();
+
+        EligibilityEvaluator.Judgement judgement = evaluator.judge(
+                profileBuilder().trainingCardStatus(TrainingCardStatus.ISSUED).build(), List.of(versionId), LocalDate.of(2026, 10, 16))
+                .get(versionId);
+
+        assertThat(judgement.evaluation().status()).isEqualTo(EligibilityStatus.ELIGIBLE);
+    }
+
+    @Test
+    void 카드_발급_상태를_모르면_추가_입력_필요로_판정되고_신청_상태는_미확인이다() {
         service.normalizePage(page(DAY1, excavator("2026-10-01", "2026-10-02")));
         flushAndClear();
         Long versionId = opportunityOf("AIG20250000502773:115").getCurrentVersion().getId();
@@ -203,8 +248,25 @@ class TrainingCourseNormalizationServiceTest {
 
         assertThat(judgement.evaluation().status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
         assertThat(judgement.evaluation().conditions()).singleElement()
-                .satisfies(c -> assertThat(c.result()).isEqualTo(ConditionMatchResult.CHECK_REQUIRED));
+                .satisfies(c -> assertThat(c.result()).isEqualTo(ConditionMatchResult.USER_INFO_MISSING));
         assertThat(judgement.applicationStatus()).isEqualTo(ApplicationStatus.UNKNOWN);
+    }
+
+    private EligibilityProfile.EligibilityProfileBuilder profileBuilder() {
+        return EligibilityProfile.builder()
+                .userId(1L)
+                .birthDate(LocalDate.of(1998, 5, 15))
+                .residenceRegion(em.getReference(Region.class, pocheon.getRegionCode()));
+    }
+
+    private static TrainingCourseRaw withTarget(String trprId, String trainTarget, String trainTargetCd) {
+        return TrainingCourseRaw.builder()
+                .trprId(trprId).trprDegr("1")
+                .title("훈련과정 " + trprId).subTitle("훈련기관")
+                .traStartDate("2026-10-19").traEndDate("2027-03-30")
+                .trainTarget(trainTarget).trainTargetCd(trainTargetCd)
+                .trngAreaCd("41650")
+                .build();
     }
 
     private Opportunity opportunityOf(String externalId) {

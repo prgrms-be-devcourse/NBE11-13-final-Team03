@@ -35,6 +35,8 @@ class EligibilityProfileInputTest {
                 .studentLoanBracket(3)
                 .personalIncome(IncomeAnswer.provided(new BigDecimal("2000000"), IncomePeriod.MONTHLY))
                 .householdIncome(IncomeAnswer.unknown())
+                .trainingCardStatus(TrainingCardStatus.ISSUED)
+                .kdtParticipation(TrainingParticipation.NONE)
                 .build();
 
         EligibilityProfileInput input = EligibilityProfileInput.from(profile);
@@ -53,6 +55,8 @@ class EligibilityProfileInputTest {
                 .isEqualTo(new EligibilityProfileInput.Income(AnswerStatus.PROVIDED, new BigDecimal("2000000"), IncomePeriod.MONTHLY));
         assertThat(input.householdIncome())
                 .isEqualTo(new EligibilityProfileInput.Income(AnswerStatus.UNKNOWN, null, null));
+        assertThat(input.trainingCardStatus()).isEqualTo(TrainingCardStatus.ISSUED);
+        assertThat(input.kdtParticipation()).isEqualTo(TrainingParticipation.NONE);
     }
 
     @Test

@@ -224,7 +224,54 @@ class EligibilityEngineTest {
         assertThat(EligibilityEngine.applyValidation(invalid, notSpecified).result()).isEqualTo(DATA_UNCLEAR);
     }
 
+    // ── 직업훈련 ──
+
+    @Test
+    void 내일배움카드_과정은_카드_발급_상태로_판정한다() {
+        EligibilityConditionInput card = condition(ConditionType.TRAINING_CARD, RequirementType.REQUIRED,
+                Map.of("status", "CARD_REQUIRED"), ValidationStatus.VALID);
+
+        assertThat(evaluate(profileBuilder().trainingCardStatus(TrainingCardStatus.ISSUED).build(), List.of(card), List.of())
+                .status()).isEqualTo(EligibilityStatus.ELIGIBLE);
+        assertThat(resultWith(profileBuilder().trainingCardStatus(TrainingCardStatus.APPLYING).build(), card))
+                .isEqualTo(CHECK_REQUIRED);
+        assertThat(resultWith(profileBuilder().trainingCardStatus(TrainingCardStatus.NOT_ISSUED).build(), card))
+                .isEqualTo(CHECK_REQUIRED);
+        assertThat(resultWith(profileBuilder().trainingCardStatus(TrainingCardStatus.UNKNOWN).build(), card))
+                .isEqualTo(USER_INFO_MISSING);
+        assertThat(resultWith(profile(), card)).isEqualTo(USER_INFO_MISSING);
+    }
+
+    @Test
+    void KDT는_1회만_지원하므로_수강_중이거나_수료했으면_NOT_ELIGIBLE() {
+        EligibilityConditionInput kdt = condition(ConditionType.PARTICIPATION_HISTORY, RequirementType.REQUIRED,
+                Map.of("status", "ONCE_ONLY", "program", "KDT"), ValidationStatus.VALID);
+
+        assertThat(resultWith(profileBuilder().kdtParticipation(TrainingParticipation.NONE).build(), kdt)).isEqualTo(MATCHED);
+        assertThat(evaluate(profileBuilder().kdtParticipation(TrainingParticipation.COMPLETED).build(), List.of(kdt), List.of())
+                .status()).isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
+        assertThat(resultWith(profileBuilder().kdtParticipation(TrainingParticipation.IN_PROGRESS).build(), kdt))
+                .isEqualTo(NOT_MATCHED);
+        assertThat(resultWith(profileBuilder().kdtParticipation(TrainingParticipation.DROPPED_OUT).build(), kdt))
+                .isEqualTo(CHECK_REQUIRED);
+        assertThat(resultWith(profileBuilder().kdtParticipation(TrainingParticipation.UNKNOWN).build(), kdt))
+                .isEqualTo(USER_INFO_MISSING);
+        assertThat(resultWith(profile(), kdt)).isEqualTo(USER_INFO_MISSING);
+    }
+
+    @Test
+    void 알_수_없는_형식의_훈련_조건은_DATA_UNCLEAR() {
+        assertThat(result(condition(ConditionType.TRAINING_CARD, RequirementType.REQUIRED,
+                Map.of("status", "SOMETHING"), ValidationStatus.VALID))).isEqualTo(DATA_UNCLEAR);
+        assertThat(result(condition(ConditionType.PARTICIPATION_HISTORY, RequirementType.REQUIRED,
+                Map.of("status", "ONCE_ONLY", "program", "OTHER"), ValidationStatus.VALID))).isEqualTo(DATA_UNCLEAR);
+    }
+
     // ── 보조 ──
+
+    private ConditionMatchResult resultWith(EligibilityProfile p, EligibilityConditionInput condition) {
+        return evaluate(p, List.of(condition), List.of()).conditions().get(0).result();
+    }
 
     private EligibilityEvaluation evaluate(EligibilityProfile p, List<EligibilityConditionInput> conditions, List<String> regionCodes) {
         return engine.evaluate(EligibilityProfileInput.from(p), conditions, regionCodes, index, TODAY);
