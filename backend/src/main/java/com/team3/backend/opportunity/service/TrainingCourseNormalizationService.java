@@ -29,7 +29,7 @@ import java.util.*;
  * 2. 버전: 정규화 스냅샷이 현재 버전과 같으면 새 버전을 만들지 않는다. 다르면 새 버전과 훈련 상세·지역·조건·신청기간을 저장한다
  *    수집마다 바뀌는 값(수강신청 인원·만족도·취업률)은 TrainingCourseRaw에 없으므로 스냅샷에 들어가지 않는다
  * 3. 분류: 온통청년 분류 체계의 대분류 교육･직업훈련 / 중분류 직업훈련으로 고정
- * 4. 훈련지역(trngAreaCd)은 지역 사전으로 매핑해 시행 지역(IMPLEMENTATION) 행으로 저장한다. 자격 조건이 아니다
+ * 4. 훈련지역(trngAreaCd)은 지역 사전으로 매핑해 시행 지역(IMPLEMENTATION) 행으로 저장한다. 자격 조건이 아니라 지역 검색 기준이다
  *
  * 신청기간 (추정)
  * - 고용24 오픈API(목록 310L01, 과정/기관정보 310L02, 훈련일정 310L03)에 모집기간이 없다.
@@ -41,7 +41,9 @@ import java.util.*;
  * 훈련 자격 (trainTargetCd, 목록 API 요청 파라미터 crseTracseSe 코드표 기준)
  * - C0061·C0061S·C0061I 국민내일배움카드 과정 (현재 정규화 대상 아님. 대상을 넓힐 때를 위해 규칙만 둔다): 카드 필요 조건(TRAINING_CARD CARD_REQUIRED)
  * - C0104 K-디지털 트레이닝: 1회 한정 참여 조건(PARTICIPATION_HISTORY ONCE_ONLY KDT) + 그 밖의 자격은 원문 확인(UNSTRUCTURED)
- *   + 거주지 제한 없음(REGION NATIONAL). 훈련지역은 훈련 장소일 뿐이라 검색에서 전국 대상으로 다루기로 함 (추천팀 합의 2026-10-20)
+ *   + 거주지 제한 없음(REGION NATIONAL, 신청 자격 판정용)
+ *   지역 기준은 두 가지로 나뉜다 (추천팀 합의 2026-10-20). 신청 자격의 거주지 조건은 REGION NATIONAL(어디 살든 신청 가능),
+ *   지역 검색은 훈련 장소인 시행 지역(IMPLEMENTATION) 행을 쓴다. NATIONAL은 지역 검색 기준이 아니다.
  * - 그 밖의 훈련유형 (현재 정규화 대상 아님): 자격 규칙을 확인하지 않아 원문 확인 필요(UNSTRUCTURED, NEEDS_REVIEW)
  * 응답의 titleLink에 있는 crseTracseSe는 trainTargetCd와 다를 수 있어(예: C0104 과정의 링크가 C0061) trainTargetCd만 쓴다.
  *
