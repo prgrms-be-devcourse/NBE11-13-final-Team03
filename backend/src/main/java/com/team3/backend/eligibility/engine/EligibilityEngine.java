@@ -1,6 +1,7 @@
 package com.team3.backend.eligibility.engine;
 
 import com.team3.backend.eligibility.domain.entity.*;
+import com.team3.backend.eligibility.engine.EligibilityProfileInput.Income;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
@@ -27,13 +28,14 @@ import static com.team3.backend.eligibility.domain.entity.ConditionMatchResult.*
  *   조건이 없다는 것은 제한이 없다는 뜻이 아니라 정규화 데이터 누락이다.
  * - 사용자 값이 없거나 "모름"이면 USER_INFO_MISSING.
  * 기준일(today)은 한국 시간 날짜로 넘긴다. 만 나이는 기준일로 계산한다.
+ * 프로필은 엔티티가 아닌 EligibilityProfileInput으로 받는다.
  */
 @Component
 public class EligibilityEngine {
 
     private static final String UNSTRUCTURED = "UNSTRUCTURED";
 
-    public EligibilityEvaluation evaluate(EligibilityProfile profile, List<EligibilityConditionInput> conditions,
+    public EligibilityEvaluation evaluate(EligibilityProfileInput profile, List<EligibilityConditionInput> conditions,
                                           Collection<String> residenceRegionCodes, RegionIndex regionIndex, LocalDate today) {
         if (conditions.isEmpty()) {
             return new EligibilityEvaluation(EligibilityStatus.UNKNOWN, List.of(), "정규화된 조건이 없어 판정할 수 없습니다.");
@@ -93,7 +95,7 @@ public class EligibilityEngine {
 
     // ── 조건별 판정 ──
 
-    private ConditionEvaluation evaluate(EligibilityConditionInput c, EligibilityProfile p, Collection<String> regionCodes,
+    private ConditionEvaluation evaluate(EligibilityConditionInput c, EligibilityProfileInput p, Collection<String> regionCodes,
                                          RegionIndex index, LocalDate today) {
         String status = status(c);
         if (UNSTRUCTURED.equals(status)) {
@@ -119,23 +121,23 @@ public class EligibilityEngine {
         };
     }
 
-    private ConditionEvaluation age(EligibilityConditionInput c, EligibilityProfile p, LocalDate today) {
+    private ConditionEvaluation age(EligibilityConditionInput c, EligibilityProfileInput p, LocalDate today) {
         Map<String, Object> e = c.expression();
         String status = status(c);
         if ("NO_LIMIT".equals(status) || "NOT_APPLICABLE".equals(status)) {
             return result(c, "ANY", status, null, MATCHED, "연령 제한이 없습니다.");
         }
-        if (p.getBirthDate() == null) {
+        if (p.birthDate() == null) {
             return result(c, null, e, null, USER_INFO_MISSING, "생년월일 정보가 필요합니다.");
         }
         if ("DATE_BOUND".equals(status)) {
             LocalDate after = date(e.get("bornOnOrAfter"));
             LocalDate before = date(e.get("bornOnOrBefore"));
-            boolean ok = (after == null || !p.getBirthDate().isBefore(after)) && (before == null || !p.getBirthDate().isAfter(before));
+            boolean ok = (after == null || !p.birthDate().isBefore(after)) && (before == null || !p.birthDate().isAfter(before));
             return result(c, "BORN_BETWEEN", Map.of("bornOnOrAfter", String.valueOf(after), "bornOnOrBefore", String.valueOf(before)),
-                    p.getBirthDate().toString(), ok ? MATCHED : NOT_MATCHED, ok ? "출생일 조건을 충족합니다." : "출생일 조건을 충족하지 않습니다.");
+                    p.birthDate().toString(), ok ? MATCHED : NOT_MATCHED, ok ? "출생일 조건을 충족합니다." : "출생일 조건을 충족하지 않습니다.");
         }
-        int age = Period.between(p.getBirthDate(), today).getYears();
+        int age = Period.between(p.birthDate(), today).getYears();
         Integer min = integer(e.get("min"));
         Integer max = integer(e.get("max"));
         boolean ok = (min == null || age >= min) && (max == null || age <= max);
@@ -147,11 +149,11 @@ public class EligibilityEngine {
                 ok ? "연령 조건을 충족합니다." : "연령 조건을 충족하지 않습니다.");
     }
 
-    private ConditionEvaluation region(EligibilityConditionInput c, EligibilityProfile p, Collection<String> codes, RegionIndex index) {
+    private ConditionEvaluation region(EligibilityConditionInput c, EligibilityProfileInput p, Collection<String> codes, RegionIndex index) {
         if ("NATIONAL".equals(status(c))) {
             return result(c, "ANY", "NATIONAL", null, MATCHED, "전국 대상입니다.");
         }
-        String userCode = p.getResidenceRegion() == null ? null : p.getResidenceRegion().getRegionCode();
+        String userCode = p.residenceRegionCode();
         if (userCode == null) {
             return result(c, "IN", codes, null, USER_INFO_MISSING, "거주지역 정보가 필요합니다.");
         }
@@ -161,7 +163,7 @@ public class EligibilityEngine {
                 ok ? "거주지역 조건을 충족합니다." : "거주지역 조건을 충족하지 않습니다.");
     }
 
-    private ConditionEvaluation code(EligibilityConditionInput c, EligibilityProfile p) {
+    private ConditionEvaluation code(EligibilityConditionInput c, EligibilityProfileInput p) {
         if ("NO_LIMIT".equals(status(c))) {
             return result(c, "ANY", "NO_LIMIT", null, MATCHED, "제한이 없습니다.");
         }
@@ -186,7 +188,7 @@ public class EligibilityEngine {
         return result(c, "ANY_OF", values, actual, NOT_MATCHED, label(c.type()) + " 조건을 충족하지 않습니다.");
     }
 
-    private ConditionEvaluation income(EligibilityConditionInput c, EligibilityProfile p) {
+    private ConditionEvaluation income(EligibilityConditionInput c, EligibilityProfileInput p) {
         Map<String, Object> e = c.expression();
         String status = status(c);
         if ("NO_LIMIT".equals(status)) {
@@ -199,28 +201,28 @@ public class EligibilityEngine {
         BigDecimal actual;
         switch (type) {
             case "MEDIAN_PERCENT" -> {
-                if (p.getMedianIncomeStatus() != AnswerStatus.PROVIDED || p.getMedianIncomePercent() == null) {
+                if (p.medianIncomeStatus() != AnswerStatus.PROVIDED || p.medianIncomePercent() == null) {
                     return result(c, "RANGE", e, null, USER_INFO_MISSING, "기준중위소득 대비 비율 정보가 필요합니다.");
                 }
-                actual = p.getMedianIncomePercent();
+                actual = p.medianIncomePercent();
             }
             case "STUDENT_LOAN_BRACKET" -> {
-                if (p.getStudentLoanBracketStatus() != AnswerStatus.PROVIDED || p.getStudentLoanBracket() == null) {
+                if (p.studentLoanBracketStatus() != AnswerStatus.PROVIDED || p.studentLoanBracket() == null) {
                     return result(c, "RANGE", e, null, USER_INFO_MISSING, "학자금 지원구간 정보가 필요합니다.");
                 }
-                actual = BigDecimal.valueOf(p.getStudentLoanBracket());
+                actual = BigDecimal.valueOf(p.studentLoanBracket());
             }
             case "AMOUNT" -> {
                 if (!Boolean.TRUE.equals(e.get("unitConfirmed"))) {
                     return result(c, "RANGE", e, null, DATA_UNCLEAR, "소득 금액의 단위가 확인되지 않았습니다.");
                 }
                 String subject = String.valueOf(e.get("subject"));
-                IncomeAnswer answer = "HOUSEHOLD".equals(subject) ? p.getHouseholdIncome()
-                        : "INDIVIDUAL".equals(subject) ? p.getPersonalIncome() : null;
+                Income answer = "HOUSEHOLD".equals(subject) ? p.householdIncome()
+                        : "INDIVIDUAL".equals(subject) ? p.personalIncome() : null;
                 if (answer == null && !"HOUSEHOLD".equals(subject) && !"INDIVIDUAL".equals(subject)) {
                     return result(c, "RANGE", e, null, CHECK_REQUIRED, "개인 소득 기준인지 가구 소득 기준인지 공고에서 확인해야 합니다.");
                 }
-                if (answer == null || answer.getStatus() != AnswerStatus.PROVIDED) {
+                if (answer == null || answer.status() != AnswerStatus.PROVIDED) {
                     return result(c, "RANGE", e, null, USER_INFO_MISSING,
                             ("HOUSEHOLD".equals(subject) ? "가구" : "개인") + " 소득 정보가 필요합니다.");
                 }
@@ -228,7 +230,7 @@ public class EligibilityEngine {
                 if (!"MONTHLY".equals(period) && !"YEARLY".equals(period)) {
                     return result(c, "RANGE", e, null, CHECK_REQUIRED, "월 소득 기준인지 연 소득 기준인지 공고에서 확인해야 합니다.");
                 }
-                actual = convert(answer.getAmount(), answer.getPeriod(), period);
+                actual = convert(answer.amount(), answer.period(), period);
             }
             default -> {
                 return result(c, null, e, null, DATA_UNCLEAR, "판정할 수 없는 소득 기준입니다.");
@@ -244,29 +246,29 @@ public class EligibilityEngine {
     record UserValues(Set<String> values, boolean onLeave) {
     }
 
-    static Optional<UserValues> userValues(ConditionType type, EligibilityProfile p) {
+    static Optional<UserValues> userValues(ConditionType type, EligibilityProfileInput p) {
         return switch (type) {
-            case MARITAL -> p.getMaritalStatus() == null || p.getMaritalStatus() == MaritalStatus.UNKNOWN
-                    ? Optional.empty() : Optional.of(new UserValues(Set.of(p.getMaritalStatus().name()), false));
-            case EMPLOYMENT -> p.getEmploymentStatus() == null
-                    ? Optional.empty() : Optional.of(new UserValues(Set.of(p.getEmploymentStatus().name()), false));
-            case SPECIALIZATION -> p.getMajorField() == null
-                    ? Optional.empty() : Optional.of(new UserValues(Set.of(p.getMajorField().name()), false));
+            case MARITAL -> p.maritalStatus() == null || p.maritalStatus() == MaritalStatus.UNKNOWN
+                    ? Optional.empty() : Optional.of(new UserValues(Set.of(p.maritalStatus().name()), false));
+            case EMPLOYMENT -> p.employmentStatus() == null
+                    ? Optional.empty() : Optional.of(new UserValues(Set.of(p.employmentStatus().name()), false));
+            case SPECIALIZATION -> p.majorField() == null
+                    ? Optional.empty() : Optional.of(new UserValues(Set.of(p.majorField().name()), false));
             case SPECIAL_TARGET -> specialTargets(p);
-            case EDUCATION -> education(p.getEducationLevel(), p.getEnrollmentStatus());
+            case EDUCATION -> education(p.educationLevel(), p.enrollmentStatus());
             default -> Optional.empty();
         };
     }
 
-    private static Optional<UserValues> specialTargets(EligibilityProfile p) {
-        if (p.getSpecialTargetStatus() == AnswerStatus.NOT_APPLICABLE) {
+    private static Optional<UserValues> specialTargets(EligibilityProfileInput p) {
+        if (p.specialTargetStatus() == AnswerStatus.NOT_APPLICABLE) {
             return Optional.of(new UserValues(Set.of(), false));
         }
-        if (p.getSpecialTargetStatus() != AnswerStatus.PROVIDED) {
+        if (p.specialTargetStatus() != AnswerStatus.PROVIDED) {
             return Optional.empty();
         }
         Set<String> names = new TreeSet<>();
-        p.getSpecialTargets().forEach(t -> names.add(t.name()));
+        p.specialTargets().forEach(t -> names.add(t.name()));
         return Optional.of(new UserValues(names, false));
     }
 

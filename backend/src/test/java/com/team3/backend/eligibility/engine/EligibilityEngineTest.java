@@ -227,7 +227,7 @@ class EligibilityEngineTest {
     // ── 보조 ──
 
     private EligibilityEvaluation evaluate(EligibilityProfile p, List<EligibilityConditionInput> conditions, List<String> regionCodes) {
-        return engine.evaluate(p, conditions, regionCodes, index, TODAY);
+        return engine.evaluate(EligibilityProfileInput.from(p), conditions, regionCodes, index, TODAY);
     }
 
     private ConditionMatchResult result(EligibilityConditionInput condition) {
