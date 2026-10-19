@@ -3,11 +3,15 @@ package com.team3.backend.search.service;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.global.exception.GlobalErrorCode;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
+import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityCondition;
 import com.team3.backend.opportunity.domain.entity.OpportunityRegion;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
+import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
+import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
+import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.opportunity.domain.repository.ApplicationStatusSpecifications;
 import com.team3.backend.opportunity.normalization.ApplicationStatus;
 import com.team3.backend.region.directory.RegionDirectory;
@@ -48,14 +52,24 @@ public class OpportunitySearchService {
     private final OpportunitySearchRepository searchRepository;
     private final RegionDirectory regionDirectory;
 
-    /** 공고 조건과 선택한 모집 상태를 DB에서 결합해 최신순 페이지를 조회한다. */
+    /** 공고 조건과 모집 상태·유형별 날짜 범위를 DB에서 결합해 최신순 페이지를 조회한다. */
     @Transactional(readOnly = true)
     public OpportunitySearchResponseDto search(
             String keyword, OpportunityType type, String category, String subCategory,
             String region, ApplicationStatus applicationStatus,
+            LocalDate deadlineFrom, LocalDate deadlineTo,
+            LocalDate startDateFrom, LocalDate startDateTo,
             int page, int size
     ) {
         if (page < 0 || size < 1 || size > 100) {
+            throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
+        }
+        boolean hasDeadlineRange = deadlineFrom != null || deadlineTo != null;
+        boolean hasStartRange = startDateFrom != null || startDateTo != null;
+        if ((deadlineFrom != null && deadlineTo != null && deadlineFrom.isAfter(deadlineTo))
+                || (startDateFrom != null && startDateTo != null && startDateFrom.isAfter(startDateTo))
+                || (hasDeadlineRange && type != OpportunityType.YOUTH_POLICY)
+                || (hasStartRange && type != OpportunityType.VOCATIONAL_TRAINING)) {
             throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
         }
 
@@ -101,6 +115,15 @@ public class OpportunitySearchService {
             filters = filters.and(ApplicationStatusSpecifications.hasStatus(
                     applicationStatus, LocalDate.now(KST)));
         }
+        // 정책은 유효한 신청 마감일, 훈련은 교육 시작일을 사용해 서로 다른 날짜를 혼합하지 않는다.
+        if (hasDeadlineRange) {
+            filters = filters.and((root, query, criteriaBuilder) ->
+                    deadlineMatches(root, query, criteriaBuilder, deadlineFrom, deadlineTo));
+        }
+        if (hasStartRange) {
+            filters = filters.and((root, query, criteriaBuilder) ->
+                    startDateMatches(root, query, criteriaBuilder, startDateFrom, startDateTo));
+        }
 
         Sort sort = Sort.by(Sort.Direction.DESC, "createdAt")
                 .and(Sort.by(Sort.Direction.DESC, "id"));
@@ -120,6 +143,46 @@ public class OpportunitySearchService {
                 addDescendants(index, child, codes);
             }
         }
+    }
+
+    private static Predicate deadlineMatches(
+            Root<Opportunity> root, CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder, LocalDate from, LocalDate to
+    ) {
+        Subquery<Long> subquery = query.subquery(Long.class);
+        Root<ApplicationWindow> window = subquery.from(ApplicationWindow.class);
+        List<Predicate> predicates = new ArrayList<>();
+        predicates.add(criteriaBuilder.equal(window.get("version"), root.get("currentVersion")));
+        predicates.add(criteriaBuilder.equal(window.get("validationStatus"), ValidationStatus.VALID));
+        predicates.add(criteriaBuilder.equal(window.get("periodType"), PeriodType.FIXED));
+        predicates.add(criteriaBuilder.isNotNull(window.get("endDate")));
+        if (from != null) {
+            predicates.add(criteriaBuilder.greaterThanOrEqualTo(window.get("endDate"), from));
+        }
+        if (to != null) {
+            predicates.add(criteriaBuilder.lessThanOrEqualTo(window.get("endDate"), to));
+        }
+        subquery.select(window.get("id")).where(predicates.toArray(Predicate[]::new));
+        return criteriaBuilder.exists(subquery);
+    }
+
+    private static Predicate startDateMatches(
+            Root<Opportunity> root, CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder, LocalDate from, LocalDate to
+    ) {
+        Subquery<Long> subquery = query.subquery(Long.class);
+        Root<TrainingCourseDetail> detail = subquery.from(TrainingCourseDetail.class);
+        List<Predicate> predicates = new ArrayList<>();
+        predicates.add(criteriaBuilder.equal(detail.get("version"), root.get("currentVersion")));
+        predicates.add(criteriaBuilder.isNotNull(detail.get("trainingStartDate")));
+        if (from != null) {
+            predicates.add(criteriaBuilder.greaterThanOrEqualTo(detail.get("trainingStartDate"), from));
+        }
+        if (to != null) {
+            predicates.add(criteriaBuilder.lessThanOrEqualTo(detail.get("trainingStartDate"), to));
+        }
+        subquery.select(detail.get("id")).where(predicates.toArray(Predicate[]::new));
+        return criteriaBuilder.exists(subquery);
     }
 
     private static Predicate regionMatches(

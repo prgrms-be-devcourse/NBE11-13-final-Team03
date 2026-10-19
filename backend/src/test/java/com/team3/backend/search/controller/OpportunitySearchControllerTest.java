@@ -11,6 +11,7 @@ import com.team3.backend.opportunity.domain.entity.PersonalizationStatus;
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
+import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.opportunity.normalization.ApplicationStatus;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
@@ -31,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Map;
 
@@ -290,6 +292,120 @@ class OpportunitySearchControllerTest {
     }
 
     @Test
+    void dateRangesUsePolicyDeadlinesAndTrainingStartDatesWithoutChangingUnfilteredSearch() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Region province = createRegion("1100000000", null);
+        Opportunity earlyPolicy = createOpportunity("V1-4 early policy", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity latePolicy = createOpportunity("V1-4 late policy", OpportunityType.YOUTH_POLICY,
+                "housing", "support", true);
+        Opportunity alwaysPolicy = createOpportunity("V1-4 always policy", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        Opportunity unknownPolicy = createOpportunity("V1-4 unknown policy", OpportunityType.YOUTH_POLICY,
+                null, null, true);
+        Opportunity earlyTraining = createOpportunity("V1-4 early training", OpportunityType.VOCATIONAL_TRAINING,
+                "career", "course", true);
+        Opportunity lateTraining = createOpportunity("V1-4 late training", OpportunityType.VOCATIONAL_TRAINING,
+                null, null, true);
+        Opportunity unknownTraining = createOpportunity("V1-4 unknown training", OpportunityType.VOCATIONAL_TRAINING,
+                null, null, true);
+        addRegion(earlyPolicy, province, RegionRole.RESIDENCE);
+        addRegion(earlyTraining, province, RegionRole.IMPLEMENTATION);
+        addWindow(earlyPolicy, PeriodType.FIXED, today.minusDays(1), today.plusDays(3), ValidationStatus.VALID);
+        addWindow(earlyPolicy, PeriodType.FIXED, today.minusDays(1), today.plusDays(3), ValidationStatus.VALID);
+        addWindow(latePolicy, PeriodType.FIXED, today.minusDays(1), today.plusDays(5), ValidationStatus.VALID);
+        addWindow(alwaysPolicy, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        addWindow(unknownPolicy, PeriodType.FIXED, today.minusDays(1), today.plusDays(3), ValidationStatus.INVALID);
+        addWindow(unknownPolicy, PeriodType.FIXED, today.minusDays(1), null, ValidationStatus.VALID);
+        addWindow(earlyTraining, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        addTrainingDetail(earlyTraining, today.plusDays(2));
+        addTrainingDetail(lateTraining, today.plusDays(4));
+        addTrainingDetail(unknownTraining, null);
+        entityManager.flush();
+        entityManager.clear();
+        regionDirectory.refresh();
+
+        mockMvc.perform(get("/api/opportunities").param("keyword", "V1-4"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(7));
+
+        for (int page = 0; page < 2; page++) {
+            mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "V1-4")
+                            .param("type", "YOUTH_POLICY")
+                            .param("deadlineFrom", today.plusDays(3).toString())
+                            .param("page", String.valueOf(page)).param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andExpect(jsonPath("$.content[0].opportunityId")
+                            .value(page == 0 ? latePolicy.getId() : earlyPolicy.getId()));
+        }
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-4").param("type", "YOUTH_POLICY")
+                        .param("deadlineTo", today.plusDays(3).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(earlyPolicy.getId()));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-4").param("type", "YOUTH_POLICY")
+                        .param("deadlineFrom", today.plusDays(3).toString())
+                        .param("deadlineTo", today.plusDays(3).toString())
+                        .param("applicationStatus", "OPEN")
+                        .param("region", province.getRegionCode())
+                        .param("category", "career"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(earlyPolicy.getId()));
+
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-4").param("type", "VOCATIONAL_TRAINING")
+                        .param("startDateFrom", today.plusDays(4).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(lateTraining.getId()));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-4").param("type", "VOCATIONAL_TRAINING")
+                        .param("startDateTo", today.plusDays(2).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(earlyTraining.getId()));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-4").param("type", "VOCATIONAL_TRAINING")
+                        .param("startDateFrom", today.plusDays(2).toString())
+                        .param("startDateTo", today.plusDays(2).toString())
+                        .param("applicationStatus", "OPEN")
+                        .param("region", province.getRegionCode())
+                        .param("category", "career"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(earlyTraining.getId()));
+
+        for (String[] invalid : new String[][]{
+                {"YOUTH_POLICY", "deadlineFrom", today.plusDays(5).toString(),
+                        "deadlineTo", today.plusDays(3).toString()},
+                {"VOCATIONAL_TRAINING", "startDateFrom", today.plusDays(4).toString(),
+                        "startDateTo", today.plusDays(2).toString()}
+        }) {
+            mockMvc.perform(get("/api/opportunities")
+                            .param("type", invalid[0])
+                            .param(invalid[1], invalid[2]).param(invalid[3], invalid[4]))
+                    .andExpect(status().isBadRequest());
+        }
+        mockMvc.perform(get("/api/opportunities").param("deadlineFrom", today.toString()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/opportunities")
+                        .param("type", "VOCATIONAL_TRAINING").param("deadlineTo", today.toString()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/opportunities")
+                        .param("type", "YOUTH_POLICY").param("startDateFrom", today.toString()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/opportunities")
+                        .param("type", "YOUTH_POLICY").param("deadlineFrom", "not-a-date"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void anonymousSearchCombinesFiltersAndExcludesUnnormalizedOpportunities() throws Exception {
         Opportunity match = createOpportunity("V1-1 training policy", OpportunityType.YOUTH_POLICY,
                 "employment", "training", true);
@@ -482,6 +598,13 @@ class OpportunitySearchControllerTest {
                 .version(opportunity.getCurrentVersion())
                 .periodType(type).startDate(start).endDate(end)
                 .validationStatus(validationStatus).build());
+    }
+
+    private void addTrainingDetail(Opportunity opportunity, LocalDate startDate) {
+        entityManager.persist(TrainingCourseDetail.builder()
+                .version(opportunity.getCurrentVersion())
+                .courseId("V1-4-" + opportunity.getId()).courseRound(1)
+                .trainingStartDate(startDate).build());
     }
 
     private void addPolicyRegionCondition(Opportunity opportunity, String status) {
