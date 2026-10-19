@@ -35,6 +35,7 @@ import java.util.*;
  * 훈련 자격 (trainTargetCd, 목록 API 요청 파라미터 crseTracseSe 코드표 기준)
  * - C0061·C0061S·C0061I 국민내일배움카드 과정: 카드 필요 조건(TRAINING_CARD CARD_REQUIRED)
  * - C0104 K-디지털 트레이닝: 1회 한정 참여 조건(PARTICIPATION_HISTORY ONCE_ONLY KDT) + 그 밖의 자격은 원문 확인(UNSTRUCTURED)
+ *   + 거주지 제한 없음(REGION NATIONAL). 훈련지역은 훈련 장소일 뿐이라 검색에서 전국 대상으로 다루기로 함 (추천팀 합의 2026-10-20)
  * - 그 밖의 훈련유형: 자격 규칙을 확인하지 않아 원문 확인 필요(UNSTRUCTURED, NEEDS_REVIEW)
  * 응답의 titleLink에 있는 crseTracseSe는 trainTargetCd와 다를 수 있어(예: C0104 과정의 링크가 C0061) trainTargetCd만 쓴다.
  *
@@ -44,7 +45,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class TrainingCourseNormalizationService {
 
-    public static final String NORMALIZATION_VERSION = "0.2.0";
+    public static final String NORMALIZATION_VERSION = "0.3.0";
     /** 국민내일배움카드 과정 (훈련유형명에 국민내일배움카드가 명시된 코드) */
     static final Set<String> CARD_REQUIRED_TARGET_CODES = Set.of("C0061", "C0061S", "C0061I");
     /** K-디지털 트레이닝. 1회만 지원한다 */
@@ -340,6 +341,9 @@ public class TrainingCourseNormalizationService {
         if (KDT_TARGET_CODE.equals(code)) {
             return List.of(new TrainingConditionSpec(ConditionType.PARTICIPATION_HISTORY, "kdtParticipation",
                     Map.of("status", "ONCE_ONLY", "program", "KDT"), ValidationStatus.VALID, "K-디지털 트레이닝은 1회만 지원"),
+                    new TrainingConditionSpec(ConditionType.REGION, "residenceRegion",
+                            Map.of("status", RegionStatus.NATIONAL.name(), "role", RegionRole.RESIDENCE.name()),
+                            ValidationStatus.VALID, "K-디지털 트레이닝은 거주지 제한 없음 (훈련지역은 훈련 장소)"),
                     unstructured);
         }
         return List.of(unstructured);
