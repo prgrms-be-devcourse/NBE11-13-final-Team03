@@ -31,7 +31,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 고용24 훈련과정 페이지 정규화를 실제 PostgreSQL로 검증한다. 원본 값은 2026-10-16 응답 샘플 기준.
+ * 고용24 훈련과정 페이지 정규화를 실제 PostgreSQL로 검증한다. 원본 값은 2026-10-16 응답 샘플 기준
+ * (정규화 대상이 KDT뿐이라 excavator·wallpaper는 훈련유형만 C0104로 바꿨다).
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -108,19 +109,22 @@ class TrainingCourseNormalizationServiceTest {
         assertThat(detail.getCourseFee()).isEqualTo(116_160L);
         assertThat(detail.getCapacity()).isEqualTo(2);
         assertThat(detail.getNcsCode()).isEqualTo("14070106");
-        assertThat(detail.getTrainingTargetCode()).isEqualTo("C0061");
+        assertThat(detail.getTrainingTargetCode()).isEqualTo("C0104");
 
         assertThat(opportunityRegionRepository.findByVersionId(versionId)).singleElement().satisfies(r -> {
             assertThat(r.getRegion().getRegionCode()).isEqualTo("4165000000");
             assertThat(r.getRegionRole()).isEqualTo(RegionRole.IMPLEMENTATION);
         });
-        assertThat(conditionRepository.findByVersionId(versionId)).singleElement().satisfies(c -> {
-            assertThat(c.getConditionType()).isEqualTo(ConditionType.TRAINING_CARD);
-            assertThat(c.getExpression()).containsEntry("status", "UNSTRUCTURED");
-            assertThat(c.getValidationStatus()).isEqualTo(ValidationStatus.NEEDS_REVIEW);
+        assertThat(conditionRepository.findByVersionId(versionId)).hasSize(3);
+        assertThat(windowRepository.findByVersionId(versionId)).singleElement().satisfies(w -> {
+            assertThat(w.getPeriodType()).isEqualTo(PeriodType.FIXED);
+            assertThat(w.getStartDate()).isNull();
+            assertThat(w.getEndDate()).isEqualTo(LocalDate.of(2026, 9, 30));
+            assertThat(w.getValidationStatus()).isEqualTo(ValidationStatus.VALID);
         });
-        assertThat(windowRepository.findByVersionId(versionId)).singleElement()
-                .extracting(ApplicationWindow::getPeriodType).isEqualTo(PeriodType.UNKNOWN);
+        assertThat(opportunity.getCurrentVersion().getNormalizedSnapshot())
+                .containsEntry("applicationPeriod", java.util.Map.of("endDate", "2026-09-30", "basis", "TRAINING_START_MINUS_ONE_DAY"));
+        assertThat(usageReasons(opportunity)).contains("APPLICATION_PERIOD_ESTIMATED").doesNotContain("APPLICATION_PERIOD_UNCONFIRMED");
     }
 
     @Test
@@ -156,15 +160,23 @@ class TrainingCourseNormalizationServiceTest {
     }
 
     @Test
-    void 식별자나_제목이_없는_원본은_건너뛰고_나머지는_저장한다() {
+    void 식별자나_제목이_없거나_KDT가_아닌_원본은_건너뛰고_나머지는_저장한다() {
         TrainingCourseRaw noId = TrainingCourseRaw.builder().trprDegr("1").title("과정").build();
         TrainingCourseRaw badRound = TrainingCourseRaw.builder().trprId("AIG1").trprDegr("일").title("과정").build();
+        TrainingCourseRaw remote = withTarget("A2", "실업자원격훈련", "C0055");
+        TrainingCourseRaw card = withTarget("A3", "국민내일배움카드(일반)", "C0061");
+        TrainingCourseRaw noTarget = withTarget("A4", null, null);
 
-        TrainingNormalizationResult result = service.normalizePage(page(DAY1, noId, excavator("2026-10-01", "2026-10-02"), badRound));
+        TrainingNormalizationResult result = service.normalizePage(
+                page(DAY1, noId, excavator("2026-10-01", "2026-10-02"), badRound, remote, card, noTarget));
+        flushAndClear();
 
         assertThat(result.created()).isEqualTo(1);
         assertThat(result.skipped()).extracting(TrainingNormalizationResult.Skipped::reason)
-                .containsExactly("훈련과정ID(trprId) 없음", "회차(trprDegr)가 숫자가 아님: 일");
+                .containsExactly("훈련과정ID(trprId) 없음", "회차(trprDegr)가 숫자가 아님: 일",
+                        "K-디지털 트레이닝(C0104)이 아님: C0055", "K-디지털 트레이닝(C0104)이 아님: C0061",
+                        "K-디지털 트레이닝(C0104)이 아님: null");
+        assertThat(sourceRepository.findBySourceIdAndExternalId(SOURCE, "A2:1")).isEmpty();
     }
 
     @Test
@@ -172,6 +184,7 @@ class TrainingCourseNormalizationServiceTest {
         TrainingCourseRaw raw = TrainingCourseRaw.builder()
                 .trprId("AIG20250000502773").trprDegr("115").title("굴삭기 과정")
                 .traStartDate("2026/10/01").realMan("33만원").trngAreaCd("41650")
+                .trainTarget("K-디지털 트레이닝").trainTargetCd("C0104")
                 .build();
 
         service.normalizePage(page(DAY1, raw));
@@ -181,30 +194,103 @@ class TrainingCourseNormalizationServiceTest {
         TrainingCourseDetail detail = detailRepository.findByVersionId(opportunity.getCurrentVersion().getId()).orElseThrow();
         assertThat(detail.getTrainingStartDate()).isNull();
         assertThat(detail.getActualTrainingCost()).isNull();
-        @SuppressWarnings("unchecked")
-        List<String> reasons = (List<String>) ((java.util.Map<String, Object>) opportunity.getCurrentVersion()
-                .getNormalizedSnapshot().get("usage")).get("exclusionReasons");
-        assertThat(reasons).contains("INVALID_traStartDate", "INVALID_realMan", "APPLICATION_PERIOD_UNCONFIRMED");
+        assertThat(usageReasons(opportunity)).contains("INVALID_traStartDate", "INVALID_realMan", "APPLICATION_PERIOD_UNCONFIRMED");
+        assertThat(opportunity.getCurrentVersion().getNormalizedSnapshot()).doesNotContainKey("applicationPeriod");
+        assertThat(windowRepository.findByVersionId(opportunity.getCurrentVersion().getId())).singleElement()
+                .satisfies(w -> {
+                    assertThat(w.getPeriodType()).isEqualTo(PeriodType.UNKNOWN);
+                    assertThat(w.getValidationStatus()).isEqualTo(ValidationStatus.UNKNOWN);
+                });
     }
 
     @Test
-    void 훈련_자격은_원문_확인_필요로_판정되고_신청_상태는_미확인이다() {
-        service.normalizePage(page(DAY1, excavator("2026-10-01", "2026-10-02")));
+    void 개강일이_종료일보다_늦으면_신청기간을_추정하지_않는다() {
+        service.normalizePage(page(DAY1, excavator("2026-10-09", "2026-10-02")));
         flushAndClear();
-        Long versionId = opportunityOf("AIG20250000502773:115").getCurrentVersion().getId();
-        EligibilityProfile profile = EligibilityProfile.builder()
+
+        Opportunity opportunity = opportunityOf("AIG20250000502773:115");
+        assertThat(usageReasons(opportunity)).contains("INVALID_traStartDate>traEndDate", "APPLICATION_PERIOD_UNCONFIRMED");
+        assertThat(windowRepository.findByVersionId(opportunity.getCurrentVersion().getId())).singleElement()
+                .extracting(ApplicationWindow::getPeriodType).isEqualTo(PeriodType.UNKNOWN);
+    }
+
+    @Test
+    void KDT_과정은_참여_이력_전국_원문확인_조건을_만든다() {
+        service.normalizePage(page(DAY1, withTarget("A1", "K-디지털 트레이닝", "C0104")));
+        flushAndClear();
+
+        assertThat(conditionRepository.findByVersionId(opportunityOf("A1:1").getCurrentVersion().getId()))
+                .extracting(c -> c.getConditionType() + ":" + c.getExpression().get("status") + ":" + c.getValidationStatus())
+                .containsExactlyInAnyOrder("PARTICIPATION_HISTORY:ONCE_ONLY:VALID", "REGION:NATIONAL:VALID",
+                        "TRAINING_CARD:UNSTRUCTURED:NEEDS_REVIEW");
+    }
+
+    @Test
+    void 정규화_대상이_아닌_훈련유형의_자격_규칙은_그대로_남아_있다() {
+        assertThat(TrainingCourseNormalizationService.trainingConditionSpecs(withTarget("A2", "실업자원격훈련", "C0055")))
+                .extracting(c -> c.type() + ":" + c.expression().get("status") + ":" + c.validationStatus())
+                .containsExactly("TRAINING_CARD:UNSTRUCTURED:NEEDS_REVIEW");
+        assertThat(TrainingCourseNormalizationService.trainingConditionSpecs(
+                withTarget("A3", "국민내일배움카드(주 훈련대상 : 구직자)", "C0061S")))
+                .extracting(c -> c.type() + ":" + c.expression().get("status") + ":" + c.validationStatus())
+                .containsExactly("TRAINING_CARD:CARD_REQUIRED:VALID");
+    }
+
+    @Test
+    void KDT_과정은_참여_이력이_있으면_NOT_ELIGIBLE이고_없으면_원문_확인_필요() {
+        service.normalizePage(page(DAY1, withTarget("A1", "K-디지털 트레이닝", "C0104")));
+        flushAndClear();
+        Long versionId = opportunityOf("A1:1").getCurrentVersion().getId();
+
+        EligibilityProfile completed = profileBuilder().kdtParticipation(TrainingParticipation.COMPLETED).build();
+        EligibilityProfile none = profileBuilder().kdtParticipation(TrainingParticipation.NONE).build();
+
+        assertThat(evaluator.judge(completed, List.of(versionId), LocalDate.of(2026, 10, 16)).get(versionId)
+                .evaluation().status()).isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
+        assertThat(evaluator.judge(none, List.of(versionId), LocalDate.of(2026, 10, 16)).get(versionId)
+                .evaluation().status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
+        assertThat(evaluator.judge(none, List.of(versionId), LocalDate.of(2026, 10, 16)).get(versionId)
+                .evaluation().conditions())
+                .filteredOn(c -> c.type() == ConditionType.REGION).singleElement()
+                .satisfies(c -> assertThat(c.result()).isEqualTo(ConditionMatchResult.MATCHED));
+    }
+
+    @Test
+    void KDT_과정은_개강_전날까지_모집_중이고_개강일부터_마감이다() {
+        service.normalizePage(page(DAY1, withTarget("A1", "K-디지털 트레이닝", "C0104")));
+        flushAndClear();
+        Long versionId = opportunityOf("A1:1").getCurrentVersion().getId();
+        EligibilityProfile profile = profileBuilder().kdtParticipation(TrainingParticipation.NONE).build();
+
+        assertThat(evaluator.judge(profile, List.of(versionId), LocalDate.of(2026, 10, 16)).get(versionId)
+                .applicationStatus()).isEqualTo(ApplicationStatus.OPEN);
+        assertThat(evaluator.judge(profile, List.of(versionId), LocalDate.of(2026, 10, 18)).get(versionId)
+                .applicationStatus()).isEqualTo(ApplicationStatus.OPEN);
+        assertThat(evaluator.judge(profile, List.of(versionId), LocalDate.of(2026, 10, 19)).get(versionId)
+                .applicationStatus()).isEqualTo(ApplicationStatus.CLOSED);
+    }
+
+    private EligibilityProfile.EligibilityProfileBuilder profileBuilder() {
+        return EligibilityProfile.builder()
                 .userId(1L)
                 .birthDate(LocalDate.of(1998, 5, 15))
-                .residenceRegion(em.getReference(Region.class, pocheon.getRegionCode()))
+                .residenceRegion(em.getReference(Region.class, pocheon.getRegionCode()));
+    }
+
+    private static TrainingCourseRaw withTarget(String trprId, String trainTarget, String trainTargetCd) {
+        return TrainingCourseRaw.builder()
+                .trprId(trprId).trprDegr("1")
+                .title("훈련과정 " + trprId).subTitle("훈련기관")
+                .traStartDate("2026-10-19").traEndDate("2027-03-30")
+                .trainTarget(trainTarget).trainTargetCd(trainTargetCd)
+                .trngAreaCd("41650")
                 .build();
+    }
 
-        EligibilityEvaluator.Judgement judgement = evaluator.judge(profile, List.of(versionId), LocalDate.of(2026, 10, 16))
-                .get(versionId);
-
-        assertThat(judgement.evaluation().status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
-        assertThat(judgement.evaluation().conditions()).singleElement()
-                .satisfies(c -> assertThat(c.result()).isEqualTo(ConditionMatchResult.CHECK_REQUIRED));
-        assertThat(judgement.applicationStatus()).isEqualTo(ApplicationStatus.UNKNOWN);
+    @SuppressWarnings("unchecked")
+    private static List<String> usageReasons(Opportunity opportunity) {
+        return (List<String>) ((java.util.Map<String, Object>) opportunity.getCurrentVersion()
+                .getNormalizedSnapshot().get("usage")).get("exclusionReasons");
     }
 
     private Opportunity opportunityOf(String externalId) {
@@ -227,7 +313,7 @@ class TrainingCourseNormalizationServiceTest {
                 .instCd("202004027").trainstCstId("500038675869")
                 .traStartDate(startDate).traEndDate(endDate)
                 .realMan("330000").courseMan("116160").yardMan("2").ncsCd("14070106")
-                .trainTarget("국민내일배움카드(일반)").trainTargetCd("C0061").wkendSe("3")
+                .trainTarget("K-디지털 트레이닝").trainTargetCd("C0104").wkendSe("3")
                 .trngAreaCd("41650").address("경기 포천시").telNo("031-531-1002")
                 .titleLink("https://www.work24.go.kr/hr/a/a/3100/selectTracseDetl.do?tracseId=AIG20250000502773&tracseTme=115")
                 .build();
@@ -240,7 +326,7 @@ class TrainingCourseNormalizationServiceTest {
                 .instCd("202400765").trainstCstId("500044167056")
                 .traStartDate("2026-10-01").traEndDate("2026-10-26")
                 .realMan("733800").courseMan("613800").yardMan("16").ncsCd("14030209")
-                .trainTarget("국민내일배움카드(일반)").trainTargetCd("C0061").wkendSe("3")
+                .trainTarget("K-디지털 트레이닝").trainTargetCd("C0104").wkendSe("3")
                 .trngAreaCd("41630").address("경기 양주시").telNo("031-855-7114")
                 .titleLink("https://www.work24.go.kr/hr/a/a/3100/selectTracseDetl.do?tracseId=AIG20250000536091&tracseTme=8")
                 .build();

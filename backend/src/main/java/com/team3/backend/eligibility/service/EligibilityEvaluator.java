@@ -4,6 +4,7 @@ import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
 import com.team3.backend.eligibility.engine.EligibilityConditionInput;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.eligibility.engine.EligibilityEvaluation;
+import com.team3.backend.eligibility.engine.EligibilityProfileInput;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.repository.ApplicationWindowRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityConditionRepository;
@@ -61,9 +62,10 @@ public class EligibilityEvaluator {
                         Collectors.toList())));
 
         var index = regionDirectory.index();
+        EligibilityProfileInput input = EligibilityProfileInput.from(profile);
         Map<Long, Judgement> result = new HashMap<>();
         for (Long versionId : versionIds) {
-            EligibilityEvaluation evaluation = engine.evaluate(profile, conditions.getOrDefault(versionId, List.of()),
+            EligibilityEvaluation evaluation = engine.evaluate(input, conditions.getOrDefault(versionId, List.of()),
                     residence.getOrDefault(versionId, List.of()), index, today);
             ApplicationStatus applicationStatus = applicationStatusCalculator.calculate(
                     periods.getOrDefault(versionId, List.of()), today);

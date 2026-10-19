@@ -1,7 +1,14 @@
 package com.team3.backend.eligibility.benchmark;
 
+import com.team3.backend.eligibility.engine.EligibilityProfileInput;
 import com.team3.backend.eligibility.domain.entity.*;
+import com.team3.backend.eligibility.api.EligibilityProvider;
+import com.team3.backend.eligibility.api.dto.EligibilitySnapshot;
+import com.team3.backend.eligibility.api.dto.EligibilitySnapshotPage;
+import com.team3.backend.eligibility.api.local.LocalEligibilityProvider;
+import com.team3.backend.eligibility.api.local.OpportunityInfoAssembler;
 import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
+import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.eligibility.dto.EligibilityListResponse;
 import com.team3.backend.eligibility.engine.ConditionEvaluation;
 import com.team3.backend.eligibility.engine.EligibilityConditionInput;
@@ -13,6 +20,11 @@ import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.ApplicationWindowRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityConditionRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityRegionRepository;
+import com.team3.backend.opportunity.domain.repository.OpportunityRepository;
+import com.team3.backend.opportunity.dto.ApplicationWindowRow;
+import com.team3.backend.opportunity.dto.ConditionRow;
+import com.team3.backend.opportunity.dto.OpportunityVersionRef;
+import com.team3.backend.opportunity.dto.RegionCodeRow;
 import com.team3.backend.opportunity.dto.NormalizationCommand;
 import com.team3.backend.opportunity.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.*;
@@ -37,6 +49,9 @@ import org.springframework.boot.SpringBootVersion;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -60,7 +75,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 판정 결과를 저장하지 않는 현재 방식(조회 시 계산)의 성능 측정. 운영 코드는 건드리지 않는다.
+ * 판정 성능 측정: 조회 시점 계산(목록·전체 판정)과 판정 결과 저장·재사용(ELIGIBILITY_RESULT). 운영 코드는 건드리지 않는다.
  *
  * 실행 (일반 테스트와 분리된 전용 DB 사용, ddl-auto=create-drop):
  *   YON_BENCH_DB_URL=jdbc:postgresql://localhost:5432/yon_bench sh ./gradlew test --tests '*EligibilityBenchmarkTest'
@@ -77,9 +92,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * 측정
  * - 목록 판정: EligibilityQueryService.evaluateAll(운영 코드)의 첫 페이지 / 마지막 페이지, size 20·100
- * - 전체 판정: 한 사용자 × 전체 정책. 판정 결과 필터를 지원할 때 드는 비용.
- *   운영 서비스의 판정 절차(조건·지역·신청기간 조회 → 엔진 → 신청 상태)를 테스트에서 그대로 재현해
- *   DB 조회와 엔진 실행 시간을 분리한다. 1,000건씩 키셋 조회하고 청크마다 영속성 컨텍스트를 비운다.
+ * - 전체 판정: 한 사용자 × 전체 정책, 저장 없이 판정만. 운영 판정(EligibilityEvaluator)과 같은 Projection 조회
+ *   (조건·거주지 지역·신청기간)와 refreshAll과 같은 1,000건 페이지 조회를 재현해 DB 조회와 엔진 시간을 나눠 잰다.
+ * - 판정 결과 저장 (ELIGIBILITY_RESULT, 운영 코드 그대로):
+ *   첫 refreshAll(저장된 결과 없음 → 전체 판정·저장), 다시 refreshAll(모두 최신 → 판정 0건),
+ *   추천 후보 getEligibilities(후보 5건), 상태 필터 findByStatuses(0페이지, 20건).
+ *   반복 횟수: YON_BENCH_RESULT_COLD_ITERATIONS(5), YON_BENCH_RESULT_WARM_ITERATIONS(20)
  * - 쿼리 수: Hibernate Statistics의 prepared statement 수.
  */
 @DataJpaTest(showSql = false)
@@ -93,7 +111,8 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "logging.level.org.hibernate.SQL=OFF"
 })
-@Import({EligibilityQueryService.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
+@Import({EligibilityResultService.class, LocalEligibilityProvider.class, OpportunityInfoAssembler.class,
+        EligibilityQueryService.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
         YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
         YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
@@ -118,6 +137,9 @@ class EligibilityBenchmarkTest {
             Complexity.MIXED, List.of("S1", "S2", "C1", "S1", "U1", "S2", "C2", "S1", "U2", "C1"));
 
     @Autowired private EligibilityQueryService queryService;
+    @Autowired private EligibilityResultService resultService;
+    @Autowired private EligibilityProvider provider;
+    @Autowired private OpportunityRepository opportunityRepository;
     @Autowired private EligibilityEngine engine;
     @Autowired private ApplicationStatusCalculator applicationStatusCalculator;
     @Autowired private YouthPolicyNormalizationService normalizationService;
@@ -160,8 +182,13 @@ class EligibilityBenchmarkTest {
                               Map<EligibilityStatus, Long> distribution) {
     }
 
+    private record ResultStoreResult(Stat cold, long coldQueries, Stat warm, long warmQueries,
+                                     Stat candidates, long candidateQueries, Stat statusPage, long statusPageQueries,
+                                     int savedRows) {
+    }
+
     private record DatasetResult(int size, Complexity complexity, int conditionRows, int windowRows, int regionRows,
-                                 List<ListResult> lists, FullResult full) {
+                                 List<ListResult> lists, FullResult full, ResultStoreResult store) {
     }
 
     @Test
@@ -178,6 +205,8 @@ class EligibilityBenchmarkTest {
         int iterations = intEnv("YON_BENCH_ITERATIONS", 50);
         int fullWarmup = intEnv("YON_BENCH_FULL_WARMUP", 3);
         int fullIterations = intEnv("YON_BENCH_FULL_ITERATIONS", 20);
+        int coldIterations = intEnv("YON_BENCH_RESULT_COLD_ITERATIONS", 5);
+        int warmIterations = intEnv("YON_BENCH_RESULT_WARM_ITERATIONS", 20);
 
         // ── 준비 (측정 제외) ──
         seedRegions();
@@ -206,14 +235,15 @@ class EligibilityBenchmarkTest {
                     lists.add(measureList(pageSize, "last", lastPage, size, warmup, iterations));
                 }
                 FullResult full = measureFull(size, fullWarmup, fullIterations);
-                DatasetResult r = new DatasetResult(size, complexity, conditionRows, windowRows, regionRows, lists, full);
+                ResultStoreResult store = measureResultStore(size, coldIterations, warmIterations);
+                DatasetResult r = new DatasetResult(size, complexity, conditionRows, windowRows, regionRows, lists, full, store);
                 results.add(r);
                 System.out.printf("[benchmark] N=%d %s done%n", size, complexity);
             }
         }
         clearClones();
 
-        String report = report(results, warmup, iterations, fullWarmup, fullIterations);
+        String report = report(results, warmup, iterations, fullWarmup, fullIterations, coldIterations, warmIterations);
         Path dir = Path.of("build", "reports", "eligibility-benchmark");
         Files.createDirectories(dir);
         Path file = dir.resolve("result-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".md");
@@ -281,9 +311,9 @@ class EligibilityBenchmarkTest {
     }
 
     /**
-     * EligibilityQueryService의 판정 절차를 그대로 재현한다 (DB 조회와 엔진 실행을 나눠 재기 위해).
-     * 조회: 프로필 → (현재 버전이 있는 기회 1,000건 키셋 조회 → 조건·지역·신청기간 IN 조회) 반복
-     * 엔진: 거주지 조건 지역 추출 → EligibilityEngine.evaluate → ApplicationStatusCalculator.calculate
+     * 운영 판정(EligibilityEvaluator.judge)과 refreshAll의 조회 방식을 그대로 재현한다 (DB 조회와 엔진 실행을 나눠 재기 위해).
+     * 조회: 프로필 → (현재 버전 1,000건 페이지 조회 → 조건·거주지 지역·신청기간 Projection IN 조회) 반복
+     * 엔진: EligibilityEngine.evaluate → ApplicationStatusCalculator.calculate
      */
     private FullRun runFull(int size) {
         FullRun run = new FullRun();
@@ -295,41 +325,42 @@ class EligibilityBenchmarkTest {
             run.dbNanos += System.nanoTime() - t0;
             run.dbQueries += statistics.getPrepareStatementCount() - q0;
 
-            long lastId = Long.MAX_VALUE;
-            while (true) {
+            int page = 0;
+            Page<OpportunityVersionRef> refs;
+            do {
                 q0 = statistics.getPrepareStatementCount();
                 t0 = System.nanoTime();
-                List<Opportunity> chunk = em.createQuery(
-                                "select o from Opportunity o join fetch o.currentVersion "
-                                        + "where o.id < :lastId order by o.id desc", Opportunity.class)
-                        .setParameter("lastId", lastId)
-                        .setMaxResults(FULL_CHUNK)
-                        .getResultList();
-                if (chunk.isEmpty()) {
+                refs = opportunityRepository.findAllCurrentVersionRefs(
+                        PageRequest.of(page++, FULL_CHUNK, Sort.by(Sort.Direction.ASC, "id")));
+                List<Long> versionIds = refs.getContent().stream().map(OpportunityVersionRef::versionId).toList();
+                if (versionIds.isEmpty()) {
                     run.dbNanos += System.nanoTime() - t0;
                     run.dbQueries += statistics.getPrepareStatementCount() - q0;
                     break;
                 }
-                List<Long> versionIds = chunk.stream().map(o -> o.getCurrentVersion().getId()).toList();
-                Map<Long, List<EligibilityConditionInput>> conditions = conditionRepository.findByVersionIdIn(versionIds).stream()
-                        .collect(Collectors.groupingBy(c -> c.getVersion().getId(),
-                                Collectors.mapping(EligibilityConditionInput::from, Collectors.toList())));
-                Map<Long, List<String>> residence = opportunityRegionRepository.findByVersionIdIn(versionIds).stream()
-                        .filter(r -> r.getRegionRole() == RegionRole.RESIDENCE)
-                        .collect(Collectors.groupingBy(r -> r.getVersion().getId(),
-                                Collectors.mapping(r -> r.getRegion().getRegionCode(), Collectors.toList())));
-                Map<Long, List<ApplicationPeriod>> periods = windowRepository.findByVersionIdIn(versionIds).stream()
-                        .collect(Collectors.groupingBy(w -> w.getVersion().getId(),
-                                Collectors.mapping(w -> new ApplicationPeriod(w.getPeriodType(), w.getStartDate(),
-                                        w.getEndDate(), w.getValidationStatus(), w.getPeriodText()), Collectors.toList())));
+                Map<Long, List<EligibilityConditionInput>> conditions = conditionRepository.findRowsByVersionIdIn(versionIds).stream()
+                        .collect(Collectors.groupingBy(ConditionRow::versionId, Collectors.mapping(
+                                c -> new EligibilityConditionInput(c.conditionType(), c.requirementType(), c.conditionField(),
+                                        c.expression(), c.validationStatus()),
+                                Collectors.toList())));
+                Map<Long, List<String>> residence = opportunityRegionRepository
+                        .findCodesByVersionIdInAndRole(versionIds, RegionRole.RESIDENCE).stream()
+                        .collect(Collectors.groupingBy(RegionCodeRow::versionId,
+                                Collectors.mapping(RegionCodeRow::regionCode, Collectors.toList())));
+                Map<Long, List<ApplicationPeriod>> periods = windowRepository.findRowsByVersionIdIn(versionIds).stream()
+                        .collect(Collectors.groupingBy(ApplicationWindowRow::versionId, Collectors.mapping(
+                                w -> new ApplicationPeriod(w.periodType(), w.startDate(), w.endDate(),
+                                        w.validationStatus(), w.periodText()),
+                                Collectors.toList())));
                 run.dbNanos += System.nanoTime() - t0;
                 run.dbQueries += statistics.getPrepareStatementCount() - q0;
 
                 q0 = statistics.getPrepareStatementCount();
                 t0 = System.nanoTime();
                 RegionIndex regionIndex = regionDirectory.index();
+                EligibilityProfileInput input = EligibilityProfileInput.from(profile);
                 for (Long versionId : versionIds) {
-                    EligibilityEvaluation evaluation = engine.evaluate(profile,
+                    EligibilityEvaluation evaluation = engine.evaluate(input,
                             conditions.getOrDefault(versionId, List.of()),
                             residence.getOrDefault(versionId, List.of()),
                             regionIndex, TODAY);
@@ -343,13 +374,83 @@ class EligibilityBenchmarkTest {
                 }
                 run.engineNanos += System.nanoTime() - t0;
                 run.engineQueries += statistics.getPrepareStatementCount() - q0;
-
-                lastId = chunk.get(chunk.size() - 1).getId();
                 em.clear();
-            }
+            } while (refs.hasNext());
         });
         assertThat(run.evaluated).isEqualTo(size);
         return run;
+    }
+
+    /**
+     * 판정 결과 저장·재사용 (운영 코드 그대로).
+     * cold: 저장된 결과를 지운 뒤 refreshAll → 전체 판정 + 저장 (삭제 시간은 제외)
+     * warm: 모두 최신인 상태에서 refreshAll → 최신 여부 확인만
+     * candidates: 추천 후보 5건 getEligibilities (최신 결과 + 기회 요약)
+     * statusPage: findByStatuses(ELIGIBLE, POSSIBLY_ELIGIBLE) 0페이지 20건 (refreshAll warm 포함)
+     */
+    private ResultStoreResult measureResultStore(int size, int coldIterations, int warmIterations) {
+        List<Double> cold = new ArrayList<>();
+        long coldQueries = 0;
+        for (int i = 0; i < coldIterations + 1; i++) {
+            jdbc.update("DELETE FROM eligibility_results WHERE user_id = ?", USER_ID);
+            long q0 = statistics.getPrepareStatementCount();
+            long t0 = System.nanoTime();
+            int judged = resultService.refreshAll(USER_ID, NOW);
+            long t1 = System.nanoTime();
+            assertThat(judged).isEqualTo(size);
+            if (i > 0) {  // 첫 회는 워밍업
+                cold.add((t1 - t0) / 1_000_000.0);
+                coldQueries = statistics.getPrepareStatementCount() - q0;
+            }
+        }
+        int savedRows = count("SELECT count(*) FROM eligibility_results WHERE user_id = " + USER_ID);
+
+        List<Double> warm = new ArrayList<>();
+        long warmQueries = 0;
+        for (int i = 0; i < warmIterations + 3; i++) {
+            long q0 = statistics.getPrepareStatementCount();
+            long t0 = System.nanoTime();
+            int judged = resultService.refreshAll(USER_ID, NOW);
+            long t1 = System.nanoTime();
+            assertThat(judged).isZero();
+            if (i >= 3) {
+                warm.add((t1 - t0) / 1_000_000.0);
+                warmQueries = statistics.getPrepareStatementCount() - q0;
+            }
+        }
+
+        List<Long> candidateIds = jdbc.queryForList(
+                "SELECT id FROM opportunities WHERE current_version_id IS NOT NULL ORDER BY id DESC LIMIT 5", Long.class);
+        List<Double> candidates = new ArrayList<>();
+        long candidateQueries = 0;
+        for (int i = 0; i < warmIterations + 3; i++) {
+            long q0 = statistics.getPrepareStatementCount();
+            long t0 = System.nanoTime();
+            List<EligibilitySnapshot> snapshots = provider.getEligibilities(USER_ID, candidateIds);
+            long t1 = System.nanoTime();
+            assertThat(snapshots).hasSize(candidateIds.size());
+            if (i >= 3) {
+                candidates.add((t1 - t0) / 1_000_000.0);
+                candidateQueries = statistics.getPrepareStatementCount() - q0;
+            }
+        }
+
+        List<Double> statusPage = new ArrayList<>();
+        long statusPageQueries = 0;
+        for (int i = 0; i < warmIterations + 3; i++) {
+            long q0 = statistics.getPrepareStatementCount();
+            long t0 = System.nanoTime();
+            EligibilitySnapshotPage page = provider.findByStatuses(USER_ID,
+                    List.of(EligibilityStatus.ELIGIBLE, EligibilityStatus.POSSIBLY_ELIGIBLE), 0, 20);
+            long t1 = System.nanoTime();
+            assertThat(page.items().size()).isLessThanOrEqualTo(20);
+            if (i >= 3) {
+                statusPage.add((t1 - t0) / 1_000_000.0);
+                statusPageQueries = statistics.getPrepareStatementCount() - q0;
+            }
+        }
+        return new ResultStoreResult(Stat.of(cold), coldQueries, Stat.of(warm), warmQueries,
+                Stat.of(candidates), candidateQueries, Stat.of(statusPage), statusPageQueries, savedRows);
     }
 
     // ───────────────────────── 데이터 준비 ─────────────────────────
@@ -526,6 +627,8 @@ class EligibilityBenchmarkTest {
     }
 
     private void clearClones() {
+        // 복제본 ID를 다음 데이터셋에서 다시 쓰므로 저장된 판정 결과도 지운다 (남아 있으면 최신으로 오인)
+        jdbc.update("DELETE FROM eligibility_results WHERE opportunity_id >= ?", CLONE_BASE);
         jdbc.update("UPDATE opportunities SET current_version_id = NULL WHERE id >= ?", CLONE_BASE);
         jdbc.update("DELETE FROM opportunity_regions WHERE version_id >= ?", CLONE_BASE);
         jdbc.update("DELETE FROM application_windows WHERE version_id >= ?", CLONE_BASE);
@@ -581,7 +684,7 @@ class EligibilityBenchmarkTest {
             List<String> residence = opportunityRegionRepository.findByVersionId(versionId).stream()
                     .filter(r -> r.getRegionRole() == RegionRole.RESIDENCE)
                     .map(r -> r.getRegion().getRegionCode()).toList();
-            EligibilityEvaluation evaluation = engine.evaluate(profile, conditions, residence, regionDirectory.index(), TODAY);
+            EligibilityEvaluation evaluation = engine.evaluate(EligibilityProfileInput.from(profile), conditions, residence, regionDirectory.index(), TODAY);
             List<String> result = new ArrayList<>();
             result.add("FINAL=" + evaluation.status());
             evaluation.conditions().stream()
@@ -594,9 +697,10 @@ class EligibilityBenchmarkTest {
 
     // ───────────────────────── 보고 ─────────────────────────
 
-    private String report(List<DatasetResult> results, int warmup, int iterations, int fullWarmup, int fullIterations) {
+    private String report(List<DatasetResult> results, int warmup, int iterations, int fullWarmup, int fullIterations,
+                          int coldIterations, int warmIterations) {
         StringBuilder sb = new StringBuilder();
-        sb.append("# 판정 성능 측정 결과 (조회 시점 계산)\n\n");
+        sb.append("# 판정 성능 측정 결과 (조회 시점 계산 + 판정 결과 저장)\n\n");
         sb.append("## 실행 환경\n\n");
         sb.append("| 항목 | 값 |\n|---|---|\n");
         Runtime rt = Runtime.getRuntime();
@@ -605,11 +709,13 @@ class EligibilityBenchmarkTest {
         row(sb, "OS", System.getProperty("os.name") + " " + System.getProperty("os.version") + " (" + System.getProperty("os.arch") + ")");
         row(sb, "CPU 코어(JVM 인식)", String.valueOf(rt.availableProcessors()));
         row(sb, "최대 힙", (rt.maxMemory() / 1024 / 1024) + " MB");
+        BenchmarkEnvironment.describe(jdbc, resultService).forEach((k, v) -> row(sb, k, v));
         row(sb, "PostgreSQL", jdbc.queryForObject("SELECT version()", String.class));
         row(sb, "Spring Boot", SpringBootVersion.getVersion());
         row(sb, "Hibernate", org.hibernate.Version.getVersionString());
         row(sb, "목록 판정 반복", "워밍업 " + warmup + "회 + 측정 " + iterations + "회");
         row(sb, "전체 판정 반복", "워밍업 " + fullWarmup + "회 + 측정 " + fullIterations + "회");
+        row(sb, "판정 결과 저장 반복", "첫 refreshAll 워밍업 1회 + 측정 " + coldIterations + "회, 나머지 워밍업 3회 + 측정 " + warmIterations + "회");
         row(sb, "기준 시각", NOW.toString());
         row(sb, "데이터 구성", "MIXED = 단순 5 : 복합 3 : 불명확 2 (ID 순으로 섞음)");
         sb.append("\n시간 단위는 ms, 쿼리 수는 호출 1회당 prepared statement 수입니다.\n\n");
@@ -631,7 +737,7 @@ class EligibilityBenchmarkTest {
             }
         }
 
-        sb.append("\n## 전체 판정 (한 사용자 × 전체 정책, 1,000건 청크)\n\n");
+        sb.append("\n## 전체 판정 (한 사용자 × 전체 정책, 저장 없음, 운영과 같은 Projection 조회·1,000건 페이지)\n\n");
         sb.append("| 정책 수 | 복잡도 | DB p50 | DB p95 | 엔진 p50 | 엔진 p95 | 합계 p50 | 합계 p95 | DB 쿼리 수 | 엔진 구간 쿼리 수 |\n");
         sb.append("|---|---|---|---|---|---|---|---|---|---|\n");
         for (DatasetResult r : results) {
@@ -639,6 +745,21 @@ class EligibilityBenchmarkTest {
             sb.append(String.format("| %d | %s | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %d | %d |%n",
                     r.size(), r.complexity(), f.db().p50(), f.db().p95(), f.engine().p50(), f.engine().p95(),
                     f.total().p50(), f.total().p95(), f.dbQueries(), f.engineQueries()));
+        }
+
+        sb.append("\n## 판정 결과 저장·재사용 (EligibilityResultService, EligibilityProvider)\n\n");
+        sb.append("첫 refreshAll = 저장된 결과 없음 → 전체 판정·저장. 다시 refreshAll = 모두 최신 → 판정 0건. ");
+        sb.append("후보 5건 = getEligibilities(최신 결과 + 기회 요약). 상태 필터 = findByStatuses 0페이지 20건(refreshAll 포함).\n\n");
+        sb.append("| 정책 수 | 복잡도 | 저장 행 | 첫 refreshAll p50 | p95 | 쿼리 | 다시 refreshAll p50 | p95 | 쿼리 | 후보 5건 p50 | p95 | 쿼리 | 상태 필터 p50 | p95 | 쿼리 |\n");
+        sb.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
+        for (DatasetResult r : results) {
+            ResultStoreResult x = r.store();
+            sb.append(String.format("| %d | %s | %d | %.2f | %.2f | %d | %.2f | %.2f | %d | %.2f | %.2f | %d | %.2f | %.2f | %d |%n",
+                    r.size(), r.complexity(), x.savedRows(),
+                    x.cold().p50(), x.cold().p95(), x.coldQueries(),
+                    x.warm().p50(), x.warm().p95(), x.warmQueries(),
+                    x.candidates().p50(), x.candidates().p95(), x.candidateQueries(),
+                    x.statusPage().p50(), x.statusPage().p95(), x.statusPageQueries()));
         }
         return sb.toString();
     }
