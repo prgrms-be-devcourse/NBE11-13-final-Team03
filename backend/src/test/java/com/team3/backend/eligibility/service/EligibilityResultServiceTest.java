@@ -23,6 +23,9 @@ import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.AopTestUtils;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDate;
@@ -63,6 +66,8 @@ class EligibilityResultServiceTest {
     private YouthPolicyNormalizationService normalizationService;
     @Autowired
     private RegionDirectory regionDirectory;
+    @Autowired
+    private JdbcTemplate jdbc;
     @PersistenceContext
     private EntityManager em;
 
@@ -178,12 +183,75 @@ class EligibilityResultServiceTest {
     }
 
     @Test
+    void 규칙_버전이_바뀐_결과는_다시_판정해_같은_행을_갱신한다() {
+        normalizePolicy("R2026-1", "11680", "34");
+        normalizePolicy("R2026-2", "11440", "34");
+        persistProfile(gangnam);
+        service.refreshAll(USER, NOW);
+        List<Long> ids = jdbc.queryForList("SELECT id FROM eligibility_results ORDER BY opportunity_id", Long.class);
+
+        jdbc.update("UPDATE eligibility_results SET rule_version = '0'");
+
+        assertThat(service.refreshAll(USER, NOW)).isEqualTo(2);
+        assertThat(jdbc.queryForList("SELECT id FROM eligibility_results ORDER BY opportunity_id", Long.class))
+                .isEqualTo(ids);
+        assertThat(jdbc.queryForList("SELECT DISTINCT rule_version FROM eligibility_results", String.class))
+                .containsExactly(EligibilityResultService.RULE_VERSION);
+    }
+
+    @Test
+    void 저장_묶음_크기와_상관없이_같은_결과를_저장한다() {
+        normalizePolicy("R2026-1", "11680", "34");
+        normalizePolicy("R2026-2", "11440", "34");
+        normalizePolicy("R2026-3", "11680", "39");
+        persistProfile(gangnam);
+        service.refreshAll(USER, NOW);
+        List<Map<String, Object>> byDefault = dumpResults();
+
+        jdbc.update("DELETE FROM eligibility_results");
+        EligibilityResultService target = AopTestUtils.getTargetObject(service);
+        ReflectionTestUtils.setField(target, "writeBatchSize", 1);
+        try {
+            assertThat(service.refreshAll(USER, NOW)).isEqualTo(3);
+        } finally {
+            ReflectionTestUtils.setField(target, "writeBatchSize", 1_000);
+        }
+        assertThat(dumpResults()).isEqualTo(byDefault);
+    }
+
+    @Test
+    void 같은_트랜잭션에서_다시_최신화하면_새_결과를_돌려준다() {
+        Long gangnamPolicy = normalizePolicy("R2026-1", "11680", "34");
+        persistProfile(gangnam);
+        assertThat(service.refresh(USER, List.of(gangnamPolicy), NOW)).singleElement()
+                .extracting(EligibilityResult::getEligibilityStatus).isEqualTo(EligibilityStatus.ELIGIBLE);
+
+        em.createQuery("update EligibilityProfile p set p.residenceRegion = :region, "
+                        + "p.profileVersion = p.profileVersion + 1 where p.userId = :userId")
+                .setParameter("region", em.getReference(Region.class, mapo.getRegionCode()))
+                .setParameter("userId", USER)
+                .executeUpdate();
+        em.clear();
+
+        assertThat(service.refresh(USER, List.of(gangnamPolicy), NOW)).singleElement().satisfies(r -> {
+            assertThat(r.getEligibilityStatus()).isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
+            assertThat(r.getProfileVersion()).isEqualTo(2L);
+        });
+    }
+
+    @Test
     void 다음_생일은_오늘이_생일이면_내년이다() {
         LocalDate birth = LocalDate.of(1998, 5, 15);
         assertThat(EligibilityResultService.nextBirthday(birth, LocalDate.of(2026, 5, 14))).isEqualTo(LocalDate.of(2026, 5, 15));
         assertThat(EligibilityResultService.nextBirthday(birth, LocalDate.of(2026, 5, 15))).isEqualTo(LocalDate.of(2027, 5, 15));
         assertThat(EligibilityResultService.nextBirthday(LocalDate.of(2000, 2, 29), LocalDate.of(2026, 3, 1)))
                 .isEqualTo(LocalDate.of(2027, 2, 28));
+    }
+
+    private List<Map<String, Object>> dumpResults() {
+        return jdbc.queryForList("SELECT opportunity_id, opportunity_version_id, profile_version, rule_version, "
+                + "eligibility_status, reason, condition_results::text AS c, valid_until, evaluated_at "
+                + "FROM eligibility_results ORDER BY opportunity_id");
     }
 
     private EligibilityStatus statusOf(Long opportunityId) {
