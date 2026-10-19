@@ -2,6 +2,7 @@ package com.team3.backend.eligibility.service;
 
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
 import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
+import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.dto.EligibilityProfilePatchRequest;
 import com.team3.backend.eligibility.dto.EligibilityProfileResponse;
 import com.team3.backend.eligibility.dto.EligibilityProfileUpdateRequest;
@@ -20,6 +21,7 @@ import java.util.Optional;
 
 import static com.team3.backend.eligibility.exception.EligibilityErrorCode.INVALID_REGION_CODE;
 import static com.team3.backend.eligibility.exception.EligibilityErrorCode.PROFILE_NOT_FOUND;
+import static com.team3.backend.eligibility.exception.EligibilityErrorCode.PROFILE_ALREADY_EXISTS;
 
 /**
  * GET·PUT /api/users/me/eligibility-profile.
@@ -38,11 +40,28 @@ public class EligibilityProfileService {
     private final RegionDirectory regionDirectory;
     private final EligibilityProfileValidator validator;
     private final ApplicationEventPublisher eventPublisher;
+    private final EligibilityResultRepository resultRepository;
 
     public EligibilityProfileResponse get(Long userId) {
         return profileRepository.findByUserId(userId)
                 .map(EligibilityProfileResponse::from)
                 .orElseThrow(() -> new BusinessException(PROFILE_NOT_FOUND));
+    }
+
+    /**
+     * 맞춤 조건 최초 등록.
+     * 이미 등록된 프로필이 있으면 기존 값을 덮어쓰지 않고 409 Conflict를 반환한다.
+     */
+    @Transactional
+    public EligibilityProfileResponse create(
+            Long userId,
+            EligibilityProfileUpdateRequest request
+    ) {
+        if (profileRepository.findByUserId(userId).isPresent()) {
+            throw new BusinessException(PROFILE_ALREADY_EXISTS);
+        }
+
+        return put(userId, request);
     }
 
     /**
@@ -92,5 +111,18 @@ public class EligibilityProfileService {
     private Region findRegion(String code) {
         return regionRepository.findById(code)
                 .orElseThrow(() -> new BusinessException(INVALID_REGION_CODE, "지역 사전에 없는 코드입니다: " + code));
+    }
+
+    /**
+     * 사용자의 맞춤 조건과 해당 조건으로 계산한 판정 결과를 모두 삭제한다.
+     */
+    @Transactional
+    public void delete(Long userId) {
+        if (profileRepository.findByUserId(userId).isEmpty()) {
+            throw new BusinessException(PROFILE_NOT_FOUND);
+        }
+
+        resultRepository.deleteAllByUserId(userId);
+        profileRepository.deleteAllByUserId(userId);
     }
 }

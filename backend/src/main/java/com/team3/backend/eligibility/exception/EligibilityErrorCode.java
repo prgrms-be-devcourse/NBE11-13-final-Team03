@@ -38,6 +38,11 @@ public enum EligibilityErrorCode implements ErrorCode {
             HttpStatus.BAD_REQUEST,
             "ELIGIBILITY_006",
             "페이지 요청값이 올바르지 않습니다."
+    ),
+    PROFILE_ALREADY_EXISTS(
+            HttpStatus.CONFLICT,
+            "ELIGIBILITY_007",
+            "이미 등록된 맞춤 조건이 있습니다."
     );
 
     private final HttpStatus status;
