@@ -31,7 +31,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -40,6 +39,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
@@ -50,19 +54,30 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-/** 외부 API만 로컬 HTTP 서버로 대체한다. 나머지는 실제 Spring 빈과 전용 PostgreSQL을 사용한다. */
-@EnabledIfEnvironmentVariable(named = "YON_TEST_DATABASE_URL", matches = "jdbc:postgresql:.*")
+/** 외부 API는 로컬 HTTP 서버, DB는 테스트 전용 PostgreSQL 컨테이너를 사용한다. */
+@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@ActiveProfiles("test")
 @SpringBootTest(properties = {
+        "app.scheduling.enabled=false",
         "collection.schedule.enabled=false",
-        "spring.datasource.url=${YON_TEST_DATABASE_URL}",
-        "spring.datasource.username=${YON_TEST_DATABASE_USERNAME:yon_test}",
-        "spring.datasource.password=${YON_TEST_DATABASE_PASSWORD:}",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.jpa.open-in-view=false"
 })
 @AutoConfigureMockMvc
 @WithMockUser(authorities = "ADMIN")
 class ManualSyncControllerIntegrationTests {
+    @Container
+    static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
+
+    @DynamicPropertySource
+    static void databaseProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.datasource.driver-class-name", postgres::getDriverClassName);
+    }
+
     private static final String PATH = "/api/admin/collection/syncs";
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
     private static final java.util.concurrent.ExecutorService HTTP_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();

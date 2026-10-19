@@ -33,8 +33,9 @@ class RawRecordDtoTests {
                 () -> new RawRecordSaveRequest(0L, "id", "hash", payload, observedAt));
         assertThrows(IllegalArgumentException.class,
                 () -> new RawRecordSaveRequest(1L, " ", "hash", payload, observedAt));
-        assertThrows(IllegalArgumentException.class,
+        assertDoesNotThrow(
                 () -> new RawRecordSaveRequest(1L, "id", " ", payload, observedAt));
+        assertDoesNotThrow(() -> new RawRecordSaveRequest(1L, "id", payload, observedAt));
         assertThrows(IllegalArgumentException.class,
                 () -> new RawRecordSaveRequest(1L, "id", "hash", mapper.nullNode(), observedAt));
         assertThrows(NullPointerException.class,
