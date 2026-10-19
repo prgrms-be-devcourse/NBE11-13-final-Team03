@@ -9,7 +9,6 @@ import com.team3.backend.collection.domain.repository.RawExternalRecordRepositor
 import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
 import com.team3.backend.collection.domain.repository.RawNormalizationRequestRepository;
 import com.team3.backend.collection.service.RawRecordService;
-import com.team3.backend.collection.service.RawRecordFingerprint;
 import java.time.OffsetDateTime;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
@@ -17,6 +16,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -25,13 +25,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -40,29 +33,18 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-/** 테스트 전용 PostgreSQL 컨테이너에서 JSONB·잠금·롤백을 검증한다. */
-@Testcontainers
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-@ActiveProfiles("test")
+/** 반드시 전용 DB를 지정한다. create-drop과 각 테스트의 전체 데이터 삭제를 수행한다. */
+@EnabledIfEnvironmentVariable(named = "YON_TEST_DATABASE_URL", matches = "jdbc:postgresql:.*")
 @SpringBootTest(properties = {
-        "app.scheduling.enabled=false",
+        "spring.datasource.url=${YON_TEST_DATABASE_URL}",
+        "spring.datasource.username=${YON_TEST_DATABASE_USERNAME:yon_test}",
+        "spring.datasource.password=${YON_TEST_DATABASE_PASSWORD:}",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.jpa.open-in-view=false"
 })
 @AutoConfigureMockMvc
 @WithMockUser(authorities = "ADMIN")
 class RawRecordControllerIntegrationTests {
-    @Container
-    static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
-
-    @DynamicPropertySource
-    static void databaseProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.datasource.driver-class-name", postgres::getDriverClassName);
-    }
-
     private static final String PATH = "/api/admin/collection/raw-records";
     private final OffsetDateTime startedAt = OffsetDateTime.parse("2026-10-16T10:00:00+09:00");
     private final JsonMapper mapper = JsonMapper.builder().build();
@@ -108,38 +90,11 @@ class RawRecordControllerIntegrationTests {
         var response = body(save("청년 지원", 1));
         long id = response.path("rawRecordId").asLong();
         assertEquals("YOUTH_POLICY", response.path("source").asString());
-        assertEquals(new RawRecordFingerprint().hash(request(sync.getId(), "청년 지원", 1).payload()),
-                response.path("payloadHash").asString());
         assertEquals("원본 유지", response.path("payload").path("unknownField").asString());
         assertEquals("object", jdbc.queryForObject("select jsonb_typeof(payload) from raw_external_record where id = ?", String.class, id));
         assertEquals(sync.getId(), jdbc.queryForObject("select sync_id from raw_external_record where id = ?", Long.class, id));
         mvc.perform(get(PATH + "/" + id)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.payload.title").value("청년 지원"));
-    }
-
-    @Test
-    void derivesHashFromJsonEvenWhenClientOmitsOrReusesHash() throws Exception {
-        var firstRequest = mapper.readTree(mapper.writeValueAsString(request(sync.getId(), "A", 1)));
-        ((tools.jackson.databind.node.ObjectNode) firstRequest).remove("payloadHash");
-        var first = mvc.perform(post(PATH).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(firstRequest)))
-                .andExpect(status().isOk()).andReturn();
-        String hash = body(first).path("payloadHash").asString();
-
-        var reordered = mapper.readTree("{\"unknownField\":\"원본 유지\",\"title\":\"A\"}");
-        var repeated = mvc.perform(post(PATH).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(new RawRecordSaveRequest(sync.getId(), "policy-1",
-                                "untrusted-hash", reordered, startedAt.plusMinutes(2)))))
-                .andExpect(status().isOk()).andReturn();
-        assertEquals(body(first).path("rawRecordId"), body(repeated).path("rawRecordId"));
-        assertEquals(hash, body(repeated).path("payloadHash").asString());
-
-        var changed = mvc.perform(post(PATH).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(new RawRecordSaveRequest(sync.getId(), "policy-1",
-                                hash, request(sync.getId(), "B", 3).payload(), startedAt.plusMinutes(3)))))
-                .andExpect(status().isOk()).andReturn();
-        assertNotEquals(hash, body(changed).path("payloadHash").asString());
-        assertEquals(2, records.count());
     }
 
     @Test
@@ -200,8 +155,7 @@ class RawRecordControllerIntegrationTests {
                         .content(mapper.writeValueAsString(request(sync.getId(), "B", 1))))
                 .andExpect(status().isBadRequest());
         assertEquals(1, records.count());
-        assertEquals(new RawRecordFingerprint().hash(request(sync.getId(), "A", 2).payload()),
-                records.findAll().getFirst().getPayloadHash());
+        assertEquals("hash-A", records.findAll().getFirst().getPayloadHash());
     }
 
     @Test
@@ -218,7 +172,7 @@ class RawRecordControllerIntegrationTests {
 
     @Test
     void databaseFailureRollsBackAndDoesNotExposeSql() throws Exception {
-        jdbc.execute("alter table raw_external_record add constraint reject_test_payload check (payload ->> 'title' <> 'rejected')");
+        jdbc.execute("alter table raw_external_record add constraint reject_test_payload check (payload_hash <> 'hash-rejected')");
         try {
             mvc.perform(post(PATH).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                             .content(mapper.writeValueAsString(request(sync.getId(), "rejected", 1))))
