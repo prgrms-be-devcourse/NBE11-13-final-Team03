@@ -1,7 +1,6 @@
 package com.team3.backend.eligibility.service;
 
 import com.team3.backend.eligibility.domain.entity.*;
-import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.dto.EligibilityProfilePatchRequest;
 import com.team3.backend.eligibility.dto.EligibilityProfileResponse;
 import com.team3.backend.eligibility.dto.EligibilityProfileUpdateRequest;
@@ -26,8 +25,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -87,9 +84,6 @@ class EligibilityProfileServiceTest {
 
     @Autowired
     private RegionDirectory regionDirectory;
-
-    @Autowired
-    private EligibilityResultRepository resultRepository;
 
     @PersistenceContext
     private EntityManager em;
@@ -306,105 +300,8 @@ class EligibilityProfileServiceTest {
     }
 
     @Test
-    void 맞춤_조건을_최초_등록한다() {
-        EligibilityProfileResponse created =
-                service.create(
-                        1L,
-                        request("1168000000", null)
-                );
-
-        assertThat(created.residenceRegionCode())
-                .isEqualTo("1168000000");
-        assertThat(profileVersion(1L))
-                .isEqualTo(1L);
-    }
-
-    @Test
-    void 이미_맞춤_조건이_있으면_최초_등록에_실패한다() {
-        service.create(
-                1L,
-                request("1168000000", null)
-        );
-
-        assertThatThrownBy(() ->
-                service.create(
-                        1L,
-                        request("1144000000", null)
-                )
-        )
-                .isInstanceOf(BusinessException.class)
-                .extracting("errorCode")
-                .isEqualTo(
-                        EligibilityErrorCode.PROFILE_ALREADY_EXISTS
-                );
-
-        assertThat(
-                service.get(1L).residenceRegionCode()
-        ).isEqualTo("1168000000");
-    }
-
-    @Test
-    void 맞춤_조건을_삭제하면_기존_판정_결과도_삭제한다() {
-        service.create(
-                1L,
-                request("1168000000", null)
-        );
-
-        resultRepository.saveAndFlush(
-                EligibilityResult.builder()
-                        .userId(1L)
-                        .opportunityId(100L)
-                        .opportunityVersionId(200L)
-                        .profileVersion(1L)
-                        .ruleVersion("v1")
-                        .eligibilityStatus(
-                                EligibilityStatus.ELIGIBLE
-                        )
-                        .reason("모든 조건 충족")
-                        .conditionResults(List.of())
-                        .validUntil(
-                                LocalDate.now().plusDays(1)
-                        )
-                        .evaluatedAt(LocalDateTime.now())
-                        .build()
-        );
-
-        service.delete(1L);
-
-        em.flush();
-        em.clear();
-
-        assertThatThrownBy(() -> service.get(1L))
-                .isInstanceOf(BusinessException.class)
-                .extracting("errorCode")
-                .isEqualTo(
-                        EligibilityErrorCode.PROFILE_NOT_FOUND
-                );
-
-        assertThat(
-                resultRepository
-                        .findByUserIdAndOpportunityIdIn(
-                                1L,
-                                List.of(100L)
-                        )
-        ).isEmpty();
-    }
-
-    @Test
-    void 맞춤_조건이_없으면_삭제에_실패한다() {
-        assertThatThrownBy(() ->
-                service.delete(99L)
-        )
-                .isInstanceOf(BusinessException.class)
-                .extracting("errorCode")
-                .isEqualTo(
-                        EligibilityErrorCode.PROFILE_NOT_FOUND
-                );
-    }
-
-    @Test
     void PATCH에서_필수_필드에_null을_보내면_수정에_실패한다() {
-        service.create(
+        service.put(
                 1L,
                 request("1168000000", null)
         );
