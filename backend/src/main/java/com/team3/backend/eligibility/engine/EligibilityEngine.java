@@ -27,6 +27,8 @@ import static com.team3.backend.eligibility.domain.entity.ConditionMatchResult.*
  * - 조건이 하나도 없으면 UNKNOWN. 정규화는 버전마다 연령·지역·코드·소득 조건 행을 항상 만들고 "제한 없음"도 NO_LIMIT 행으로 저장하므로,
  *   조건이 없다는 것은 제한이 없다는 뜻이 아니라 정규화 데이터 누락이다.
  * - 사용자 값이 없거나 "모름"이면 USER_INFO_MISSING.
+ * - 직업훈련: 국민내일배움카드 필요 과정(TRAINING_CARD CARD_REQUIRED)은 카드 발급 상태로, 1회 한정 과정
+ *   (PARTICIPATION_HISTORY ONCE_ONLY, 예: KDT)은 참여 이력으로 판정한다. 카드 미발급·신청 중은 발급하면 되므로 불충족이 아니라 확인 필요.
  * 기준일(today)은 한국 시간 날짜로 넘긴다. 만 나이는 기준일로 계산한다.
  * 프로필은 엔티티가 아닌 EligibilityProfileInput으로 받는다.
  */
@@ -117,6 +119,8 @@ public class EligibilityEngine {
             case REGION -> region(c, p, regionCodes, index);
             case INCOME -> income(c, p);
             case MARITAL, EMPLOYMENT, EDUCATION, SPECIALIZATION, SPECIAL_TARGET -> code(c, p);
+            case TRAINING_CARD -> trainingCard(c, p);
+            case PARTICIPATION_HISTORY -> participation(c, p);
             default -> result(c, null, null, null, DATA_UNCLEAR, "판정 규칙이 없는 조건입니다.");
         };
     }
@@ -239,6 +243,39 @@ public class EligibilityEngine {
         boolean ok = within(actual, decimal(e.get("min")), decimal(e.get("max")),
                 !Boolean.FALSE.equals(e.get("minInclusive")), !Boolean.FALSE.equals(e.get("maxInclusive")));
         return result(c, "RANGE", e, actual, ok ? MATCHED : NOT_MATCHED, ok ? "소득 조건을 충족합니다." : "소득 조건을 충족하지 않습니다.");
+    }
+
+    /** 국민내일배움카드가 필요한 과정. 미발급·신청 중은 개강 전에 발급받으면 되므로 불충족으로 보지 않는다 */
+    private ConditionEvaluation trainingCard(EligibilityConditionInput c, EligibilityProfileInput p) {
+        if (!"CARD_REQUIRED".equals(status(c))) {
+            return result(c, null, c.expression(), null, DATA_UNCLEAR, "판정할 수 없는 훈련 자격 조건입니다.");
+        }
+        TrainingCardStatus card = p.trainingCardStatus() == null ? TrainingCardStatus.UNKNOWN : p.trainingCardStatus();
+        return switch (card) {
+            case ISSUED -> result(c, "EQ", "ISSUED", card.name(), MATCHED, "국민내일배움카드를 발급받았습니다.");
+            case APPLYING -> result(c, "EQ", "ISSUED", card.name(), CHECK_REQUIRED,
+                    "국민내일배움카드 발급이 끝나야 수강할 수 있습니다. 개강 전 발급 여부를 확인해야 합니다.");
+            case NOT_ISSUED -> result(c, "EQ", "ISSUED", card.name(), CHECK_REQUIRED,
+                    "국민내일배움카드 발급이 필요합니다. 발급 대상인지 확인해야 합니다.");
+            case UNKNOWN -> result(c, "EQ", "ISSUED", null, USER_INFO_MISSING, "국민내일배움카드 발급 상태 정보가 필요합니다.");
+        };
+    }
+
+    /** 1회만 지원하는 훈련(예: KDT). 수강 중·수료는 이미 지원받은 것으로 보고, 중도탈락은 재참여 규정을 확인해야 한다 */
+    private ConditionEvaluation participation(EligibilityConditionInput c, EligibilityProfileInput p) {
+        Map<String, Object> e = c.expression();
+        if (!"ONCE_ONLY".equals(status(c)) || !"KDT".equals(e.get("program"))) {
+            return result(c, null, e, null, DATA_UNCLEAR, "판정할 수 없는 참여 이력 조건입니다.");
+        }
+        TrainingParticipation history = p.kdtParticipation() == null ? TrainingParticipation.UNKNOWN : p.kdtParticipation();
+        return switch (history) {
+            case NONE -> result(c, "EQ", "NONE", history.name(), MATCHED, "K-디지털 트레이닝 참여 이력이 없습니다.");
+            case IN_PROGRESS, COMPLETED -> result(c, "EQ", "NONE", history.name(), NOT_MATCHED,
+                    "K-디지털 트레이닝은 1회만 지원되며 이미 참여한 이력이 있습니다.");
+            case DROPPED_OUT -> result(c, "EQ", "NONE", history.name(), CHECK_REQUIRED,
+                    "중도탈락 후 다시 참여할 수 있는지 확인해야 합니다.");
+            case UNKNOWN -> result(c, "EQ", "NONE", null, USER_INFO_MISSING, "K-디지털 트레이닝 참여 이력 정보가 필요합니다.");
+        };
     }
 
     // ── 사용자 값 ──

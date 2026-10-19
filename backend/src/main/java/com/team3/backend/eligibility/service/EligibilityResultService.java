@@ -44,8 +44,9 @@ import static com.team3.backend.eligibility.exception.EligibilityErrorCode.PROFI
 @Transactional
 public class EligibilityResultService {
 
-    /** 판정 규칙 버전. 판정 엔진 규칙이 바뀌면 올린다 → 기존 결과가 모두 오래된 것이 된다 */
-    public static final String RULE_VERSION = "1";
+    /** 판정 규칙 버전. 판정 엔진 규칙이 바뀌면 올린다 → 기존 결과가 모두 오래된 것이 된다
+     *  1 → 2 (2026-10-19): 국민내일배움카드(TRAINING_CARD)·K-디지털 트레이닝 1회 한정(PARTICIPATION_HISTORY) 판정 추가 */
+    public static final String RULE_VERSION = "2";
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CHUNK = 1_000;

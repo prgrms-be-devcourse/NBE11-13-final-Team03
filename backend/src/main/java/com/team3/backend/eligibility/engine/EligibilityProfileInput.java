@@ -26,7 +26,9 @@ public record EligibilityProfileInput(
         AnswerStatus studentLoanBracketStatus,
         Integer studentLoanBracket,
         Income personalIncome,
-        Income householdIncome
+        Income householdIncome,
+        TrainingCardStatus trainingCardStatus,
+        TrainingParticipation kdtParticipation
 ) {
 
     /** 개인·가구 소득 응답 (IncomeAnswer와 같은 값) */
@@ -58,6 +60,8 @@ public record EligibilityProfileInput(
                 p.getStudentLoanBracketStatus(),
                 p.getStudentLoanBracket(),
                 Income.from(p.getPersonalIncome()),
-                Income.from(p.getHouseholdIncome()));
+                Income.from(p.getHouseholdIncome()),
+                p.getTrainingCardStatus(),
+                p.getKdtParticipation());
     }
 }
