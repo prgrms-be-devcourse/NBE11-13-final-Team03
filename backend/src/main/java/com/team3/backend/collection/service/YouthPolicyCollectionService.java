@@ -16,6 +16,8 @@ import tools.jackson.databind.JsonNode;
 
 @Service
 public class YouthPolicyCollectionService {
+    private static final int MAX_FIRST_PAGE_ATTEMPTS = 3;
+    private static final int MAX_CONSECUTIVE_PAGE_FAILURES = 3;
     private final YouthPolicyClient client;
 
     public YouthPolicyCollectionService(YouthPolicyClient client) {
@@ -42,21 +44,25 @@ public class YouthPolicyCollectionService {
         int fetchedCount = 0;
         List<SyncPageFailureResponse> failures = new ArrayList<>();
         Integer totalCount = null;
+        int consecutiveFailures = 0;
         for (int pageNumber = 1; ; pageNumber++) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new CancellationException("수집 실행이 중단되었습니다.");
             }
             YouthPolicyPage page = null;
             try {
-                page = client.fetchPage(pageNumber, pageSize);
+                page = pageNumber == 1 ? fetchFirstPageWithRetry(pageSize) : client.fetchPage(pageNumber, pageSize);
             } catch (YouthPolicyClientException exception) {
                 failures.add(new SyncPageFailureResponse(pageNumber,
                         exception.getErrorCode(), exception.getMessage(), exception.isRetryable()));
-                if (exception.getErrorCode().equals("HTTP_401") || exception.getErrorCode().equals("HTTP_403")) {
+                consecutiveFailures++;
+                if (pageNumber == 1 || !exception.isRetryable()
+                        || consecutiveFailures >= MAX_CONSECUTIVE_PAGE_FAILURES) {
                     return new CollectionSummary(fetchedCount, false, failures, List.of(), List.of());
                 }
             }
             if (page != null) {
+                consecutiveFailures = 0;
                 pageHandler.accept(fetchedCount, page.records());
                 fetchedCount += page.records().size();
                 if (page.totalCount() != null) {
@@ -71,6 +77,21 @@ public class YouthPolicyCollectionService {
             }
             if (pageNumber == maxPages) {
                 return new CollectionSummary(fetchedCount, false, failures, List.of(), List.of());
+            }
+        }
+    }
+
+    private YouthPolicyPage fetchFirstPageWithRetry(int pageSize) {
+        for (int attempt = 1; ; attempt++) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new CancellationException("수집 실행이 중단되었습니다.");
+            }
+            try {
+                return client.fetchPage(1, pageSize);
+            } catch (YouthPolicyClientException exception) {
+                if (!exception.isRetryable() || attempt >= MAX_FIRST_PAGE_ATTEMPTS) {
+                    throw exception;
+                }
             }
         }
     }
