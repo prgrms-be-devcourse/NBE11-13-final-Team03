@@ -209,35 +209,51 @@ class OpportunitySearchPostgresTest {
         Opportunity always = opportunity("PG status always policy", OpportunityType.YOUTH_POLICY);
         Opportunity closed = opportunity("PG status closed policy", OpportunityType.YOUTH_POLICY);
         Opportunity unknown = opportunity("PG status unknown training", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity futureTraining = opportunity("PG status future training", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity startedTraining = opportunity("PG status started training", OpportunityType.VOCATIONAL_TRAINING);
         policy.updateSummary(policy.getTitle(), "career", "job", null);
         training.updateSummary(training.getTitle(), "career", "course", null);
+        futureTraining.updateSummary(futureTraining.getTitle(), "career", "course", null);
         entityManager.persist(OpportunityRegion.builder()
                 .version(policy.getCurrentVersion()).region(province)
                 .regionRole(RegionRole.RESIDENCE).build());
         entityManager.persist(OpportunityRegion.builder()
                 .version(training.getCurrentVersion()).region(province)
                 .regionRole(RegionRole.IMPLEMENTATION).build());
+        entityManager.persist(OpportunityRegion.builder()
+                .version(futureTraining.getCurrentVersion()).region(province)
+                .regionRole(RegionRole.IMPLEMENTATION).build());
+        entityManager.persist(OpportunityRegion.builder()
+                .version(startedTraining.getCurrentVersion()).region(province)
+                .regionRole(RegionRole.IMPLEMENTATION).build());
         window(policy, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
         window(policy, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
         window(policy, PeriodType.FIXED, today.minusDays(10), today.minusDays(5), ValidationStatus.VALID);
-        window(training, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(training, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
         window(upcoming, PeriodType.FIXED, today.plusDays(1), today.plusDays(10), ValidationStatus.VALID);
         window(always, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
         window(closed, PeriodType.CLOSED, null, null, ValidationStatus.VALID);
-        window(unknown, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.INVALID);
+        window(unknown, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
+        window(futureTraining, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
+        window(startedTraining, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
+        trainingDetail(training, today);
+        trainingDetail(unknown, null);
+        trainingDetail(futureTraining, today.plusDays(1));
+        trainingDetail(startedTraining, today.minusDays(1));
         entityManager.flush();
         entityManager.clear();
         regionDirectory.refresh();
 
         MvcResult unfiltered = mockMvc.perform(get("/api/opportunities").param("keyword", "PG status"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(6))
+                .andExpect(jsonPath("$.totalElements").value(8))
                 .andReturn();
         assertEquals(Set.of(policy.getId(), training.getId(), upcoming.getId(), always.getId(),
-                closed.getId(), unknown.getId()), new HashSet<>(opportunityIds(unfiltered)));
+                closed.getId(), unknown.getId(), futureTraining.getId(), startedTraining.getId()),
+                new HashSet<>(opportunityIds(unfiltered)));
 
         List<Long> openIds = new ArrayList<>();
-        for (int page = 0; page < 2; page++) {
+        for (int page = 0; page < 3; page++) {
             MvcResult result = mockMvc.perform(get("/api/opportunities")
                             .param("keyword", "PG status")
                             .param("applicationStatus", "OPEN")
@@ -245,17 +261,17 @@ class OpportunitySearchPostgresTest {
                             .param("size", "1"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.content.length()").value(1))
-                    .andExpect(jsonPath("$.totalElements").value(2))
-                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andExpect(jsonPath("$.totalElements").value(3))
+                    .andExpect(jsonPath("$.totalPages").value(3))
                     .andReturn();
             openIds.addAll(opportunityIds(result));
         }
-        assertEquals(Set.of(policy.getId(), training.getId()), new HashSet<>(openIds));
+        assertEquals(Set.of(policy.getId(), training.getId(), futureTraining.getId()), new HashSet<>(openIds));
         assertEquals(openIds.size(), new HashSet<>(openIds).size());
 
         for (Object[] expected : new Object[][]{
                 {"ALWAYS_OPEN", always.getId()}, {"UPCOMING", upcoming.getId()},
-                {"CLOSED", closed.getId()}, {"UNKNOWN", unknown.getId()}
+                {"CLOSED", closed.getId()}
         }) {
             MvcResult result = mockMvc.perform(get("/api/opportunities")
                             .param("keyword", "PG status")
@@ -265,6 +281,15 @@ class OpportunitySearchPostgresTest {
                     .andReturn();
             assertEquals(List.of(expected[1]), opportunityIds(result));
         }
+
+        MvcResult unknownResult = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG status")
+                        .param("applicationStatus", "UNKNOWN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andReturn();
+        assertEquals(Set.of(training.getId(), unknown.getId(), futureTraining.getId(), startedTraining.getId()),
+                new HashSet<>(opportunityIds(unknownResult)));
 
         MvcResult combined = mockMvc.perform(get("/api/opportunities")
                         .param("keyword", "PG status")
@@ -281,11 +306,23 @@ class OpportunitySearchPostgresTest {
                         .param("keyword", "PG status")
                         .param("applicationStatus", "OPEN")
                         .param("type", "VOCATIONAL_TRAINING")
-                        .param("region", province.getRegionCode()))
+                        .param("category", "career")
+                        .param("region", province.getRegionCode())
+                        .param("sort", "START_DATE_ASC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andReturn();
+        assertEquals(List.of(training.getId(), futureTraining.getId()), opportunityIds(trainingResult));
+
+        MvcResult todayTraining = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG status")
+                        .param("applicationStatus", "OPEN")
+                        .param("type", "VOCATIONAL_TRAINING")
+                        .param("startDateTo", today.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andReturn();
-        assertEquals(List.of(training.getId()), opportunityIds(trainingResult));
+        assertEquals(List.of(training.getId()), opportunityIds(todayTraining));
     }
 
     @Test
@@ -312,7 +349,7 @@ class OpportunitySearchPostgresTest {
         window(earlyPolicy, PeriodType.FIXED, today.minusDays(1), today.plusDays(3), ValidationStatus.VALID);
         window(latePolicy, PeriodType.FIXED, today.minusDays(1), today.plusDays(5), ValidationStatus.VALID);
         window(alwaysPolicy, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
-        window(earlyTraining, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(earlyTraining, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
         trainingDetail(earlyTraining, today.plusDays(2));
         trainingDetail(lateTraining, today.plusDays(4));
         trainingDetail(unknownTraining, null);
@@ -415,7 +452,7 @@ class OpportunitySearchPostgresTest {
         entityManager.persist(OpportunityRegion.builder()
                 .version(trainingNear.getCurrentVersion()).region(province)
                 .regionRole(RegionRole.IMPLEMENTATION).build());
-        window(trainingNear, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(trainingNear, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
         trainingDetail(trainingNear, today.plusDays(1));
         trainingDetail(trainingLate, today.plusDays(3));
         trainingDetail(trainingUnknown, null);

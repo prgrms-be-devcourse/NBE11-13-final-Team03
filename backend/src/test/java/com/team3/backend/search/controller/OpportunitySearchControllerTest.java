@@ -225,37 +225,47 @@ class OpportunitySearchControllerTest {
                 "career", "job", true);
         Opportunity always = createOpportunity("V1-3 always policy", OpportunityType.YOUTH_POLICY,
                 "housing", "support", true);
-        Opportunity upcoming = createOpportunity("V1-3 upcoming training", OpportunityType.VOCATIONAL_TRAINING,
-                "career", "course", true);
+        Opportunity upcoming = createOpportunity("V1-3 upcoming policy", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
         Opportunity closed = createOpportunity("V1-3 closed policy", OpportunityType.YOUTH_POLICY,
                 "career", "job", true);
         Opportunity unknown = createOpportunity("V1-3 unknown training", OpportunityType.VOCATIONAL_TRAINING,
                 "career", "course", true);
         Opportunity openTraining = createOpportunity("V1-3 open training", OpportunityType.VOCATIONAL_TRAINING,
                 "career", "course", true);
+        Opportunity futureTraining = createOpportunity("V1-3 future training", OpportunityType.VOCATIONAL_TRAINING,
+                "career", "course", true);
+        Opportunity startedTraining = createOpportunity("V1-3 started training", OpportunityType.VOCATIONAL_TRAINING,
+                "career", "course", true);
         addRegion(open, province, RegionRole.RESIDENCE);
         addRegion(openTraining, province, RegionRole.IMPLEMENTATION);
+        addRegion(futureTraining, province, RegionRole.IMPLEMENTATION);
+        addRegion(startedTraining, province, RegionRole.IMPLEMENTATION);
         addWindow(open, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
         addWindow(open, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
         addWindow(open, PeriodType.FIXED, today.minusDays(10), today.minusDays(5), ValidationStatus.VALID);
         addWindow(always, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
         addWindow(upcoming, PeriodType.FIXED, today.plusDays(1), today.plusDays(10), ValidationStatus.VALID);
         addWindow(closed, PeriodType.CLOSED, null, null, ValidationStatus.VALID);
-        addWindow(unknown, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.INVALID);
-        addWindow(openTraining, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        for (Opportunity training : new Opportunity[]{unknown, openTraining, futureTraining, startedTraining}) {
+            addWindow(training, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
+        }
+        addTrainingDetail(unknown, null);
+        addTrainingDetail(openTraining, today);
+        addTrainingDetail(futureTraining, today.plusDays(1));
+        addTrainingDetail(startedTraining, today.minusDays(1));
         entityManager.flush();
         entityManager.clear();
         regionDirectory.refresh();
 
         mockMvc.perform(get("/api/opportunities").param("keyword", "V1-3"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(6));
+                .andExpect(jsonPath("$.totalElements").value(8));
 
         for (Object[] expected : new Object[][]{
                 {ApplicationStatus.ALWAYS_OPEN, always.getId()},
                 {ApplicationStatus.UPCOMING, upcoming.getId()},
-                {ApplicationStatus.CLOSED, closed.getId()},
-                {ApplicationStatus.UNKNOWN, unknown.getId()}
+                {ApplicationStatus.CLOSED, closed.getId()}
         }) {
             mockMvc.perform(get("/api/opportunities")
                             .param("keyword", "V1-3")
@@ -268,7 +278,11 @@ class OpportunitySearchControllerTest {
         mockMvc.perform(get("/api/opportunities")
                         .param("keyword", "V1-3").param("applicationStatus", "OPEN"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(2));
+                .andExpect(jsonPath("$.totalElements").value(3));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-3").param("applicationStatus", "UNKNOWN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4));
         mockMvc.perform(get("/api/opportunities")
                         .param("keyword", "V1-3")
                         .param("applicationStatus", "OPEN")
@@ -283,7 +297,19 @@ class OpportunitySearchControllerTest {
                         .param("keyword", "V1-3")
                         .param("applicationStatus", "OPEN")
                         .param("type", "VOCATIONAL_TRAINING")
-                        .param("region", province.getRegionCode()))
+                        .param("region", province.getRegionCode())
+                        .param("category", "career")
+                        .param("sort", "START_DATE_ASC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(openTraining.getId()))
+                .andExpect(jsonPath("$.content[1].opportunityId").value(futureTraining.getId()));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "V1-3")
+                        .param("applicationStatus", "OPEN")
+                        .param("type", "VOCATIONAL_TRAINING")
+                        .param("region", province.getRegionCode())
+                        .param("startDateTo", today.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].opportunityId").value(openTraining.getId()));
@@ -317,7 +343,7 @@ class OpportunitySearchControllerTest {
         addWindow(alwaysPolicy, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
         addWindow(unknownPolicy, PeriodType.FIXED, today.minusDays(1), today.plusDays(3), ValidationStatus.INVALID);
         addWindow(unknownPolicy, PeriodType.FIXED, today.minusDays(1), null, ValidationStatus.VALID);
-        addWindow(earlyTraining, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        addWindow(earlyTraining, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
         addTrainingDetail(earlyTraining, today.plusDays(2));
         addTrainingDetail(lateTraining, today.plusDays(4));
         addTrainingDetail(unknownTraining, null);
@@ -486,7 +512,7 @@ class OpportunitySearchControllerTest {
         Opportunity trainingUnknown = createOpportunity("V1-5 start unknown", OpportunityType.VOCATIONAL_TRAINING,
                 null, null, true);
         addRegion(trainingNear, province, RegionRole.IMPLEMENTATION);
-        addWindow(trainingNear, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        addWindow(trainingNear, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
         addTrainingDetail(trainingNear, today.plusDays(1));
         addTrainingDetail(trainingTied, today.plusDays(1));
         addTrainingDetail(trainingLate, today.plusDays(3));

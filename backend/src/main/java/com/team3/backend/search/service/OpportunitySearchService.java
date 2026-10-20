@@ -115,9 +115,21 @@ public class OpportunitySearchService {
             return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
         };
         if (applicationStatus != null) {
-            // 모집 상태는 공통 Specification을 AND로 결합해 재계산 없이 페이지와 전체 건수에 반영한다.
-            filters = filters.and(ApplicationStatusSpecifications.hasStatus(
-                    applicationStatus, LocalDate.now(KST)));
+            LocalDate today = LocalDate.now(KST);
+            if (applicationStatus == ApplicationStatus.OPEN) {
+                // 개강 예정 훈련은 모집 상태를 바꾸지 않고 OPEN 검색에만 포함한다.
+                filters = filters.and((root, query, criteriaBuilder) -> criteriaBuilder.or(
+                        criteriaBuilder.and(
+                                criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.YOUTH_POLICY),
+                                ApplicationStatusSpecifications.hasStatus(ApplicationStatus.OPEN, today)
+                                        .toPredicate(root, query, criteriaBuilder)),
+                        criteriaBuilder.and(
+                                criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.VOCATIONAL_TRAINING),
+                                startDateMatches(root, query, criteriaBuilder, today, null))
+                ));
+            } else {
+                filters = filters.and(ApplicationStatusSpecifications.hasStatus(applicationStatus, today));
+            }
         }
         // 정책은 유효한 신청 마감일, 훈련은 교육 시작일을 사용해 서로 다른 날짜를 혼합하지 않는다.
         if (hasDeadlineRange) {
