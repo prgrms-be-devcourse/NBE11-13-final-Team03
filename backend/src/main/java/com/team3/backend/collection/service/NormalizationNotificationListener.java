@@ -45,7 +45,7 @@ public class NormalizationNotificationListener {
                     create or replace function notify_raw_normalization_request() returns trigger
                     language plpgsql as $$
                     begin
-                        perform pg_notify('raw_normalization_requested', '');
+                        perform pg_notify('raw_normalization_requested', NEW.id::text);
                         return NEW;
                     end;
                     $$

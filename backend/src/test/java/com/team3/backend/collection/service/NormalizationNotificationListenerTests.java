@@ -33,14 +33,17 @@ class NormalizationNotificationListenerTests {
             var postgres = listener.unwrap(PGConnection.class);
             writer.setAutoCommit(false);
             try (var sql = writer.createStatement()) {
-                sql.execute("insert into raw_normalization_request values (1)");
+                sql.execute("insert into raw_normalization_request values (123), (124)");
                 assertEquals(0, postgres.getNotifications(100).length);
                 writer.commit();
                 var notifications = postgres.getNotifications(2_000);
                 assertNotNull(notifications);
-                assertEquals(1, notifications.length);
+                assertEquals(2, notifications.length);
                 assertEquals(NormalizationNotificationListener.CHANNEL, notifications[0].getName());
-                sql.execute("insert into raw_normalization_request values (2)");
+                assertEquals("123", notifications[0].getParameter());
+                assertEquals(NormalizationNotificationListener.CHANNEL, notifications[1].getName());
+                assertEquals("124", notifications[1].getParameter());
+                sql.execute("insert into raw_normalization_request values (125)");
                 writer.rollback();
                 assertEquals(0, postgres.getNotifications(100).length);
             }
