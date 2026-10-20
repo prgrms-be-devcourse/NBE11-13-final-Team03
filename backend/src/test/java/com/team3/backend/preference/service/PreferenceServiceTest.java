@@ -13,6 +13,9 @@ import com.team3.backend.user.domain.entity.User;
 import com.team3.backend.user.domain.repository.UserRepository;
 import com.team3.backend.user.exception.UserErrorCode;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,6 +24,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -44,6 +48,9 @@ class PreferenceServiceTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
 
     @Autowired
     private TransactionTemplate transactionTemplate;
@@ -264,6 +271,47 @@ class PreferenceServiceTest {
                             userId, pagination[0], pagination[1]));
             assertEquals(GlobalErrorCode.INVALID_INPUT_VALUE,
                     exception.getErrorCode());
+        }
+    }
+
+    @Test
+    void savedOpportunityIdsAreScopedToUserAndPageWithOneQuery() {
+        Long userId = createUser(209L);
+        Long otherUserId = createUser(210L);
+        Long savedId = createOpportunity("Saved in page");
+        Long savedAndHiddenId = createOpportunity("Saved and hidden in page");
+        Long hiddenOnlyId = createOpportunity("Hidden only in page");
+        Long otherUserSavedId = createOpportunity("Other user's saved");
+        Long outsidePageId = createOpportunity("Saved outside page");
+
+        preferenceService.save(userId, savedId);
+        preferenceService.save(userId, savedAndHiddenId);
+        preferenceService.hide(userId, savedAndHiddenId);
+        preferenceService.hide(userId, hiddenOnlyId);
+        preferenceService.save(otherUserId, otherUserSavedId);
+        preferenceService.save(userId, outsidePageId);
+
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        boolean statisticsEnabled = statistics.isStatisticsEnabled();
+        statistics.setStatisticsEnabled(true);
+        try {
+            long beforeEmpty = statistics.getPrepareStatementCount();
+            assertEquals(Set.of(), preferenceService.getSavedOpportunityIds(userId, List.of()));
+            assertEquals(0, statistics.getPrepareStatementCount() - beforeEmpty);
+
+            long beforeSingle = statistics.getPrepareStatementCount();
+            assertEquals(Set.of(savedId),
+                    preferenceService.getSavedOpportunityIds(userId, List.of(savedId)));
+            assertEquals(1, statistics.getPrepareStatementCount() - beforeSingle);
+
+            long beforePage = statistics.getPrepareStatementCount();
+            assertEquals(Set.of(savedId, savedAndHiddenId),
+                    preferenceService.getSavedOpportunityIds(userId, List.of(
+                            savedId, savedAndHiddenId, hiddenOnlyId, otherUserSavedId,
+                            Long.MAX_VALUE)));
+            assertEquals(1, statistics.getPrepareStatementCount() - beforePage);
+        } finally {
+            statistics.setStatisticsEnabled(statisticsEnabled);
         }
     }
 

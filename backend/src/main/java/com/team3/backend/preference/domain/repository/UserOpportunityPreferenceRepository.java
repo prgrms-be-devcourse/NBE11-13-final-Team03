@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -34,6 +35,19 @@ public interface UserOpportunityPreferenceRepository
         """)
     List<UserOpportunityPreference> findSavedByUserId(
             @Param("userId") Long userId
+    );
+
+    /** 지정한 공고 중 숨김 여부와 관계없이 저장된 공고 ID만 조회한다. */
+    @Query("""
+        select preference.opportunity.id
+        from UserOpportunityPreference preference
+        where preference.user.id = :userId
+          and preference.opportunity.id in :opportunityIds
+          and preference.isSaved = true
+        """)
+    List<Long> findSavedOpportunityIds(
+            @Param("userId") Long userId,
+            @Param("opportunityIds") Collection<Long> opportunityIds
     );
 
     /** 공고를 함께 읽어 저장 목록과 정확한 전체 건수를 페이지로 반환한다. */

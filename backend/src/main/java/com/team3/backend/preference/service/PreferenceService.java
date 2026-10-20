@@ -19,7 +19,9 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.Optional;
+import java.util.Set;
 
 /** 사용자별 저장·숨김 상태와 저장 목록 조회를 관리한다. */
 @Service
@@ -121,6 +123,15 @@ public class PreferenceService {
                 results.getTotalPages(),
                 results.hasNext()
         );
+    }
+
+    /** 지정한 공고 중 사용자가 저장한 공고 ID를 일괄 조회한다. */
+    @Transactional(readOnly = true)
+    public Set<Long> getSavedOpportunityIds(Long userId, Collection<Long> opportunityIds) {
+        if (opportunityIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(preferenceRepository.findSavedOpportunityIds(userId, opportunityIds));
     }
 
     private User getLockedUser(Long userId) {
