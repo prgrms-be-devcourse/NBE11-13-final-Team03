@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 /** 기회 ID 목록 → 추천용 기회 요약. 쿼리 3번 (기회, 신청기간, 훈련 상세) */
 @Component
 @RequiredArgsConstructor
-class OpportunityInfoAssembler {
+public class OpportunityInfoAssembler {
 
     private final OpportunityRepository opportunityRepository;
     private final ApplicationWindowRepository windowRepository;

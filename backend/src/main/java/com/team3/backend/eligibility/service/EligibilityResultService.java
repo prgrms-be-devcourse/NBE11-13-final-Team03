@@ -4,6 +4,7 @@ import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
 import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
+import com.team3.backend.eligibility.domain.repository.EligibilityResultUpsertRepository.UpsertRow;
 import com.team3.backend.eligibility.dto.EligibilityResultFreshness;
 import com.team3.backend.eligibility.engine.ConditionEvaluation;
 import com.team3.backend.eligibility.engine.EligibilityEvaluation;
@@ -13,6 +14,7 @@ import com.team3.backend.opportunity.dto.OpportunityVersionRef;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -35,14 +37,16 @@ import static com.team3.backend.eligibility.exception.EligibilityErrorCode.PROFI
  * - refreshAll: 사용자의 정규화된 기회 전체를 최신화 (신청 가능성 필터 검색 전, 프로필 변경 후)
  * 최신 결과는 다시 판정하지 않고, 없거나 오래된 결과만 판정해 저장한다 (기준은 EligibilityResult 참고).
  * 판정 결과가 없는 기회는 NOT_ELIGIBLE이 아니라 미판정이다.
+ * 저장은 yon.eligibility.result-write-batch-size(기본 1,000)건씩 SQL 1개로 묶어 한다 (EligibilityResultUpsertRepository).
  */
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class EligibilityResultService {
 
-    /** 판정 규칙 버전. 판정 엔진 규칙이 바뀌면 올린다 → 기존 결과가 모두 오래된 것이 된다 */
-    public static final String RULE_VERSION = "1";
+    /** 판정 규칙 버전. 판정 엔진 규칙이 바뀌면 올린다 → 기존 결과가 모두 오래된 것이 된다
+     *  1 → 2 (2026-10-19): 국민내일배움카드(TRAINING_CARD)·K-디지털 트레이닝 1회 한정(PARTICIPATION_HISTORY) 판정 추가 */
+    public static final String RULE_VERSION = "2";
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CHUNK = 1_000;
@@ -53,6 +57,9 @@ public class EligibilityResultService {
     private final EligibilityEvaluator evaluator;
     @PersistenceContext
     private EntityManager em;
+    /** 저장 SQL 1개에 담는 행 수. refreshAll은 CHUNK건씩 판정하므로 CHUNK보다 크게 잡아도 한 번에 CHUNK건까지만 담긴다 */
+    @Value("${yon.eligibility.result-write-batch-size:1000}")
+    private int writeBatchSize = 1_000;
 
     public List<EligibilityResult> refresh(Long userId, Collection<Long> opportunityIds) {
         return refresh(userId, opportunityIds, OffsetDateTime.now(KST));
@@ -65,7 +72,11 @@ public class EligibilityResultService {
             return List.of();
         }
         List<OpportunityVersionRef> refs = opportunityRepository.findCurrentVersionRefs(opportunityIds);
-        refreshTargets(profile, refs, today(now), now);
+        if (refreshTargets(profile, refs, today(now), now) > 0) {
+            // 저장은 영속성 컨텍스트를 거치지 않으므로, 이미 읽어 둔 결과 엔티티가 있으면 버리고 새로 읽는다
+            em.flush();
+            em.clear();
+        }
         return resultRepository.findByUserIdAndOpportunityIdIn(userId,
                 refs.stream().map(OpportunityVersionRef::opportunityId).toList());
     }
@@ -114,37 +125,22 @@ public class EligibilityResultService {
 
         Map<Long, EligibilityEvaluator.Judgement> judgements = evaluator.judge(profile,
                 stale.stream().map(OpportunityVersionRef::versionId).collect(Collectors.toSet()), today);
-        Map<Long, EligibilityResult> existing = resultRepository.findByUserIdAndOpportunityIdIn(profile.getUserId(),
-                        stale.stream().map(OpportunityVersionRef::opportunityId).filter(freshness::containsKey).toList())
-                .stream().collect(Collectors.toMap(EligibilityResult::getOpportunityId, Function.identity()));
 
         LocalDate validUntil = nextBirthday(profile.getBirthDate(), today);
         var evaluatedAt = now.atZoneSameInstant(KST).toLocalDateTime();
-        List<EligibilityResult> created = new ArrayList<>();
+        List<UpsertRow> rows = new ArrayList<>(stale.size());
         for (OpportunityVersionRef ref : stale) {
             EligibilityEvaluation evaluation = judgements.get(ref.versionId()).evaluation();
             List<Map<String, Object>> conditions = evaluation.conditions().stream()
                     .map(EligibilityResultService::toMap).toList();
-            EligibilityResult current = existing.get(ref.opportunityId());
-            if (current != null) {
-                current.update(ref.versionId(), profile.getProfileVersion(), RULE_VERSION, evaluation.status(),
-                        evaluation.reason(), conditions, validUntil, evaluatedAt);
-            } else {
-                created.add(EligibilityResult.builder()
-                        .userId(profile.getUserId())
-                        .opportunityId(ref.opportunityId())
-                        .opportunityVersionId(ref.versionId())
-                        .profileVersion(profile.getProfileVersion())
-                        .ruleVersion(RULE_VERSION)
-                        .eligibilityStatus(evaluation.status())
-                        .reason(evaluation.reason())
-                        .conditionResults(conditions)
-                        .validUntil(validUntil)
-                        .evaluatedAt(evaluatedAt)
-                        .build());
-            }
+            rows.add(new UpsertRow(ref.opportunityId(), ref.versionId(), evaluation.status(), evaluation.reason(),
+                    conditions, validUntil));
         }
-        resultRepository.saveAll(created);
+        int batchSize = Math.max(1, writeBatchSize);
+        for (int from = 0; from < rows.size(); from += batchSize) {
+            resultRepository.upsert(profile.getUserId(), profile.getProfileVersion(), RULE_VERSION, evaluatedAt,
+                    rows.subList(from, Math.min(from + batchSize, rows.size())));
+        }
         return stale.size();
     }
 

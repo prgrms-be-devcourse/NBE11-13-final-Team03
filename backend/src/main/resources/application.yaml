@@ -2,7 +2,9 @@ spring:
   application:
     name: backend
   config:
-    import: optional:classpath:youth-policy-codes.yaml
+    import:
+      - optional:classpath:youth-policy-codes.yaml
+      - classpath:application-collection.yaml
 
   jpa:
     hibernate:
@@ -67,18 +69,6 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [traceId=%X{traceId:-no-trace}] %logger{36} - %msg%n"
 
-collection:
-  employment24:
-    url: https://www.work24.go.kr/cm/openApi/call/hr/callOpenApiSvcInfo310L01.do
-    api-key: ${EMPLOYMENT24_API_KEY:}
-    connect-timeout: 5s
-    read-timeout: 20s
-
-  youth-policy:
-    url: https://www.youthcenter.go.kr/go/ythip/getPlcy
-    api-key: ${YOUTH_POLICY_API_KEY:}
-    connect-timeout: 5s
-    read-timeout: 20s
 region-code-api:
   base-url: https://apis.data.go.kr/1741000/StanReginCd/getStanReginCdList
   service-key: ${REGION_CODE_API_KEY:}
