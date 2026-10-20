@@ -26,6 +26,7 @@ import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
 import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
+import com.jayway.jsonpath.JsonPath;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,14 +36,19 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -810,6 +816,51 @@ class OpportunitySearchControllerTest {
                 .andExpect(jsonPath("$.code").value("COMMON_002"));
         mockMvc.perform(get("/api/opportunities").param("page", "text"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void openApiDocumentsSearchAndPreferenceWithoutRequiringLoginForPublicSearch() throws Exception {
+        MvcResult result = mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String document = result.getResponse().getContentAsString();
+
+        List<String> searchParameters = JsonPath.read(document,
+                "$['paths']['/api/opportunities']['get']['parameters'][*]['name']");
+        assertEquals(Set.of("keyword", "type", "category", "subCategory", "region",
+                        "applicationStatus", "eligibilityStatuses", "deadlineFrom", "deadlineTo",
+                        "startDateFrom", "startDateTo", "sort", "page", "size"),
+                Set.copyOf(searchParameters));
+        Map<String, Object> searchOperation = JsonPath.read(document,
+                "$['paths']['/api/opportunities']['get']");
+        assertFalse(searchOperation.containsKey("security"));
+        assertEquals(List.of("array"), JsonPath.read(document,
+                "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == 'eligibilityStatuses')]['schema']['type']"));
+        for (String[] expected : new String[][]{{"sort", "LATEST"}, {"page", "0"}, {"size", "20"}}) {
+            List<Object> defaults = JsonPath.read(document,
+                    "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == '"
+                            + expected[0] + "')]['schema']['default']");
+            assertEquals(expected[1], String.valueOf(defaults.getFirst()));
+        }
+        assertEquals("boolean", JsonPath.read(document,
+                "$.components.schemas.OpportunitySearchItemDto.properties.saved.type"));
+        assertTrue(JsonPath.<Map<String, Object>>read(document,
+                "$.components.schemas.OpportunitySearchItemDto.properties.eligibilityStatus")
+                .containsKey("description"));
+
+        for (String path : List.of("/api/opportunities/{id}/save", "/api/opportunities/{id}/hide")) {
+            for (String method : List.of("post", "delete")) {
+                assertTrue(JsonPath.<List<Map<String, Object>>>read(document,
+                        "$['paths']['" + path + "']['" + method + "']['security']")
+                        .getFirst().containsKey("cookieAuth"));
+                assertTrue(JsonPath.<Map<String, Object>>read(document,
+                        "$['paths']['" + path + "']['" + method + "']['responses']")
+                        .containsKey("204"));
+            }
+        }
+        assertTrue(JsonPath.<List<Map<String, Object>>>read(document,
+                "$['paths']['/api/users/me/saved-opportunities']['get']['security']")
+                .getFirst().containsKey("cookieAuth"));
     }
 
     private Opportunity createOpportunity(String title, OpportunityType type,
