@@ -1,5 +1,12 @@
 package com.team3.backend.search.controller;
 
+import com.team3.backend.auth.security.CustomUserDetails;
+import com.team3.backend.eligibility.domain.entity.EducationLevel;
+import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
+import com.team3.backend.eligibility.domain.entity.EligibilityResult;
+import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
+import com.team3.backend.eligibility.domain.entity.EmploymentStatus;
+import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
@@ -37,6 +44,7 @@ import java.time.ZoneId;
 import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -583,6 +591,64 @@ class OpportunitySearchControllerTest {
             }
             mockMvc.perform(request).andExpect(status().isBadRequest());
         }
+    }
+
+    @Test
+    void eligibilityFilterRequiresAuthenticationAndUsesSavedStatuses() throws Exception {
+        Long userId = 901L;
+        Region region = createRegion("1100000000", null);
+        entityManager.persist(EligibilityProfile.builder()
+                .userId(userId).birthDate(LocalDate.of(1998, 1, 1))
+                .residenceRegion(region).employmentStatus(EmploymentStatus.UNEMPLOYED)
+                .educationLevel(EducationLevel.UNIVERSITY).build());
+        Opportunity eligible = createOpportunity("V1-6 eligible", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        Opportunity possible = createOpportunity("V1-6 possible", OpportunityType.YOUTH_POLICY,
+                "career", "job", true);
+        addEligibilityResult(userId, eligible, EligibilityStatus.ELIGIBLE);
+        addEligibilityResult(userId, possible, EligibilityStatus.POSSIBLY_ELIGIBLE);
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(get("/api/opportunities").param("keyword", "V1-6"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+        mockMvc.perform(get("/api/opportunities").param("keyword", "V1-6")
+                        .param("eligibilityStatuses", "ELIGIBLE"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/opportunities").param("keyword", "V1-6")
+                        .param("eligibilityStatuses", "INVALID"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/opportunities").param("keyword", "V1-6")
+                        .param("eligibilityStatuses", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+
+        CustomUserDetails principal = new CustomUserDetails(userId, Role.USER, "search-test");
+        mockMvc.perform(get("/api/opportunities").with(user(principal))
+                        .param("keyword", "V1-6").param("eligibilityStatuses", "ELIGIBLE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(eligible.getId()));
+        mockMvc.perform(get("/api/opportunities").with(user(principal))
+                        .param("keyword", "V1-6")
+                        .param("eligibilityStatuses", "ELIGIBLE,POSSIBLY_ELIGIBLE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+        mockMvc.perform(get("/api/opportunities")
+                        .with(user(new CustomUserDetails(902L, Role.USER, "other")))
+                        .param("keyword", "V1-6").param("eligibilityStatuses", "ELIGIBLE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    private void addEligibilityResult(Long userId, Opportunity opportunity, EligibilityStatus status) {
+        entityManager.persist(EligibilityResult.builder()
+                .userId(userId).opportunityId(opportunity.getId())
+                .opportunityVersionId(opportunity.getCurrentVersion().getId())
+                .profileVersion(1L).ruleVersion(EligibilityResultService.RULE_VERSION)
+                .eligibilityStatus(status).conditionResults(java.util.List.of())
+                .evaluatedAt(LocalDateTime.now()).build());
     }
 
     @Test

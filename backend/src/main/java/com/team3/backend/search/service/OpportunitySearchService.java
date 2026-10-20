@@ -1,5 +1,7 @@
 package com.team3.backend.search.service;
 
+import com.team3.backend.eligibility.api.EligibilitySpecifications;
+import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.global.exception.GlobalErrorCode;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
@@ -43,7 +45,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
 
-/** 정규화된 공고의 검색 조건과 페이지 조회를 구성한다. */
+/** 정규화된 공고의 검색 조건과 신청 가능성 판정 결과를 페이지 조회에 결합한다. */
 @Service
 @RequiredArgsConstructor
 public class OpportunitySearchService {
@@ -58,6 +60,7 @@ public class OpportunitySearchService {
     public OpportunitySearchResponseDto search(
             String keyword, OpportunityType type, String category, String subCategory,
             String region, ApplicationStatus applicationStatus,
+            Long userId, List<EligibilityStatus> eligibilityStatuses,
             LocalDate deadlineFrom, LocalDate deadlineTo,
             LocalDate startDateFrom, LocalDate startDateTo,
             OpportunitySearchSort sort,
@@ -114,8 +117,8 @@ public class OpportunitySearchService {
             }
             return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
         };
+        LocalDate today = LocalDate.now(KST);
         if (applicationStatus != null) {
-            LocalDate today = LocalDate.now(KST);
             if (applicationStatus == ApplicationStatus.OPEN) {
                 // 개강 예정 훈련은 모집 상태를 바꾸지 않고 OPEN 검색에만 포함한다.
                 filters = filters.and((root, query, criteriaBuilder) -> criteriaBuilder.or(
@@ -130,6 +133,10 @@ public class OpportunitySearchService {
             } else {
                 filters = filters.and(ApplicationStatusSpecifications.hasStatus(applicationStatus, today));
             }
+        }
+        if (eligibilityStatuses != null && !eligibilityStatuses.isEmpty()) {
+            // 저장된 최신 판정만 DB에서 결합해 페이지와 전체 건수에 동일하게 반영한다.
+            filters = filters.and(EligibilitySpecifications.statusIn(userId, eligibilityStatuses, today));
         }
         // 정책은 유효한 신청 마감일, 훈련은 교육 시작일을 사용해 서로 다른 날짜를 혼합하지 않는다.
         if (hasDeadlineRange) {
@@ -149,7 +156,7 @@ public class OpportunitySearchService {
         if (sort == OpportunitySearchSort.DEADLINE_ASC) {
             filters = filters.and((root, query, criteriaBuilder) -> {
                 if (!Long.class.equals(query.getResultType())) {
-                    orderByDeadline(root, query, criteriaBuilder, LocalDate.now(KST));
+                    orderByDeadline(root, query, criteriaBuilder, today);
                 }
                 return criteriaBuilder.conjunction();
             });

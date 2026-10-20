@@ -1,5 +1,12 @@
 package com.team3.backend.search.controller;
 
+import com.team3.backend.auth.security.CustomUserDetails;
+import com.team3.backend.eligibility.domain.entity.EducationLevel;
+import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
+import com.team3.backend.eligibility.domain.entity.EligibilityResult;
+import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
+import com.team3.backend.eligibility.domain.entity.EmploymentStatus;
+import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
@@ -13,8 +20,11 @@ import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
+import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
+import com.team3.backend.user.domain.entity.Role;
+import com.team3.backend.user.domain.entity.User;
 import com.jayway.jsonpath.JsonPath;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
@@ -33,6 +43,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.util.ArrayList;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
@@ -42,6 +53,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -75,6 +87,266 @@ class OpportunitySearchPostgresTest {
 
     @Autowired
     private RegionDirectory regionDirectory;
+
+    @Test
+    void combinedPolicyFiltersSortAndPageWithoutExcludingSavedHiddenOpportunity() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Region province = Region.builder().regionCode("1100000000").regionName("Seoul").build();
+        Region elsewhere = Region.builder().regionCode("2600000000").regionName("Busan").build();
+        entityManager.persist(province);
+        entityManager.persist(elsewhere);
+        User account = User.builder().kakaoId(990001L).role(Role.USER).build();
+        entityManager.persist(account);
+        Long userId = account.getId();
+        entityManager.persist(EligibilityProfile.builder()
+                .userId(userId).birthDate(LocalDate.of(1998, 1, 1))
+                .residenceRegion(province).employmentStatus(EmploymentStatus.UNEMPLOYED)
+                .educationLevel(EducationLevel.UNIVERSITY).build());
+
+        Opportunity near = opportunity("PG final near", OpportunityType.YOUTH_POLICY);
+        Opportunity middle = opportunity("PG final middle", OpportunityType.YOUTH_POLICY);
+        Opportunity far = opportunity("PG final far", OpportunityType.YOUTH_POLICY);
+        Opportunity possible = opportunity("PG final possible", OpportunityType.YOUTH_POLICY);
+        Opportunity wrongSubCategory = opportunity("PG final other subcategory", OpportunityType.YOUTH_POLICY);
+        Opportunity wrongRegion = opportunity("PG final other region", OpportunityType.YOUTH_POLICY);
+        Opportunity outsideDate = opportunity("PG final outside date", OpportunityType.YOUTH_POLICY);
+        Opportunity upcoming = opportunity("PG final upcoming", OpportunityType.YOUTH_POLICY);
+        Opportunity wrongCategory = opportunity("PG final other category", OpportunityType.YOUTH_POLICY);
+        for (Opportunity policy : List.of(near, middle, far, possible, wrongSubCategory,
+                wrongRegion, outsideDate, upcoming, wrongCategory)) {
+            policy.updateSummary(policy.getTitle(),
+                    policy == wrongCategory ? "housing" : "career",
+                    policy == wrongSubCategory ? "support" : "job", null);
+            entityManager.persist(OpportunityRegion.builder().version(policy.getCurrentVersion())
+                    .region(policy == wrongRegion ? elsewhere : province)
+                    .regionRole(RegionRole.RESIDENCE).build());
+            LocalDate start = policy == upcoming ? today.plusDays(1) : today.minusDays(1);
+            LocalDate end = policy == near ? today.plusDays(1)
+                    : policy == far ? today.plusDays(3)
+                    : policy == outsideDate ? today.plusDays(5) : today.plusDays(2);
+            window(policy, PeriodType.FIXED, start, end, ValidationStatus.VALID);
+            eligibilityResult(userId, policy,
+                    policy == possible ? EligibilityStatus.POSSIBLY_ELIGIBLE : EligibilityStatus.ELIGIBLE,
+                    null, 1L, EligibilityResultService.RULE_VERSION, null);
+        }
+        UserOpportunityPreference preference = UserOpportunityPreference.builder()
+                .user(account).opportunity(near).build();
+        preference.markSaved();
+        preference.markHidden();
+        entityManager.persist(preference);
+        entityManager.flush();
+        entityManager.clear();
+        regionDirectory.refresh();
+
+        CustomUserDetails principal = new CustomUserDetails(userId, Role.USER, "pg-final");
+        List<Long> actualIds = new ArrayList<>();
+        for (int page = 0; page < 3; page++) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities").with(user(principal))
+                            .param("keyword", "PG final")
+                            .param("type", "YOUTH_POLICY")
+                            .param("region", province.getRegionCode())
+                            .param("category", "career")
+                            .param("subCategory", "job")
+                            .param("applicationStatus", "OPEN")
+                            .param("deadlineFrom", today.plusDays(1).toString())
+                            .param("deadlineTo", today.plusDays(3).toString())
+                            .param("eligibilityStatuses", "ELIGIBLE")
+                            .param("sort", "DEADLINE_ASC")
+                            .param("page", String.valueOf(page)).param("size", "2"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(3))
+                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andExpect(jsonPath("$.hasNext").value(page == 0))
+                    .andExpect(jsonPath("$.content.length()").value(page == 0 ? 2 : page == 1 ? 1 : 0))
+                    .andReturn();
+            actualIds.addAll(opportunityIds(result));
+        }
+        assertEquals(List.of(near.getId(), middle.getId(), far.getId()), actualIds);
+        assertEquals(actualIds.size(), new HashSet<>(actualIds).size());
+
+        MvcResult publicSearch = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG final near"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andReturn();
+        assertEquals(List.of(near.getId()), opportunityIds(publicSearch));
+    }
+
+    @Test
+    void eligibilityFilterUsesFreshResultsBeforePostgresPagination() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Long userId = 1001L;
+        Long otherUserId = 1002L;
+        Region region = Region.builder().regionCode("1100000000").regionName("Seoul").build();
+        entityManager.persist(region);
+        for (Long profileUserId : List.of(userId, otherUserId, 1004L)) {
+            entityManager.persist(EligibilityProfile.builder()
+                    .userId(profileUserId).birthDate(LocalDate.of(1998, 1, 1))
+                    .residenceRegion(region).employmentStatus(EmploymentStatus.UNEMPLOYED)
+                    .educationLevel(EducationLevel.UNIVERSITY).build());
+        }
+
+        Opportunity eligible = opportunity("PG eligibility eligible", OpportunityType.YOUTH_POLICY);
+        Opportunity possible = opportunity("PG eligibility possible", OpportunityType.YOUTH_POLICY);
+        Opportunity notEligible = opportunity("PG eligibility not eligible", OpportunityType.YOUTH_POLICY);
+        Opportunity unknown = opportunity("PG eligibility unknown", OpportunityType.YOUTH_POLICY);
+        Opportunity staleOpportunity = opportunity("PG eligibility stale opportunity", OpportunityType.YOUTH_POLICY);
+        Opportunity staleProfile = opportunity("PG eligibility stale profile", OpportunityType.YOUTH_POLICY);
+        Opportunity staleRule = opportunity("PG eligibility stale rule", OpportunityType.YOUTH_POLICY);
+        Opportunity expired = opportunity("PG eligibility expired", OpportunityType.YOUTH_POLICY);
+        Opportunity noResult = opportunity("PG eligibility no result", OpportunityType.YOUTH_POLICY);
+        Opportunity otherOnly = opportunity("PG eligibility other only", OpportunityType.YOUTH_POLICY);
+        Opportunity trainingToday = opportunity("PG eligibility training today", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity trainingPast = opportunity("PG eligibility training past", OpportunityType.VOCATIONAL_TRAINING);
+        eligible.updateSummary(eligible.getTitle(), "career", "job", null);
+        trainingToday.updateSummary(trainingToday.getTitle(), "career", "course", null);
+        trainingPast.updateSummary(trainingPast.getTitle(), "career", "course", null);
+        entityManager.persist(OpportunityRegion.builder().version(eligible.getCurrentVersion())
+                .region(region).regionRole(RegionRole.RESIDENCE).build());
+        for (Opportunity training : List.of(trainingToday, trainingPast)) {
+            entityManager.persist(OpportunityRegion.builder().version(training.getCurrentVersion())
+                    .region(region).regionRole(RegionRole.IMPLEMENTATION).build());
+            window(training, PeriodType.UNKNOWN, null, null, ValidationStatus.UNKNOWN);
+        }
+        window(eligible, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        trainingDetail(trainingToday, today);
+        trainingDetail(trainingPast, today.minusDays(1));
+
+        eligibilityResult(userId, eligible, EligibilityStatus.ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(userId, possible, EligibilityStatus.POSSIBLY_ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, today.plusDays(1));
+        eligibilityResult(userId, notEligible, EligibilityStatus.NOT_ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(userId, unknown, EligibilityStatus.UNKNOWN, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(userId, staleOpportunity, EligibilityStatus.ELIGIBLE,
+                staleOpportunity.getCurrentVersion().getId() + 1000, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(userId, staleProfile, EligibilityStatus.ELIGIBLE, null, 2L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(userId, staleRule, EligibilityStatus.ELIGIBLE, null, 1L,
+                "old-rule", null);
+        eligibilityResult(userId, expired, EligibilityStatus.ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, today);
+        eligibilityResult(otherUserId, otherOnly, EligibilityStatus.ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(userId, trainingToday, EligibilityStatus.ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(userId, trainingPast, EligibilityStatus.ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        entityManager.flush();
+        entityManager.clear();
+        regionDirectory.refresh();
+
+        CustomUserDetails principal = new CustomUserDetails(userId, Role.USER, "pg-search");
+        MvcResult unfiltered = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG eligibility"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(12))
+                .andReturn();
+        assertEquals(12, opportunityIds(unfiltered).size());
+
+        List<Long> eligibleIds = new ArrayList<>();
+        for (int page = 0; page < 3; page++) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities").with(user(principal))
+                            .param("keyword", "PG eligibility")
+                            .param("eligibilityStatuses", "ELIGIBLE")
+                            .param("page", String.valueOf(page)).param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(3))
+                    .andExpect(jsonPath("$.totalPages").value(3))
+                    .andReturn();
+            eligibleIds.addAll(opportunityIds(result));
+        }
+        assertEquals(Set.of(eligible.getId(), trainingToday.getId(), trainingPast.getId()),
+                new HashSet<>(eligibleIds));
+        assertEquals(3, new HashSet<>(eligibleIds).size());
+
+        MvcResult combinedStatuses = mockMvc.perform(get("/api/opportunities").with(user(principal))
+                        .param("keyword", "PG eligibility")
+                        .param("eligibilityStatuses", "ELIGIBLE,POSSIBLY_ELIGIBLE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andReturn();
+        assertEquals(Set.of(eligible.getId(), possible.getId(), trainingToday.getId(), trainingPast.getId()),
+                new HashSet<>(opportunityIds(combinedStatuses)));
+
+        for (Object[] expected : new Object[][]{
+                {"NOT_ELIGIBLE", notEligible.getId()}, {"UNKNOWN", unknown.getId()}
+        }) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities").with(user(principal))
+                            .param("keyword", "PG eligibility")
+                            .param("eligibilityStatuses", (String) expected[0]))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andReturn();
+            assertEquals(List.of(expected[1]), opportunityIds(result));
+        }
+
+        MvcResult training = mockMvc.perform(get("/api/opportunities").with(user(principal))
+                        .param("keyword", "PG eligibility")
+                        .param("eligibilityStatuses", "ELIGIBLE")
+                        .param("type", "VOCATIONAL_TRAINING")
+                        .param("category", "career")
+                        .param("region", region.getRegionCode())
+                        .param("applicationStatus", "OPEN")
+                        .param("startDateFrom", today.toString())
+                        .param("sort", "START_DATE_ASC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andReturn();
+        assertEquals(List.of(trainingToday.getId()), opportunityIds(training));
+
+        MvcResult policy = mockMvc.perform(get("/api/opportunities").with(user(principal))
+                        .param("keyword", "PG eligibility")
+                        .param("eligibilityStatuses", "ELIGIBLE")
+                        .param("type", "YOUTH_POLICY")
+                        .param("category", "career")
+                        .param("region", region.getRegionCode())
+                        .param("applicationStatus", "OPEN")
+                        .param("deadlineTo", today.plusDays(1).toString())
+                        .param("sort", "DEADLINE_ASC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andReturn();
+        assertEquals(List.of(eligible.getId()), opportunityIds(policy));
+
+        MvcResult other = mockMvc.perform(get("/api/opportunities")
+                        .with(user(new CustomUserDetails(otherUserId, Role.USER, "other")))
+                        .param("keyword", "PG eligibility")
+                        .param("eligibilityStatuses", "ELIGIBLE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andReturn();
+        assertEquals(List.of(otherOnly.getId()), opportunityIds(other));
+        mockMvc.perform(get("/api/opportunities")
+                        .with(user(new CustomUserDetails(1003L, Role.USER, "no-profile")))
+                        .param("keyword", "PG eligibility")
+                        .param("eligibilityStatuses", "ELIGIBLE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.content.length()").value(0));
+        mockMvc.perform(get("/api/opportunities")
+                        .with(user(new CustomUserDetails(1004L, Role.USER, "no-result")))
+                        .param("keyword", "PG eligibility")
+                        .param("eligibilityStatuses", "ELIGIBLE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.content.length()").value(0));
+    }
+
+    private void eligibilityResult(Long userId, Opportunity opportunity, EligibilityStatus status,
+                                   Long opportunityVersionId, Long profileVersion, String ruleVersion,
+                                   LocalDate validUntil) {
+        entityManager.persist(EligibilityResult.builder()
+                .userId(userId).opportunityId(opportunity.getId())
+                .opportunityVersionId(opportunityVersionId == null
+                        ? opportunity.getCurrentVersion().getId() : opportunityVersionId)
+                .profileVersion(profileVersion).ruleVersion(ruleVersion)
+                .eligibilityStatus(status).conditionResults(List.of())
+                .validUntil(validUntil).evaluatedAt(LocalDateTime.now()).build());
+    }
 
     @Test
     void regionFilterUsesPostgresJsonAndExactPageCounts() throws Exception {
