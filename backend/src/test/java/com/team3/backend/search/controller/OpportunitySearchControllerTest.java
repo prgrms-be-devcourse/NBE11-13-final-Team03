@@ -537,27 +537,27 @@ class OpportunitySearchControllerTest {
 
         mockMvc.perform(get("/api/opportunities")
                         .param("keyword", "V1-5 deadline").param("type", "YOUTH_POLICY")
-                        .param("sort", "DEADLINE_ASC"))
+                        .param("sort", "DEADLINE_PRIORITY"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(7))
                 .andExpect(jsonPath("$.content[0].opportunityId").value(tied.getId()))
                 .andExpect(jsonPath("$.content[1].opportunityId").value(near.getId()))
                 .andExpect(jsonPath("$.content[2].opportunityId").value(multi.getId()))
-                .andExpect(jsonPath("$.content[3].opportunityId").value(unknown.getId()))
+                .andExpect(jsonPath("$.content[3].opportunityId").value(upcoming.getId()))
                 .andExpect(jsonPath("$.content[4].opportunityId").value(always.getId()))
-                .andExpect(jsonPath("$.content[5].opportunityId").value(upcoming.getId()))
-                .andExpect(jsonPath("$.content[6].opportunityId").value(past.getId()));
+                .andExpect(jsonPath("$.content[5].opportunityId").value(past.getId()))
+                .andExpect(jsonPath("$.content[6].opportunityId").value(unknown.getId()));
         mockMvc.perform(get("/api/opportunities")
                         .param("keyword", "V1-5 deadline").param("type", "YOUTH_POLICY")
-                        .param("sort", "DEADLINE_ASC").param("page", "1").param("size", "2"))
+                        .param("sort", "DEADLINE_PRIORITY").param("page", "1").param("size", "2"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].opportunityId").value(multi.getId()))
-                .andExpect(jsonPath("$.content[1].opportunityId").value(unknown.getId()))
+                .andExpect(jsonPath("$.content[1].opportunityId").value(upcoming.getId()))
                 .andExpect(jsonPath("$.totalElements").value(7))
                 .andExpect(jsonPath("$.totalPages").value(4));
         mockMvc.perform(get("/api/opportunities")
                         .param("keyword", "V1-5 deadline").param("type", "YOUTH_POLICY")
-                        .param("sort", "DEADLINE_ASC")
+                        .param("sort", "DEADLINE_PRIORITY")
                         .param("category", "career")
                         .param("region", province.getRegionCode())
                         .param("applicationStatus", "OPEN")
@@ -587,7 +587,8 @@ class OpportunitySearchControllerTest {
                 .andExpect(jsonPath("$.content[0].opportunityId").value(trainingNear.getId()));
 
         for (String[] invalid : new String[][]{
-                {"DEADLINE_ASC", ""}, {"DEADLINE_ASC", "VOCATIONAL_TRAINING"},
+                {"DEADLINE_PRIORITY", ""}, {"DEADLINE_PRIORITY", "VOCATIONAL_TRAINING"},
+                {"DEADLINE_ASC", "YOUTH_POLICY"},
                 {"START_DATE_ASC", ""}, {"START_DATE_ASC", "YOUTH_POLICY"},
                 {"INVALID", "YOUTH_POLICY"}
         }) {

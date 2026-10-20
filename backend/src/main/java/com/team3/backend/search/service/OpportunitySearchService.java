@@ -80,7 +80,7 @@ public class OpportunitySearchService {
                 || (startDateFrom != null && startDateTo != null && startDateFrom.isAfter(startDateTo))
                 || (hasDeadlineRange && type != OpportunityType.YOUTH_POLICY)
                 || (hasStartRange && type != OpportunityType.VOCATIONAL_TRAINING)
-                || (sort == OpportunitySearchSort.DEADLINE_ASC && type != OpportunityType.YOUTH_POLICY)
+                || (sort == OpportunitySearchSort.DEADLINE_PRIORITY && type != OpportunityType.YOUTH_POLICY)
                 || (sort == OpportunitySearchSort.START_DATE_ASC && type != OpportunityType.VOCATIONAL_TRAINING)) {
             throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
         }
@@ -156,12 +156,12 @@ public class OpportunitySearchService {
         Sort pageSort = switch (sort) {
             case LATEST -> Sort.by(Sort.Direction.DESC, "createdAt", "id");
             case OLDEST -> Sort.by(Sort.Direction.ASC, "createdAt", "id");
-            case DEADLINE_ASC, START_DATE_ASC -> Sort.unsorted();
+            case DEADLINE_PRIORITY, START_DATE_ASC -> Sort.unsorted();
         };
-        if (sort == OpportunitySearchSort.DEADLINE_ASC) {
+        if (sort == OpportunitySearchSort.DEADLINE_PRIORITY) {
             filters = filters.and((root, query, criteriaBuilder) -> {
                 if (!Long.class.equals(query.getResultType())) {
-                    orderByDeadline(root, query, criteriaBuilder, today);
+                    orderByDeadlinePriority(root, query, criteriaBuilder, today);
                 }
                 return criteriaBuilder.conjunction();
             });
@@ -245,22 +245,74 @@ public class OpportunitySearchService {
         return criteriaBuilder.exists(subquery);
     }
 
-    private static void orderByDeadline(
+    private static void orderByDeadlinePriority(
             Root<Opportunity> root, CriteriaQuery<?> query,
             CriteriaBuilder criteriaBuilder, LocalDate today
     ) {
+        Predicate open = ApplicationStatusSpecifications.hasStatus(ApplicationStatus.OPEN, today)
+                .toPredicate(root, query, criteriaBuilder);
+        Predicate upcoming = ApplicationStatusSpecifications.hasStatus(ApplicationStatus.UPCOMING, today)
+                .toPredicate(root, query, criteriaBuilder);
+        Predicate alwaysOpen = ApplicationStatusSpecifications.hasStatus(ApplicationStatus.ALWAYS_OPEN, today)
+                .toPredicate(root, query, criteriaBuilder);
+        Predicate closed = ApplicationStatusSpecifications.hasStatus(ApplicationStatus.CLOSED, today)
+                .toPredicate(root, query, criteriaBuilder);
+
+        // 공고 상태는 공통 판정으로 정하고, 대표 마감일만 그 상태에 해당하는 FIXED 기간에서 고른다.
+        Subquery<LocalDate> openDeadline = deadlineForStatus(root, query, criteriaBuilder, today, ApplicationStatus.OPEN);
+        Subquery<LocalDate> upcomingDeadline = deadlineForStatus(root, query, criteriaBuilder, today, ApplicationStatus.UPCOMING);
+        Subquery<LocalDate> closedDeadline = deadlineForStatus(root, query, criteriaBuilder, today, ApplicationStatus.CLOSED);
+        Expression<Integer> priority = criteriaBuilder.<Integer>selectCase()
+                .when(open, 0).when(upcoming, 1).when(alwaysOpen, 2).when(closed, 3).otherwise(4);
+        Expression<LocalDate> date = criteriaBuilder.<LocalDate>selectCase()
+                .when(open, openDeadline).when(upcoming, upcomingDeadline)
+                .when(closed, closedDeadline).otherwise(criteriaBuilder.nullLiteral(LocalDate.class));
+        Expression<LocalDate> ascendingDate = criteriaBuilder.<LocalDate>selectCase()
+                .when(closed, criteriaBuilder.nullLiteral(LocalDate.class)).otherwise(date);
+        Expression<LocalDate> descendingDate = criteriaBuilder.<LocalDate>selectCase()
+                .when(closed, date).otherwise(criteriaBuilder.nullLiteral(LocalDate.class));
+        query.orderBy(
+                criteriaBuilder.asc(priority),
+                criteriaBuilder.asc(criteriaBuilder.<Integer>selectCase()
+                        .when(criteriaBuilder.isNull(date), 1).otherwise(0)),
+                criteriaBuilder.asc(ascendingDate),
+                criteriaBuilder.desc(descendingDate),
+                criteriaBuilder.desc(root.get("id"))
+        );
+    }
+
+    private static Subquery<LocalDate> deadlineForStatus(
+            Root<Opportunity> root, CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder, LocalDate today, ApplicationStatus status
+    ) {
         Subquery<LocalDate> deadline = query.subquery(LocalDate.class);
         Root<ApplicationWindow> window = deadline.from(ApplicationWindow.class);
-        // 현재 열려 있는 유효 기간이 여러 개면 가장 가까운 마감일 하나만 대표값으로 삼는다.
-        deadline.select(criteriaBuilder.least(window.<LocalDate>get("endDate"))).where(
-                criteriaBuilder.equal(window.get("version"), root.get("currentVersion")),
-                criteriaBuilder.equal(window.get("validationStatus"), ValidationStatus.VALID),
-                criteriaBuilder.equal(window.get("periodType"), PeriodType.FIXED),
-                criteriaBuilder.or(criteriaBuilder.isNull(window.get("startDate")),
-                        criteriaBuilder.lessThanOrEqualTo(window.get("startDate"), today)),
-                criteriaBuilder.greaterThanOrEqualTo(window.get("endDate"), today)
-        );
-        orderByNullableDate(root, query, criteriaBuilder, deadline);
+        List<Predicate> predicates = new ArrayList<>();
+        predicates.add(criteriaBuilder.equal(window.get("version"), root.get("currentVersion")));
+        predicates.add(criteriaBuilder.equal(window.get("validationStatus"), ValidationStatus.VALID));
+        predicates.add(criteriaBuilder.equal(window.get("periodType"), PeriodType.FIXED));
+        switch (status) {
+            case OPEN -> {
+                predicates.add(criteriaBuilder.or(criteriaBuilder.isNull(window.get("startDate")),
+                        criteriaBuilder.lessThanOrEqualTo(window.get("startDate"), today)));
+                predicates.add(criteriaBuilder.greaterThanOrEqualTo(window.get("endDate"), today));
+            }
+            case UPCOMING -> {
+                predicates.add(criteriaBuilder.greaterThan(window.get("startDate"), today));
+                predicates.add(criteriaBuilder.greaterThanOrEqualTo(window.get("endDate"), today));
+            }
+            case CLOSED -> {
+                predicates.add(criteriaBuilder.or(criteriaBuilder.isNull(window.get("startDate")),
+                        criteriaBuilder.lessThanOrEqualTo(window.get("startDate"), today)));
+                predicates.add(criteriaBuilder.lessThan(window.get("endDate"), today));
+            }
+            default -> throw new IllegalArgumentException("마감일 정렬 대상이 아닌 신청 상태다.");
+        }
+        Expression<LocalDate> endDate = window.get("endDate");
+        deadline.select(status == ApplicationStatus.CLOSED
+                ? criteriaBuilder.greatest(endDate) : criteriaBuilder.least(endDate));
+        deadline.where(predicates.toArray(Predicate[]::new));
+        return deadline;
     }
 
     private static void orderByTrainingStart(

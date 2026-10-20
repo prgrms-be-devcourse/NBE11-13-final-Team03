@@ -42,6 +42,7 @@ public class OpportunitySearchController {
                     신청 가능성 필터는 저장된 최신 판정 결과만 사용하며 결과가 없거나 오래된 공고는 제외한다. 검색 중 새로 판정하지 않는다.
                     직업훈련의 OPEN 검색은 실제 모집기간 확정이 아니라 교육 시작일이 오늘 또는 이후인 훈련을 포함하는 검색 규칙이다.
                     날짜 범위는 양 끝을 포함한다. deadlineFrom/To는 YOUTH_POLICY, startDateFrom/To는 VOCATIONAL_TRAINING에서만 사용할 수 있다.
+                    DEADLINE_PRIORITY는 청년정책을 OPEN → UPCOMING → ALWAYS_OPEN → CLOSED → UNKNOWN 순으로 정렬하며, 같은 상태에서는 마감일과 ID를 사용한다.
                     """
     )
     @ApiResponses({
@@ -74,7 +75,7 @@ public class OpportunitySearchController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDateFrom,
             @Parameter(description = "직업훈련 교육 시작일 끝(포함), YYYY-MM-DD. type=VOCATIONAL_TRAINING 필수다")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDateTo,
-            @Parameter(description = "LATEST(기본, 최초 등록일 최신순), OLDEST(오래된순), DEADLINE_ASC(정책 마감일순), START_DATE_ASC(훈련 시작일순). 전용 정렬에는 해당 type이 필수다")
+            @Parameter(description = "LATEST(기본, 최초 등록일 최신순), OLDEST(오래된순), DEADLINE_PRIORITY(정책 마감 임박순: OPEN, UPCOMING, ALWAYS_OPEN, CLOSED, UNKNOWN 순), START_DATE_ASC(훈련 시작일순). 전용 정렬에는 해당 type이 필수다")
             @RequestParam(defaultValue = "LATEST") OpportunitySearchSort sort,
             @Parameter(description = "0부터 시작하는 페이지 번호")
             @RequestParam(defaultValue = "0") int page,

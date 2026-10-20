@@ -159,7 +159,7 @@ class OpportunitySearchPostgresTest {
                             .param("deadlineFrom", today.plusDays(1).toString())
                             .param("deadlineTo", today.plusDays(3).toString())
                             .param("eligibilityStatuses", "ELIGIBLE")
-                            .param("sort", "DEADLINE_ASC")
+                            .param("sort", "DEADLINE_PRIORITY")
                             .param("page", String.valueOf(page)).param("size", "2"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalElements").value(3))
@@ -314,7 +314,7 @@ class OpportunitySearchPostgresTest {
                         .param("region", region.getRegionCode())
                         .param("applicationStatus", "OPEN")
                         .param("deadlineTo", today.plusDays(1).toString())
-                        .param("sort", "DEADLINE_ASC"))
+                        .param("sort", "DEADLINE_PRIORITY"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andReturn();
@@ -854,6 +854,171 @@ class OpportunitySearchPostgresTest {
     }
 
     @Test
+    void deadlinePrioritySortsPolicyStatusesAndRepresentativeDatesBeforePagination() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Opportunity openFar = opportunity("PG priority open far", OpportunityType.YOUTH_POLICY);
+        Opportunity upcomingNear = opportunity("PG priority upcoming near", OpportunityType.YOUTH_POLICY);
+        Opportunity openNear = opportunity("PG priority open near", OpportunityType.YOUTH_POLICY);
+        Opportunity openTied = opportunity("PG priority open tied", OpportunityType.YOUTH_POLICY);
+        Opportunity openMissing = opportunity("PG priority open missing", OpportunityType.YOUTH_POLICY);
+        Opportunity openMixed = opportunity("PG priority open mixed", OpportunityType.YOUTH_POLICY);
+        Opportunity upcomingFar = opportunity("PG priority upcoming far", OpportunityType.YOUTH_POLICY);
+        Opportunity upcomingMulti = opportunity("PG priority upcoming multi", OpportunityType.YOUTH_POLICY);
+        Opportunity upcomingMissing = opportunity("PG priority upcoming missing", OpportunityType.YOUTH_POLICY);
+        Opportunity alwaysOld = opportunity("PG priority always old", OpportunityType.YOUTH_POLICY);
+        Opportunity alwaysNew = opportunity("PG priority always new", OpportunityType.YOUTH_POLICY);
+        Opportunity closedOld = opportunity("PG priority closed old", OpportunityType.YOUTH_POLICY);
+        Opportunity closedNear = opportunity("PG priority closed near", OpportunityType.YOUTH_POLICY);
+        Opportunity closedMulti = opportunity("PG priority closed multi", OpportunityType.YOUTH_POLICY);
+        Opportunity closedMissing = opportunity("PG priority closed missing", OpportunityType.YOUTH_POLICY);
+        Opportunity unknownOld = opportunity("PG priority unknown old", OpportunityType.YOUTH_POLICY);
+        Opportunity unknownNew = opportunity("PG priority unknown new", OpportunityType.YOUTH_POLICY);
+
+        window(openFar, PeriodType.FIXED, today.minusDays(1), today.plusDays(5), ValidationStatus.VALID);
+        window(openFar, PeriodType.FIXED, today.minusDays(1), today.plusDays(3), ValidationStatus.VALID);
+        window(upcomingNear, PeriodType.FIXED, today.plusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(openNear, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(openTied, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(openMissing, PeriodType.FIXED, today.minusDays(1), null, ValidationStatus.VALID);
+        window(openMixed, PeriodType.FIXED, today.minusDays(1), today.plusDays(8), ValidationStatus.VALID);
+        window(openMixed, PeriodType.FIXED, today.plusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(upcomingFar, PeriodType.FIXED, today.plusDays(1), today.plusDays(20), ValidationStatus.VALID);
+        window(upcomingMulti, PeriodType.FIXED, today.plusDays(1), today.plusDays(10), ValidationStatus.VALID);
+        window(upcomingMulti, PeriodType.FIXED, today.plusDays(1), today.plusDays(2), ValidationStatus.VALID);
+        window(upcomingMissing, PeriodType.FIXED, today.plusDays(1), null, ValidationStatus.VALID);
+        window(alwaysOld, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        window(alwaysNew, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        window(closedOld, PeriodType.FIXED, today.minusDays(11), today.minusDays(10), ValidationStatus.VALID);
+        window(closedNear, PeriodType.FIXED, today.minusDays(2), today.minusDays(1), ValidationStatus.VALID);
+        window(closedMulti, PeriodType.FIXED, today.minusDays(9), today.minusDays(8), ValidationStatus.VALID);
+        window(closedMulti, PeriodType.FIXED, today.minusDays(3), today.minusDays(2), ValidationStatus.VALID);
+        window(closedMissing, PeriodType.CLOSED, null, null, ValidationStatus.VALID);
+        window(unknownNew, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.INVALID);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Long> expected = List.of(openTied.getId(), openNear.getId(), openFar.getId(),
+                openMixed.getId(), openMissing.getId(), upcomingNear.getId(), upcomingMulti.getId(),
+                upcomingFar.getId(), upcomingMissing.getId(), alwaysNew.getId(), alwaysOld.getId(),
+                closedNear.getId(), closedMulti.getId(), closedOld.getId(), closedMissing.getId(),
+                unknownNew.getId(), unknownOld.getId());
+        List<Long> pagedIds = new ArrayList<>();
+        for (int page = 0; page < 6; page++) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG priority")
+                            .param("type", "YOUTH_POLICY")
+                            .param("sort", "DEADLINE_PRIORITY")
+                            .param("page", String.valueOf(page)).param("size", "3"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(17))
+                    .andExpect(jsonPath("$.totalPages").value(6))
+                    .andExpect(jsonPath("$.hasNext").value(page < 5))
+                    .andReturn();
+            pagedIds.addAll(opportunityIds(result));
+        }
+        assertEquals(expected, pagedIds);
+        assertEquals(expected.size(), new HashSet<>(pagedIds).size());
+
+        for (Object[] group : new Object[][]{
+                {"OPEN", expected.subList(0, 5)},
+                {"UPCOMING", expected.subList(5, 9)},
+                {"ALWAYS_OPEN", expected.subList(9, 11)},
+                {"CLOSED", expected.subList(11, 15)},
+                {"UNKNOWN", expected.subList(15, 17)}
+        }) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG priority")
+                            .param("type", "YOUTH_POLICY")
+                            .param("applicationStatus", (String) group[0])
+                            .param("sort", "DEADLINE_PRIORITY"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(((List<?>) group[1]).size()))
+                    .andReturn();
+            assertEquals(group[1], opportunityIds(result));
+        }
+
+        MvcResult filtered = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG priority")
+                        .param("type", "YOUTH_POLICY")
+                        .param("deadlineFrom", today.plusDays(1).toString())
+                        .param("deadlineTo", today.plusDays(3).toString())
+                        .param("sort", "DEADLINE_PRIORITY"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(6))
+                .andReturn();
+        assertEquals(List.of(openTied.getId(), openNear.getId(), openFar.getId(),
+                openMixed.getId(), upcomingNear.getId(), upcomingMulti.getId()), opportunityIds(filtered));
+    }
+
+    @Test
+    void upcomingPoliciesSortByFutureDeadlinesBeforePagination() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Opportunity near = opportunity("PG upcoming deadline near", OpportunityType.YOUTH_POLICY);
+        Opportunity far = opportunity("PG upcoming deadline far", OpportunityType.YOUTH_POLICY);
+        Opportunity tied = opportunity("PG upcoming deadline tied", OpportunityType.YOUTH_POLICY);
+        Opportunity multi = opportunity("PG upcoming deadline multi", OpportunityType.YOUTH_POLICY);
+        Opportunity missing = opportunity("PG upcoming deadline missing", OpportunityType.YOUTH_POLICY);
+        Opportunity open = opportunity("PG upcoming deadline open", OpportunityType.YOUTH_POLICY);
+        Opportunity always = opportunity("PG upcoming deadline always", OpportunityType.YOUTH_POLICY);
+        Opportunity closed = opportunity("PG upcoming deadline closed", OpportunityType.YOUTH_POLICY);
+        window(near, PeriodType.FIXED, today.plusDays(1), today.plusDays(3), ValidationStatus.VALID);
+        window(far, PeriodType.FIXED, today.plusDays(1), today.plusDays(30), ValidationStatus.VALID);
+        window(tied, PeriodType.FIXED, today.plusDays(1), today.plusDays(3), ValidationStatus.VALID);
+        window(multi, PeriodType.FIXED, today.plusDays(1), today.plusDays(20), ValidationStatus.VALID);
+        window(multi, PeriodType.FIXED, today.plusDays(1), today.plusDays(2), ValidationStatus.VALID);
+        window(missing, PeriodType.FIXED, today.plusDays(1), null, ValidationStatus.VALID);
+        window(open, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
+        window(always, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        window(closed, PeriodType.FIXED, today.minusDays(10), today.minusDays(1), ValidationStatus.VALID);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Long> sortedIds = new ArrayList<>();
+        for (int page = 0; page < 3; page++) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG upcoming deadline")
+                            .param("type", "YOUTH_POLICY")
+                            .param("applicationStatus", "UPCOMING")
+                            .param("sort", "DEADLINE_PRIORITY")
+                            .param("page", String.valueOf(page)).param("size", "2"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(5))
+                    .andExpect(jsonPath("$.totalPages").value(3))
+                    .andExpect(jsonPath("$.hasNext").value(page < 2))
+                    .andReturn();
+            sortedIds.addAll(opportunityIds(result));
+        }
+        assertEquals(List.of(multi.getId(), tied.getId(), near.getId(), far.getId(), missing.getId()),
+                sortedIds);
+        assertEquals(sortedIds.size(), new HashSet<>(sortedIds).size());
+
+        MvcResult dateFiltered = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG upcoming deadline")
+                        .param("type", "YOUTH_POLICY")
+                        .param("applicationStatus", "UPCOMING")
+                        .param("deadlineTo", today.plusDays(3).toString())
+                        .param("sort", "DEADLINE_PRIORITY"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andReturn();
+        assertEquals(List.of(multi.getId(), tied.getId(), near.getId()), opportunityIds(dateFiltered));
+
+        for (Object[] expected : new Object[][]{
+                {"OPEN", open.getId()}, {"ALWAYS_OPEN", always.getId()}, {"CLOSED", closed.getId()}
+        }) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG upcoming deadline")
+                            .param("type", "YOUTH_POLICY")
+                            .param("applicationStatus", (String) expected[0])
+                            .param("sort", "DEADLINE_PRIORITY"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andReturn();
+            assertEquals(List.of(expected[1]), opportunityIds(result));
+        }
+    }
+
+    @Test
     void sortOptionsUsePostgresBeforePaginationAndKeepExactTotals() throws Exception {
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
         Region province = Region.builder().regionCode("1100000000")
@@ -918,7 +1083,7 @@ class OpportunitySearchPostgresTest {
         for (int page = 0; page < 4; page++) {
             MvcResult result = mockMvc.perform(get("/api/opportunities")
                             .param("keyword", "PG sort deadline")
-                            .param("type", "YOUTH_POLICY").param("sort", "DEADLINE_ASC")
+                            .param("type", "YOUTH_POLICY").param("sort", "DEADLINE_PRIORITY")
                             .param("page", String.valueOf(page)).param("size", "1"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalElements").value(4))
@@ -931,7 +1096,7 @@ class OpportunitySearchPostgresTest {
 
         MvcResult combinedPolicy = mockMvc.perform(get("/api/opportunities")
                         .param("keyword", "PG sort deadline").param("type", "YOUTH_POLICY")
-                        .param("sort", "DEADLINE_ASC")
+                        .param("sort", "DEADLINE_PRIORITY")
                         .param("category", "career").param("region", province.getRegionCode())
                         .param("applicationStatus", "OPEN")
                         .param("deadlineFrom", today.plusDays(1).toString()))

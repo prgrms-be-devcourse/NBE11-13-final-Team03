@@ -4,6 +4,6 @@ package com.team3.backend.search.dto;
 public enum OpportunitySearchSort {
     LATEST,
     OLDEST,
-    DEADLINE_ASC,
+    DEADLINE_PRIORITY,
     START_DATE_ASC
 }
