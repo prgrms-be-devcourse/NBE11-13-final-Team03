@@ -14,6 +14,10 @@ import java.time.LocalDateTime;
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_user_opportunity_preferences_user_opportunity",
                 columnNames = {"user_id", "opportunity_id"}
+        ),
+        indexes = @Index(
+                name = "idx_user_opportunity_preferences_saved_users",
+                columnList = "opportunity_id, is_saved, user_id"
         )
 )
 @Getter

@@ -12,7 +12,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-/** 사용자별 공고 상태와 저장 목록을 조회한다. */
+/** 사용자별 공고 상태와 저장 목록·공고별 저장 사용자를 조회한다. */
 @Repository
 public interface UserOpportunityPreferenceRepository
         extends JpaRepository<UserOpportunityPreference, Long> {
@@ -48,6 +48,34 @@ public interface UserOpportunityPreferenceRepository
     List<Long> findSavedOpportunityIds(
             @Param("userId") Long userId,
             @Param("opportunityIds") Collection<Long> opportunityIds
+    );
+
+    /** 공고를 저장한 사용자 ID를 마지막 ID 이후부터 오름차순으로 조회한다. */
+    @Query("""
+        select preference.user.id
+        from UserOpportunityPreference preference
+        where preference.opportunity.id = :opportunityId
+          and preference.isSaved = true
+          and preference.user.id > :afterUserId
+        order by preference.user.id asc
+        """)
+    List<Long> findSavedUserIdsAfter(
+            @Param("opportunityId") Long opportunityId,
+            @Param("afterUserId") Long afterUserId,
+            Pageable pageable
+    );
+
+    /** 지정한 사용자 중 해당 공고를 현재 저장한 사용자 ID만 조회한다. */
+    @Query("""
+        select preference.user.id
+        from UserOpportunityPreference preference
+        where preference.opportunity.id = :opportunityId
+          and preference.user.id in :userIds
+          and preference.isSaved = true
+        """)
+    List<Long> findSavedUserIds(
+            @Param("opportunityId") Long opportunityId,
+            @Param("userIds") Collection<Long> userIds
     );
 
     /** 공고를 함께 읽어 저장 목록과 정확한 전체 건수를 페이지로 반환한다. */

@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -132,6 +133,25 @@ public class PreferenceService {
             return Set.of();
         }
         return Set.copyOf(preferenceRepository.findSavedOpportunityIds(userId, opportunityIds));
+    }
+
+    /** 저장 사용자 ID를 커서 다음부터 조회하며 첫 호출의 커서는 0이다. */
+    @Transactional(readOnly = true)
+    public List<Long> getSavedUserIdsAfter(Long opportunityId, Long afterUserId, int size) {
+        if (size < 1) {
+            throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
+        }
+        return preferenceRepository.findSavedUserIdsAfter(
+                opportunityId, afterUserId, PageRequest.of(0, size));
+    }
+
+    /** 지정한 사용자 중 공고를 현재 저장한 ID를 한 번에 재확인한다. */
+    @Transactional(readOnly = true)
+    public Set<Long> getSavedUserIds(Long opportunityId, Collection<Long> userIds) {
+        if (userIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(preferenceRepository.findSavedUserIds(opportunityId, userIds));
     }
 
     private User getLockedUser(Long userId) {

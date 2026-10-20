@@ -113,7 +113,7 @@ class UserOpportunityPreferenceRepositoryTest {
                 results.stream().map(UserOpportunityPreference::getId)
                         .collect(Collectors.toSet()));
 
-        Sort sort = Sort.by(Sort.Direction.DESC, "savedAt");
+        Sort sort = Sort.by(Sort.Direction.DESC, "savedAt", "id");
         Page<UserOpportunityPreference> firstPage = preferenceRepository
                 .findSavedPageByUserId(user.getId(), PageRequest.of(0, 1, sort));
         Page<UserOpportunityPreference> secondPage = preferenceRepository
