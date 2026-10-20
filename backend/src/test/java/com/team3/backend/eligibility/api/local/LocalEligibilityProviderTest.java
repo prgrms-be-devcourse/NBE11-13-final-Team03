@@ -189,6 +189,40 @@ class LocalEligibilityProviderTest {
         assertThat(provider.findFreshStatuses(USER, List.of(), LocalDate.of(2026, 10, 20))).isEmpty();
     }
 
+    @Test
+    void 상세_조회는_재판정하지_않고_저장된_최신_결과를_사유와_조건까지_돌려준다() {
+        Long policy = normalizePolicy("R2026-1", "11680");
+        persistProfile();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+
+        assertThat(provider.findFreshEligibility(USER, policy, today)).isEmpty();
+        assertThat(em.createQuery("select count(r) from EligibilityResult r", Long.class).getSingleResult()).isZero();
+
+        EligibilitySnapshot judged = provider.getEligibilities(USER, List.of(policy)).getFirst();
+        em.clear();
+
+        EligibilitySnapshot fresh = provider.findFreshEligibility(USER, policy, today).orElseThrow();
+        assertThat(fresh.status()).isEqualTo(EligibilityStatus.ELIGIBLE);
+        assertThat(fresh.reason()).isEqualTo(judged.reason());
+        assertThat(fresh.conditions()).isEqualTo(judged.conditions()).isNotEmpty();
+        assertThat(fresh.opportunity().opportunityId()).isEqualTo(policy);
+        assertThat(fresh.opportunity().title()).isEqualTo("청년 월세 지원");
+        assertThat(fresh.ruleVersion()).isEqualTo(EligibilityResultService.RULE_VERSION);
+
+        em.createQuery("update EligibilityProfile p set p.profileVersion = p.profileVersion + 1 where p.userId = :u")
+                .setParameter("u", USER).executeUpdate();
+        em.clear();
+        assertThat(provider.findFreshEligibility(USER, policy, today)).isEmpty();
+    }
+
+    @Test
+    void 상세_조회는_프로필이_없거나_없는_기회면_빈_값이다() {
+        Long policy = normalizePolicy("R2026-1", "11680");
+
+        assertThat(provider.findFreshEligibility(99L, policy, LocalDate.of(2026, 10, 20))).isEmpty();
+        assertThat(provider.findFreshEligibility(USER, 999_999L, LocalDate.of(2026, 10, 20))).isEmpty();
+    }
+
     private Long normalizePolicy(String plcyNo, String zipCd) {
         YouthPolicyRaw raw = YouthPolicyRaw.builder()
                 .plcyNo(plcyNo).plcyNm("청년 월세 지원")
