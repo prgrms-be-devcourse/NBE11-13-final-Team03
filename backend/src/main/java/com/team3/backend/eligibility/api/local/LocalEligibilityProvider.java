@@ -78,9 +78,23 @@ public class LocalEligibilityProvider implements EligibilityProvider {
                 .collect(Collectors.toUnmodifiableMap(EligibilityStatusRow::opportunityId, EligibilityStatusRow::status));
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<EligibilitySnapshot> findFreshEligibility(Long userId, Long opportunityId, LocalDate today) {
+        Objects.requireNonNull(userId, "userId");
+        Objects.requireNonNull(opportunityId, "opportunityId");
+        Objects.requireNonNull(today, "today");
+        return resultRepository.findFresh(userId, opportunityId, EligibilityResultService.RULE_VERSION, today)
+                .map(r -> withOpportunities(List.of(r), today).getFirst());
+    }
+
     private List<EligibilitySnapshot> withOpportunities(List<EligibilityResult> results) {
+        return withOpportunities(results, LocalDate.now(KST));
+    }
+
+    private List<EligibilitySnapshot> withOpportunities(List<EligibilityResult> results, LocalDate today) {
         Map<Long, OpportunityInfo> infos = opportunityInfoAssembler.assemble(
-                results.stream().map(EligibilityResult::getOpportunityId).toList(), LocalDate.now(KST));
+                results.stream().map(EligibilityResult::getOpportunityId).toList(), today);
         return results.stream().map(r -> toSnapshot(r, infos.get(r.getOpportunityId()))).toList();
     }
 
