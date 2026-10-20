@@ -87,11 +87,13 @@ class ManualSyncControllerIntegrationTests {
     private static volatile int blockedYouthPage;
     private static volatile String employmentRecords = "[]";
     private static volatile int youthFailurePage;
+    private static volatile int youthResultCode;
     private static volatile int employmentFailureCode;
     private static volatile int youthTotalOverride;
     private static volatile CountDownLatch youthRelease = new CountDownLatch(0);
     private static volatile CountDownLatch youthEntered = new CountDownLatch(0);
     private static final AtomicInteger EMPLOYMENT_CALLS = new AtomicInteger();
+    private static final AtomicInteger YOUTH_CALLS = new AtomicInteger();
 
     @Autowired private MockMvc mvc;
     @Autowired private SyncJobService jobs;
@@ -121,6 +123,7 @@ class ManualSyncControllerIntegrationTests {
         youthRecords = "[{\"plcyNo\":\"p1\",\"title\":\"A\",\"nested\":{\"z\":2,\"a\":1}}]";
         employmentRecords = "[]";
         youthFailurePage = 0;
+        youthResultCode = 0;
         employmentFailureCode = 0;
         youthTotalOverride = -1;
         youthSecondRecords = "[]";
@@ -128,6 +131,7 @@ class ManualSyncControllerIntegrationTests {
         youthRelease = new CountDownLatch(0);
         youthEntered = new CountDownLatch(0);
         EMPLOYMENT_CALLS.set(0);
+        YOUTH_CALLS.set(0);
     }
 
     @AfterEach
@@ -298,6 +302,56 @@ class ManualSyncControllerIntegrationTests {
     }
 
     @Test
+    void firstPageOutageStopsAfterThreeCallsAndPersistsFailedHistory() throws Exception {
+        youthFailurePage = 1;
+        var result = awaitDone(start("YOUTH_POLICY"));
+        assertEquals(SyncJobStatus.FAILED, result.status());
+        assertEquals(3, YOUTH_CALLS.get());
+        assertEquals(1, result.failedPageCount());
+        assertEquals("HTTP_503", result.pageFailures().getFirst().errorCode());
+        assertEquals(0, records.count());
+    }
+
+    @Test
+    void firstPageApiErrorStopsImmediatelyAndPersistsFailedHistory() throws Exception {
+        youthFailurePage = 1;
+        youthResultCode = 401;
+        var result = awaitDone(start("YOUTH_POLICY"));
+        assertEquals(SyncJobStatus.FAILED, result.status());
+        assertEquals(1, YOUTH_CALLS.get());
+        assertEquals("API_ERROR", result.pageFailures().getFirst().errorCode());
+        assertEquals(0, records.count());
+    }
+
+    @Test
+    void middlePageApiErrorPreservesSavedRecordsAndEndsAsPartialSuccess() throws Exception {
+        youthFailurePage = 2;
+        youthResultCode = 403;
+        youthTotalOverride = 1000;
+        var result = awaitDone(start("YOUTH_POLICY", 1));
+        assertEquals(SyncJobStatus.PARTIAL_SUCCESS, result.status());
+        assertEquals(2, YOUTH_CALLS.get());
+        assertEquals(1, result.successCount());
+        assertEquals(2, result.pageFailures().getFirst().pageNumber());
+        assertEquals(1, records.count());
+        assertEquals(1, normalizationRequests.count());
+    }
+
+    @Test
+    void failedScheduledAttemptIsRecognizedOnlyOnItsKoreanCalendarDay() {
+        long id = jobs.createScheduled(CollectionSource.YOUTH_POLICY).jobId();
+        jobs.fail(id, "API 장애", false);
+        var from = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"))
+                .atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toOffsetDateTime();
+        assertTrue(histories.existsBySourceSourceCodeAndSyncTypeAndStartedAtGreaterThanEqualAndStartedAtLessThan(
+                "YOUTH_POLICY", "SCHEDULED", from, from.plusDays(1)));
+        assertFalse(histories.existsBySourceSourceCodeAndSyncTypeAndStartedAtGreaterThanEqualAndStartedAtLessThan(
+                "YOUTH_POLICY", "MANUAL", from, from.plusDays(1)));
+        assertFalse(histories.existsBySourceSourceCodeAndSyncTypeAndStartedAtGreaterThanEqualAndStartedAtLessThan(
+                "YOUTH_POLICY", "SCHEDULED", from.plusDays(1), from.plusDays(2)));
+    }
+
+    @Test
     void storageFailureRollsBackBothSnapshotAndSuccessCounter() throws Exception {
         youthRecords = "[{\"plcyNo\":\"bad\",\"title\":\"reject\"},{\"plcyNo\":\"good\",\"title\":\"keep\"}]";
         jdbc.execute("alter table raw_external_record add constraint reject_manual_test check (payload ->> 'title' <> 'reject')");
@@ -437,6 +491,7 @@ class ManualSyncControllerIntegrationTests {
     }
 
     private static void youth(HttpExchange exchange) throws IOException {
+        YOUTH_CALLS.incrementAndGet();
         var query = query(exchange);
         int page = Integer.parseInt(query.get("pageNum"));
         if (blockedYouthPage == 0 || page == blockedYouthPage) {
@@ -453,7 +508,8 @@ class ManualSyncControllerIntegrationTests {
             }
         }
         if (page == youthFailurePage) {
-            respond(exchange, 503, "{}");
+            respond(exchange, youthResultCode == 0 ? 503 : 200,
+                    "{\"resultCode\":" + youthResultCode + "}");
             return;
         }
         int count = youthTotalOverride >= 0 ? youthTotalOverride : MAPPER.readTree(youthRecords).size();

@@ -45,7 +45,9 @@ public class CollectionScheduler {
         for (var source : CollectionSource.values()) {
             try {
                 if (!histories.existsBySourceSourceCodeAndStatusAndStartedAtGreaterThanEqualAndStartedAtLessThan(
-                        source.name(), SyncJobStatus.SUCCESS, from, until)) {
+                        source.name(), SyncJobStatus.SUCCESS, from, until)
+                        && !histories.existsBySourceSourceCodeAndSyncTypeAndStartedAtGreaterThanEqualAndStartedAtLessThan(
+                        source.name(), "SCHEDULED", from, until)) {
                     start(source);
                 }
             } catch (RuntimeException exception) {
