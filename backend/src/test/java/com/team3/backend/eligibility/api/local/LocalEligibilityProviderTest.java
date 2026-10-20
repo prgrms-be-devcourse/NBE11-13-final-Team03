@@ -34,7 +34,9 @@ import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -155,6 +157,36 @@ class LocalEligibilityProviderTest {
 
         assertThatThrownBy(() -> provider.getEligibilities(99L, List.of(policy)))
                 .extracting("errorCode").isEqualTo(EligibilityErrorCode.PROFILE_NOT_FOUND);
+    }
+
+    @Test
+    void 상태_일괄_조회는_재판정하지_않고_저장된_최신_결과만_돌려준다() {
+        Long gangnamPolicy = normalizePolicy("R2026-1", "11680");
+        Long mapoPolicy = normalizePolicy("R2026-2", "11440");
+        persistProfile();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+
+        assertThat(provider.findFreshStatuses(USER, List.of(gangnamPolicy, mapoPolicy), today)).isEmpty();
+        assertThat(em.createQuery("select count(r) from EligibilityResult r", Long.class).getSingleResult()).isZero();
+
+        provider.getEligibilities(USER, List.of(gangnamPolicy, mapoPolicy));
+
+        assertThat(provider.findFreshStatuses(USER, List.of(gangnamPolicy, mapoPolicy, 999_999L), today))
+                .containsExactlyInAnyOrderEntriesOf(Map.of(
+                        gangnamPolicy, EligibilityStatus.ELIGIBLE, mapoPolicy, EligibilityStatus.NOT_ELIGIBLE));
+
+        em.createQuery("update EligibilityProfile p set p.profileVersion = p.profileVersion + 1 where p.userId = :u")
+                .setParameter("u", USER).executeUpdate();
+        em.clear();
+        assertThat(provider.findFreshStatuses(USER, List.of(gangnamPolicy, mapoPolicy), today)).isEmpty();
+    }
+
+    @Test
+    void 상태_일괄_조회는_프로필이_없거나_ID가_비면_빈_맵이다() {
+        Long policy = normalizePolicy("R2026-1", "11680");
+
+        assertThat(provider.findFreshStatuses(99L, List.of(policy), LocalDate.of(2026, 10, 20))).isEmpty();
+        assertThat(provider.findFreshStatuses(USER, List.of(), LocalDate.of(2026, 10, 20))).isEmpty();
     }
 
     private Long normalizePolicy(String plcyNo, String zipCd) {

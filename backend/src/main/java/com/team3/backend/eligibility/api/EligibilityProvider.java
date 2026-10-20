@@ -4,8 +4,10 @@ import com.team3.backend.eligibility.api.dto.EligibilitySnapshot;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshotPage;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 다른 영역(추천 등)이 판정 결과를 받아 가는 유일한 진입점.
@@ -15,9 +17,10 @@ import java.util.List;
  * - local (기본): 같은 애플리케이션 안에서 직접 호출 → LocalEligibilityProvider
  * - MSA 전환 시: HTTP 등 원격 구현을 추가하고 이 값을 바꾼다. 호출하는 쪽 코드는 바뀌지 않는다
  *
- * 두 메서드 모두 오래되거나 없는 판정 결과를 먼저 다시 판정한 뒤 돌려준다.
+ * getEligibilities·findByStatuses는 오래되거나 없는 판정 결과를 먼저 다시 판정한 뒤 돌려준다.
  * 결과마다 추천에 필요한 기회 요약(OpportunityInfo: 분류, NCS, 모집 상태, 마감일, 교육 시작일, 등록일)을 함께 담는다.
  * 판정 프로필이 없는 사용자는 BusinessException(PROFILE_NOT_FOUND).
+ * findFreshStatuses는 재판정하지 않고 저장된 최신 결과의 상태만 읽는다 (검색 목록 표시용).
  */
 public interface EligibilityProvider {
 
@@ -32,4 +35,12 @@ public interface EligibilityProvider {
      * 사용자의 정규화된 기회 전체를 먼저 최신화하므로 단건 조회보다 무겁다.
      */
     EligibilitySnapshotPage findByStatuses(Long userId, Collection<EligibilityStatus> statuses, int page, int size);
+
+    /**
+     * 저장된 최신 판정 결과의 상태만 기회 ID별로 일괄 조회한다 (예: 검색 결과 페이지의 신청 가능성 표시). DB 조회 전용, 재판정하지 않는다.
+     * 최신 기준은 EligibilitySpecifications와 같다 (현재 기회 버전·판정 프로필 버전·규칙 버전이 같고 validUntil이 today보다 뒤).
+     * 결과가 없거나 오래된 기회는 맵에서 빠진다. 실제 UNKNOWN 판정은 UNKNOWN으로 들어 있다.
+     * 판정 프로필이 없는 사용자는 빈 맵을 돌려준다 (예외 아님). today는 한국 시간 날짜를 넘긴다.
+     */
+    Map<Long, EligibilityStatus> findFreshStatuses(Long userId, Collection<Long> opportunityIds, LocalDate today);
 }

@@ -9,6 +9,7 @@ import com.team3.backend.eligibility.domain.entity.ConditionMatchResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
+import com.team3.backend.eligibility.dto.EligibilityStatusRow;
 import com.team3.backend.eligibility.exception.EligibilityErrorCode;
 import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.global.exception.BusinessException;
@@ -61,6 +62,20 @@ public class LocalEligibilityProvider implements EligibilityProvider {
                 PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "opportunityId")));
         return new EligibilitySnapshotPage(withOpportunities(results.getContent()),
                 page, size, results.getTotalElements(), results.hasNext());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, EligibilityStatus> findFreshStatuses(Long userId, Collection<Long> opportunityIds, LocalDate today) {
+        Objects.requireNonNull(userId, "userId");
+        Objects.requireNonNull(opportunityIds, "opportunityIds");
+        Objects.requireNonNull(today, "today");
+        List<Long> ids = opportunityIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return resultRepository.findFreshStatuses(userId, ids, EligibilityResultService.RULE_VERSION, today).stream()
+                .collect(Collectors.toUnmodifiableMap(EligibilityStatusRow::opportunityId, EligibilityStatusRow::status));
     }
 
     private List<EligibilitySnapshot> withOpportunities(List<EligibilityResult> results) {
