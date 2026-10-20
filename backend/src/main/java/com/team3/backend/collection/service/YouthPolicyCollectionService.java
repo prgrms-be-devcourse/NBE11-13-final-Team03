@@ -1,0 +1,77 @@
+package com.team3.backend.collection.service;
+
+import com.team3.backend.collection.client.YouthPolicyClient;
+import com.team3.backend.collection.dto.external.YouthPolicyCollectionResult;
+import com.team3.backend.collection.dto.external.CollectionSummary;
+import com.team3.backend.collection.dto.external.YouthPolicyPage;
+import com.team3.backend.collection.dto.response.SyncPageFailureResponse;
+import com.team3.backend.collection.exception.YouthPolicyClientException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.Objects;
+import java.util.function.BiConsumer;
+import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+
+@Service
+public class YouthPolicyCollectionService {
+    private final YouthPolicyClient client;
+
+    public YouthPolicyCollectionService(YouthPolicyClient client) {
+        this.client = client;
+    }
+
+    public YouthPolicyCollectionResult collect() {
+        return collect(100, 1000);
+    }
+
+    public YouthPolicyCollectionResult collect(int pageSize, int maxPages) {
+        List<JsonNode> records = new ArrayList<>();
+        var summary = collectPages(pageSize, maxPages, (offset, page) -> records.addAll(page));
+        return new YouthPolicyCollectionResult(records, summary.pageFailures(), summary.completed());
+    }
+
+    /** offset은 전체 수집 결과 내 시작 인덱스다. 처리기가 반환한 뒤 다음 페이지를 조회한다. */
+    public CollectionSummary collectPages(int pageSize, int maxPages,
+                                          BiConsumer<Integer, List<JsonNode>> pageHandler) {
+        if (pageSize < 1 || maxPages < 1) {
+            throw new IllegalArgumentException("페이지 크기와 최대 조회 페이지 수는 1 이상이어야 합니다.");
+        }
+        Objects.requireNonNull(pageHandler, "페이지 처리기가 필요합니다.");
+        int fetchedCount = 0;
+        List<SyncPageFailureResponse> failures = new ArrayList<>();
+        Integer totalCount = null;
+        for (int pageNumber = 1; ; pageNumber++) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new CancellationException("수집 실행이 중단되었습니다.");
+            }
+            YouthPolicyPage page = null;
+            try {
+                page = client.fetchPage(pageNumber, pageSize);
+            } catch (YouthPolicyClientException exception) {
+                failures.add(new SyncPageFailureResponse(pageNumber,
+                        exception.getErrorCode(), exception.getMessage(), exception.isRetryable()));
+                if (exception.getErrorCode().equals("HTTP_401") || exception.getErrorCode().equals("HTTP_403")) {
+                    return new CollectionSummary(fetchedCount, false, failures, List.of(), List.of());
+                }
+            }
+            if (page != null) {
+                pageHandler.accept(fetchedCount, page.records());
+                fetchedCount += page.records().size();
+                if (page.totalCount() != null) {
+                    totalCount = page.totalCount();
+                }
+                if (page.records().isEmpty()) {
+                    return new CollectionSummary(fetchedCount, true, failures, List.of(), List.of());
+                }
+            }
+            if (totalCount != null && (long) pageNumber * pageSize >= totalCount) {
+                return new CollectionSummary(fetchedCount, true, failures, List.of(), List.of());
+            }
+            if (pageNumber == maxPages) {
+                return new CollectionSummary(fetchedCount, false, failures, List.of(), List.of());
+            }
+        }
+    }
+}
