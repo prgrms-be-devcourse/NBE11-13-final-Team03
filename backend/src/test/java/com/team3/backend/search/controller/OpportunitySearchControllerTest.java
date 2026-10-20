@@ -612,7 +612,9 @@ class OpportunitySearchControllerTest {
 
         mockMvc.perform(get("/api/opportunities").param("keyword", "V1-6"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(2));
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].eligibilityStatus").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].saved").value(false));
         mockMvc.perform(get("/api/opportunities").param("keyword", "V1-6")
                         .param("eligibilityStatuses", "ELIGIBLE"))
                 .andExpect(status().isUnauthorized());
@@ -629,7 +631,9 @@ class OpportunitySearchControllerTest {
                         .param("keyword", "V1-6").param("eligibilityStatuses", "ELIGIBLE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1))
-                .andExpect(jsonPath("$.content[0].opportunityId").value(eligible.getId()));
+                .andExpect(jsonPath("$.content[0].opportunityId").value(eligible.getId()))
+                .andExpect(jsonPath("$.content[0].eligibilityStatus").value("ELIGIBLE"))
+                .andExpect(jsonPath("$.content[0].saved").value(false));
         mockMvc.perform(get("/api/opportunities").with(user(principal))
                         .param("keyword", "V1-6")
                         .param("eligibilityStatuses", "ELIGIBLE,POSSIBLY_ELIGIBLE"))
@@ -640,6 +644,13 @@ class OpportunitySearchControllerTest {
                         .param("keyword", "V1-6").param("eligibilityStatuses", "ELIGIBLE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(0));
+
+        mockMvc.perform(get("/api/opportunities").with(user(principal))
+                        .param("keyword", "V1-6"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].eligibilityStatus").value("POSSIBLY_ELIGIBLE"))
+                .andExpect(jsonPath("$.content[1].eligibilityStatus").value("ELIGIBLE"));
     }
 
     private void addEligibilityResult(Long userId, Opportunity opportunity, EligibilityStatus status) {
@@ -672,6 +683,8 @@ class OpportunitySearchControllerTest {
                 .andExpect(jsonPath("$.content[0].opportunityId").value(match.getId()))
                 .andExpect(jsonPath("$.content[0].type").value("YOUTH_POLICY"))
                 .andExpect(jsonPath("$.content[0].createdAt").exists())
+                .andExpect(jsonPath("$.content[0].eligibilityStatus").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].saved").value(false))
                 .andExpect(jsonPath("$.page").value(0))
                 .andExpect(jsonPath("$.size").value(20))
                 .andExpect(jsonPath("$.totalElements").value(1))

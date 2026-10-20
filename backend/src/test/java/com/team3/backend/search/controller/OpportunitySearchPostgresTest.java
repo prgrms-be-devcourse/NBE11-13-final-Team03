@@ -27,6 +27,9 @@ import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
 import com.jayway.jsonpath.JsonPath;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -46,12 +49,14 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -84,6 +89,9 @@ class OpportunitySearchPostgresTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
 
     @Autowired
     private RegionDirectory regionDirectory;
@@ -346,6 +354,164 @@ class OpportunitySearchPostgresTest {
                 .profileVersion(profileVersion).ruleVersion(ruleVersion)
                 .eligibilityStatus(status).conditionResults(List.of())
                 .validUntil(validUntil).evaluatedAt(LocalDateTime.now()).build());
+    }
+
+    @Test
+    void searchDisplaysOnlyCurrentUsersFreshStatusesAndSavedIdsWithoutPerItemQueries() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Region region = Region.builder().regionCode("1171000000").regionName("Songpa").build();
+        entityManager.persist(region);
+        User account = User.builder().kakaoId(990011L).role(Role.USER).build();
+        User otherAccount = User.builder().kakaoId(990012L).role(Role.USER).build();
+        User noProfileAccount = User.builder().kakaoId(990013L).role(Role.USER).build();
+        entityManager.persist(account);
+        entityManager.persist(otherAccount);
+        entityManager.persist(noProfileAccount);
+        for (Long profileUserId : List.of(account.getId(), otherAccount.getId())) {
+            entityManager.persist(EligibilityProfile.builder()
+                    .userId(profileUserId).birthDate(LocalDate.of(1998, 1, 1))
+                    .residenceRegion(region).employmentStatus(EmploymentStatus.UNEMPLOYED)
+                    .educationLevel(EducationLevel.UNIVERSITY).build());
+        }
+
+        Opportunity eligible = opportunity("PG display eligible", OpportunityType.YOUTH_POLICY);
+        Opportunity possible = opportunity("PG display possible", OpportunityType.YOUTH_POLICY);
+        Opportunity notEligible = opportunity("PG display not eligible", OpportunityType.YOUTH_POLICY);
+        Opportunity unknown = opportunity("PG display unknown", OpportunityType.YOUTH_POLICY);
+        Opportunity staleVersion = opportunity("PG display stale version", OpportunityType.YOUTH_POLICY);
+        Opportunity staleProfile = opportunity("PG display stale profile", OpportunityType.YOUTH_POLICY);
+        Opportunity staleRule = opportunity("PG display stale rule", OpportunityType.YOUTH_POLICY);
+        Opportunity expired = opportunity("PG display expired", OpportunityType.YOUTH_POLICY);
+        Opportunity noResult = opportunity("PG display no result", OpportunityType.YOUTH_POLICY);
+        eligibilityResult(account.getId(), eligible, EligibilityStatus.ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(account.getId(), possible, EligibilityStatus.POSSIBLY_ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(account.getId(), notEligible, EligibilityStatus.NOT_ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(account.getId(), unknown, EligibilityStatus.UNKNOWN, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(account.getId(), staleVersion, EligibilityStatus.ELIGIBLE,
+                staleVersion.getCurrentVersion().getId() + 1000, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(account.getId(), staleProfile, EligibilityStatus.ELIGIBLE, null, 2L,
+                EligibilityResultService.RULE_VERSION, null);
+        eligibilityResult(account.getId(), staleRule, EligibilityStatus.ELIGIBLE, null, 1L,
+                "old-rule", null);
+        eligibilityResult(account.getId(), expired, EligibilityStatus.ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, today);
+        eligibilityResult(otherAccount.getId(), noResult, EligibilityStatus.ELIGIBLE, null, 1L,
+                EligibilityResultService.RULE_VERSION, null);
+
+        UserOpportunityPreference both = UserOpportunityPreference.builder()
+                .user(account).opportunity(eligible).build();
+        both.markSaved();
+        both.markHidden();
+        entityManager.persist(both);
+        UserOpportunityPreference saved = UserOpportunityPreference.builder()
+                .user(account).opportunity(unknown).build();
+        saved.markSaved();
+        entityManager.persist(saved);
+        UserOpportunityPreference otherSaved = UserOpportunityPreference.builder()
+                .user(otherAccount).opportunity(possible).build();
+        otherSaved.markSaved();
+        entityManager.persist(otherSaved);
+        UserOpportunityPreference noProfileSaved = UserOpportunityPreference.builder()
+                .user(noProfileAccount).opportunity(notEligible).build();
+        noProfileSaved.markSaved();
+        entityManager.persist(noProfileSaved);
+        entityManager.flush();
+        entityManager.clear();
+
+        CustomUserDetails principal = new CustomUserDetails(account.getId(), Role.USER, "display");
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        boolean statisticsEnabled = statistics.isStatisticsEnabled();
+        statistics.setStatisticsEnabled(true);
+        try {
+            long beforePublic = statistics.getPrepareStatementCount();
+            MvcResult publicPage = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG display").param("size", "2"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(9))
+                    .andExpect(jsonPath("$.totalPages").value(5))
+                    .andReturn();
+            long publicQueries = statistics.getPrepareStatementCount() - beforePublic;
+            for (Map<String, Object> item : searchItems(publicPage).values()) {
+                assertNull(item.get("eligibilityStatus"));
+                assertEquals(false, item.get("saved"));
+            }
+
+            long beforeAuthenticated = statistics.getPrepareStatementCount();
+            MvcResult authenticatedPage = mockMvc.perform(get("/api/opportunities")
+                            .with(user(principal)).param("keyword", "PG display").param("size", "2"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(9))
+                    .andExpect(jsonPath("$.totalPages").value(5))
+                    .andReturn();
+            assertEquals(publicQueries + 2,
+                    statistics.getPrepareStatementCount() - beforeAuthenticated);
+            assertEquals(opportunityIds(publicPage), opportunityIds(authenticatedPage));
+
+            long beforeLargePage = statistics.getPrepareStatementCount();
+            MvcResult largePage = mockMvc.perform(get("/api/opportunities")
+                            .with(user(principal)).param("keyword", "PG display"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(9))
+                    .andExpect(jsonPath("$.content.length()").value(9))
+                    .andReturn();
+            assertEquals(3, statistics.getPrepareStatementCount() - beforeLargePage);
+            Map<Long, Map<String, Object>> items = searchItems(largePage);
+            assertEquals("ELIGIBLE", items.get(eligible.getId()).get("eligibilityStatus"));
+            assertEquals(true, items.get(eligible.getId()).get("saved"));
+            assertEquals("POSSIBLY_ELIGIBLE", items.get(possible.getId()).get("eligibilityStatus"));
+            assertEquals(false, items.get(possible.getId()).get("saved"));
+            assertEquals("NOT_ELIGIBLE", items.get(notEligible.getId()).get("eligibilityStatus"));
+            assertEquals("UNKNOWN", items.get(unknown.getId()).get("eligibilityStatus"));
+            assertEquals(true, items.get(unknown.getId()).get("saved"));
+            for (Opportunity stale : List.of(staleVersion, staleProfile, staleRule, expired, noResult)) {
+                assertNull(items.get(stale.getId()).get("eligibilityStatus"));
+                assertEquals(false, items.get(stale.getId()).get("saved"));
+            }
+
+            MvcResult filtered = mockMvc.perform(get("/api/opportunities")
+                            .with(user(principal)).param("keyword", "PG display")
+                            .param("eligibilityStatuses", "ELIGIBLE"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andReturn();
+            assertEquals(List.of(eligible.getId()), opportunityIds(filtered));
+            assertEquals("ELIGIBLE", searchItems(filtered).get(eligible.getId()).get("eligibilityStatus"));
+
+            MvcResult other = mockMvc.perform(get("/api/opportunities")
+                            .with(user(new CustomUserDetails(otherAccount.getId(), Role.USER, "other")))
+                            .param("keyword", "PG display"))
+                    .andExpect(status().isOk()).andReturn();
+            assertNull(searchItems(other).get(eligible.getId()).get("eligibilityStatus"));
+            assertEquals(false, searchItems(other).get(eligible.getId()).get("saved"));
+            assertEquals("ELIGIBLE", searchItems(other).get(noResult.getId()).get("eligibilityStatus"));
+            assertEquals(true, searchItems(other).get(possible.getId()).get("saved"));
+
+            MvcResult noProfile = mockMvc.perform(get("/api/opportunities")
+                            .with(user(new CustomUserDetails(noProfileAccount.getId(), Role.USER, "no-profile")))
+                            .param("keyword", "PG display"))
+                    .andExpect(status().isOk()).andReturn();
+            assertNull(searchItems(noProfile).get(eligible.getId()).get("eligibilityStatus"));
+            assertEquals(true, searchItems(noProfile).get(notEligible.getId()).get("saved"));
+
+            long beforeEmptyPublic = statistics.getPrepareStatementCount();
+            mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG display").param("page", "9").param("size", "2"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.content.length()").value(0));
+            long emptyPublicQueries = statistics.getPrepareStatementCount() - beforeEmptyPublic;
+            long beforeEmptyAuthenticated = statistics.getPrepareStatementCount();
+            mockMvc.perform(get("/api/opportunities").with(user(principal))
+                            .param("keyword", "PG display").param("page", "9").param("size", "2"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.content.length()").value(0));
+            assertEquals(emptyPublicQueries,
+                    statistics.getPrepareStatementCount() - beforeEmptyAuthenticated);
+        } finally {
+            statistics.setStatisticsEnabled(statisticsEnabled);
+        }
     }
 
     @Test
@@ -798,6 +964,15 @@ class OpportunitySearchPostgresTest {
         List<Number> ids = JsonPath.read(result.getResponse().getContentAsString(),
                 "$.content[*].opportunityId");
         return ids.stream().map(Number::longValue).toList();
+    }
+
+    private static Map<Long, Map<String, Object>> searchItems(MvcResult result) throws Exception {
+        List<Map<String, Object>> content = JsonPath.read(result.getResponse().getContentAsString(), "$.content");
+        Map<Long, Map<String, Object>> items = new HashMap<>();
+        for (Map<String, Object> item : content) {
+            items.put(((Number) item.get("opportunityId")).longValue(), item);
+        }
+        return items;
     }
 
     private Opportunity opportunity(String title, OpportunityType type) {

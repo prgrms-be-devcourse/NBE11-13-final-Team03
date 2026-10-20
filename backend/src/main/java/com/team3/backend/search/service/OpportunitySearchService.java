@@ -1,5 +1,6 @@
 package com.team3.backend.search.service;
 
+import com.team3.backend.eligibility.api.EligibilityProvider;
 import com.team3.backend.eligibility.api.EligibilitySpecifications;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.global.exception.BusinessException;
@@ -16,6 +17,7 @@ import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.opportunity.domain.repository.ApplicationStatusSpecifications;
 import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.preference.service.PreferenceService;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.directory.RegionIndex;
 import com.team3.backend.search.domain.repository.OpportunitySearchRepository;
@@ -42,10 +44,11 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
-/** 정규화된 공고의 검색 조건과 신청 가능성 판정 결과를 페이지 조회에 결합한다. */
+/** 정규화된 공고를 검색하고 현재 페이지의 신청 가능성·저장 상태를 표시한다. */
 @Service
 @RequiredArgsConstructor
 public class OpportunitySearchService {
@@ -54,8 +57,10 @@ public class OpportunitySearchService {
 
     private final OpportunitySearchRepository searchRepository;
     private final RegionDirectory regionDirectory;
+    private final EligibilityProvider eligibilityProvider;
+    private final PreferenceService preferenceService;
 
-    /** 공고 조건을 DB에서 결합하고 선택한 정렬 기준으로 페이지를 조회한다. */
+    /** 공고를 DB에서 페이지 조회한 뒤 인증 사용자에게 현재 페이지의 개인화 상태를 덧붙인다. */
     @Transactional(readOnly = true)
     public OpportunitySearchResponseDto search(
             String keyword, OpportunityType type, String category, String subCategory,
@@ -169,12 +174,25 @@ public class OpportunitySearchService {
             });
         }
         // DB에서 대표 날짜를 정렬한 뒤 페이지를 잘라야 결과 순서와 전체 건수가 유지된다.
-        Page<OpportunitySearchItemDto> results = searchRepository
-                .findAll(filters, PageRequest.of(page, size, pageSort))
-                .map(OpportunitySearchItemDto::from);
+        Page<Opportunity> results = searchRepository.findAll(
+                filters, PageRequest.of(page, size, pageSort));
+        Map<Long, EligibilityStatus> freshStatuses = Map.of();
+        Set<Long> savedIds = Set.of();
+        if (userId != null && !results.isEmpty()) {
+            List<Long> opportunityIds = results.getContent().stream().map(Opportunity::getId).toList();
+            freshStatuses = eligibilityProvider.findFreshStatuses(userId, opportunityIds, today);
+            savedIds = preferenceService.getSavedOpportunityIds(userId, opportunityIds);
+        }
+        Map<Long, EligibilityStatus> statusesById = freshStatuses;
+        Set<Long> savedOpportunityIds = savedIds;
+        List<OpportunitySearchItemDto> items = results.getContent().stream()
+                .map(opportunity -> OpportunitySearchItemDto.from(
+                        opportunity, statusesById.get(opportunity.getId()),
+                        savedOpportunityIds.contains(opportunity.getId())))
+                .toList();
 
         return new OpportunitySearchResponseDto(
-                results.getContent(), results.getNumber(), results.getSize(),
+                items, results.getNumber(), results.getSize(),
                 results.getTotalElements(), results.getTotalPages(), results.hasNext()
         );
     }
