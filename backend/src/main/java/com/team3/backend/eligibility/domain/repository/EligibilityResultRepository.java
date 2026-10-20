@@ -7,6 +7,7 @@ import com.team3.backend.eligibility.dto.EligibilityStatusRow;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -28,6 +29,13 @@ public interface EligibilityResultRepository extends JpaRepository<EligibilityRe
             + "from EligibilityResult r where r.userId = :userId and r.opportunityId in :opportunityIds")
     List<EligibilityResultFreshness> findFreshness(@Param("userId") Long userId,
                                                    @Param("opportunityIds") Collection<Long> opportunityIds);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+        delete from EligibilityResult r
+        where r.userId = :userId
+        """)
+    int deleteAllByUserId(@Param("userId") Long userId);
 
     /**
      * 저장된 최신 판정 결과의 상태만 조회한다 (재판정하지 않음). 최신 기준은 EligibilityResultFreshness.isFresh·EligibilitySpecifications와 같다:

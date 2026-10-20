@@ -1,5 +1,8 @@
 package com.team3.backend.user.service;
 
+import com.team3.backend.auth.domain.repository.RefreshTokenRepository;
+import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
+import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.user.domain.entity.User;
 import com.team3.backend.user.domain.repository.UserRepository;
@@ -18,6 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final EligibilityResultRepository eligibilityResultRepository;
+    private final EligibilityProfileRepository eligibilityProfileRepository;
 
 
     @Operation(
@@ -48,5 +54,24 @@ public class UserService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
         return UserMeResponseDto.from(user);
+    }
+
+    @Transactional
+    public void withdraw(Long userId) {
+        if (!userRepository.existsById(userId)) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // User를 참조하는 FK 데이터부터 삭제
+        refreshTokenRepository.deleteAllByUserId(userId);
+
+        // 사용자별 정책 판정 데이터 삭제
+        eligibilityResultRepository.deleteAllByUserId(userId);
+
+        // 맞춤 조건 삭제
+        eligibilityProfileRepository.deleteAllByUserId(userId);
+
+        // 마지막으로 사용자 삭제
+        userRepository.deleteById(userId);
     }
 }
