@@ -34,6 +34,7 @@ class EventScanHistoryTest {
                 .isEqualTo(STARTED_AT);
         assertThat(history.getUpdatedAt())
                 .isEqualTo(STARTED_AT);
+        assertThat(history.getExecutionId()).isNotBlank();
     }
 
     @Test
@@ -105,6 +106,13 @@ class EventScanHistoryTest {
         assertThat(history.getCompletedAt()).isNull();
         assertThat(history.getRetryCount()).isEqualTo(1);
         assertThat(history.getLastError()).isNull();
+        String previousExecutionId =
+                history.getExecutionId();
+
+        history.restart(restartedAt);
+
+        assertThat(history.getExecutionId())
+                .isNotEqualTo(previousExecutionId);
     }
 
     @Test

@@ -65,6 +65,9 @@ public class EventScanHistory {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "execution_id", nullable = false, length = 36)
+    private String executionId;
+
     public static EventScanHistory start(
             LocalDate scanDate,
             Instant now
@@ -74,6 +77,9 @@ public class EventScanHistory {
 
         return EventScanHistory.builder()
                 .scanDate(scanDate)
+                .executionId(
+                        java.util.UUID.randomUUID().toString()
+                )
                 .status(EventScanStatus.RUNNING)
                 .startedAt(now)
                 .retryCount(0)
@@ -114,6 +120,8 @@ public class EventScanHistory {
             );
         }
 
+        this.executionId =
+                java.util.UUID.randomUUID().toString();
         this.status = EventScanStatus.RUNNING;
         this.startedAt = now;
         this.completedAt = null;
