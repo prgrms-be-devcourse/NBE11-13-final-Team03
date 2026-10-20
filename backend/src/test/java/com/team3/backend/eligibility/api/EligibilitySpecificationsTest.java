@@ -1,6 +1,7 @@
 package com.team3.backend.eligibility.api;
 
 import com.team3.backend.eligibility.domain.entity.*;
+import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.dto.EligibilityResultFreshness;
 import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.opportunity.domain.entity.*;
@@ -13,6 +14,7 @@ import jakarta.persistence.criteria.Root;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.data.jpa.domain.Specification;
@@ -52,6 +54,8 @@ class EligibilitySpecificationsTest {
 
     @PersistenceContext
     private EntityManager em;
+    @Autowired
+    private EligibilityResultRepository resultRepository;
 
     /** 기회 ID → 사용자 USER의 저장된 결과 (없으면 null) */
     private final Map<Long, EligibilityResult> resultByOpportunity = new LinkedHashMap<>();
@@ -140,6 +144,24 @@ class EligibilitySpecificationsTest {
 
         assertThat(others).hasSize(1);
         assertThat(mine).doesNotContainAnyElementsOf(others);
+    }
+
+    @Test
+    void 상태_일괄_조회도_같은_최신_기준으로_상태를_돌려준다() {
+        List<Long> all = new ArrayList<>(resultByOpportunity.keySet());
+        all.add(withoutVersionId);
+
+        Map<Long, EligibilityStatus> actual = new HashMap<>();
+        resultRepository.findFreshStatuses(USER, all, RULE, TODAY)
+                .forEach(row -> actual.put(row.opportunityId(), row.status()));
+
+        Map<Long, EligibilityStatus> expected = new HashMap<>();
+        for (Long id : expected(Set.of(EligibilityStatus.values()))) {
+            expected.put(id, resultByOpportunity.get(id).getEligibilityStatus());
+        }
+        assertThat(actual).isEqualTo(expected);
+        assertThat(actual).containsValue(UNKNOWN);
+        assertThat(resultRepository.findFreshStatuses(NO_PROFILE_USER, all, RULE, TODAY)).isEmpty();
     }
 
     /** 판정 서비스 기준(isFresh)으로 계산한 기대값 */
