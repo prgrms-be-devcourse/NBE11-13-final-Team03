@@ -36,7 +36,7 @@ jobs:
           import pathlib
           import xml.etree.ElementTree as ET
 
-          report = pathlib.Path('backend/build/test-results/test/TEST-com.team3.backend.collection.service.NormalizationNotificationListenerTests.xml')
+          report = pathlib.Path('backend/build/test-results/test/TEST-com.team3.backend.collection.service.NormalizationNotificationTriggerTests.xml')
           suite = ET.parse(report).getroot()
           assert int(suite.attrib['tests']) > 0, 'Notification tests did not run'
           for key in ('skipped', 'failures', 'errors'):
