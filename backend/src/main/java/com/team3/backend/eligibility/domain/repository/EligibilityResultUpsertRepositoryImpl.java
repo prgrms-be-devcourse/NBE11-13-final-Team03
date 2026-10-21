@@ -42,6 +42,7 @@ public class EligibilityResultUpsertRepositoryImpl implements EligibilityResultU
                 valid_until = EXCLUDED.valid_until,
                 evaluated_at = EXCLUDED.evaluated_at
             WHERE EXCLUDED.profile_version >= t.profile_version
+              AND EXCLUDED.opportunity_version_id >= t.opportunity_version_id
               AND (t.opportunity_version_id, t.profile_version, t.rule_version, t.eligibility_status, t.reason,
                    t.condition_results, t.valid_until)
                   IS DISTINCT FROM
@@ -67,6 +68,21 @@ public class EligibilityResultUpsertRepositoryImpl implements EligibilityResultU
                 .setParameter("evaluatedAt", evaluatedAt)
                 .setParameter("rows", toJson(rows))
                 .executeUpdate();
+    }
+
+    @Override
+    public boolean lacksStatistics() {
+        Object exists = em.createNativeQuery("""
+                        SELECT EXISTS (SELECT 1 FROM pg_stats
+                                       WHERE schemaname = current_schema() AND tablename = 'eligibility_results')
+                        """)
+                .getSingleResult();
+        return !Boolean.TRUE.equals(exists);
+    }
+
+    @Override
+    public void analyze() {
+        em.createNativeQuery("ANALYZE eligibility_results").executeUpdate();
     }
 
     private static String toJson(List<UpsertRow> rows) {
