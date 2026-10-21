@@ -257,6 +257,28 @@ class TrainingCourseNormalizationServiceTest {
         assertThat(judgement.applicationStatus()).isEqualTo(ApplicationStatus.UNKNOWN);
     }
 
+    @Test
+    void 조건_묶음은_훈련유형으로만_나뉘고_훈련_지역과_무관하다() {
+        service.normalizePage(page(DAY1,
+                withTarget("C1", "국민내일배움카드(주 훈련대상 : 구직자)", "C0061S"),
+                withTarget("C2", "국민내일배움카드(일반)", "C0061"),
+                withTarget("K1", "K-디지털 트레이닝", "C0104"),
+                withTarget("O1", "실업자원격훈련", "C0055"),
+                withTarget("O2", "과정평가형", "C0055C"),
+                TrainingCourseRaw.builder().trprId("C3").trprDegr("1").title("훈련과정 C3").subTitle("훈련기관")
+                        .traStartDate("2026-10-19").traEndDate("2027-03-30")
+                        .trainTarget("국민내일배움카드(일반)").trainTargetCd("C0061").trngAreaCd("41630").build()));
+        flushAndClear();
+
+        assertThat(setOf("C1:1")).isNotNull().isEqualTo(setOf("C2:1")).isEqualTo(setOf("C3:1"));
+        assertThat(setOf("O1:1")).isNotNull().isEqualTo(setOf("O2:1"));
+        assertThat(java.util.Set.of(setOf("C1:1"), setOf("K1:1"), setOf("O1:1"))).hasSize(3);
+    }
+
+    private Long setOf(String externalId) {
+        return opportunityOf(externalId).getCurrentVersion().getConditionSetId();
+    }
+
     private EligibilityProfile.EligibilityProfileBuilder profileBuilder() {
         return EligibilityProfile.builder()
                 .userId(1L)
