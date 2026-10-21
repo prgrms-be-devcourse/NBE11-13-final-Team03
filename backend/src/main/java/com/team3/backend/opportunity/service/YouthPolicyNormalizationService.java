@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.util.*;
 
@@ -36,6 +37,8 @@ import java.util.*;
  *    추가 자격(addAplyQlfcCndCn)·참여 제한(ptcpPrpTrgtCn) 원문은 구조화하지 않고 검토 대상 조건으로 보존한다.
  * 2. 출처 매핑: (sourceId, plcyNo)로 기존 Opportunity를 찾고, 없으면 새로 만든다
  * 3. 버전: 정규화 스냅샷이 현재 버전과 같으면 새 버전을 만들지 않는다. 다르면 새 버전과 조건·신청기간을 저장한다.
+ * 4. 상세: 지원 내용·기관·신청 방법·URL·사업기간 등 화면용 정보를 버전별 YouthPolicyDetail에 저장한다.
+ *    스냅샷에도 "policy"·"businessPeriod"로 넣어 상세 정보만 바뀌어도 새 버전을 만든다 (공백만 다른 원문은 같게 본다).
  *
  * 스냅샷에는 비교 기준이 되는 정규화 값만 넣는다. 기준일에 따라 바뀌는 값(현재 신청 상태), 수집·확인 시각,
  * 원문 해시, 원문 표기(신청기간 원문 등)는 넣지 않는다. 근거·원문은 조건과 신청기간 행에 보관한다.
@@ -44,7 +47,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class YouthPolicyNormalizationService {
 
-    public static final String NORMALIZATION_VERSION = "0.1.0";
+    public static final String NORMALIZATION_VERSION = "0.2.0";
 
     /** 코드 필드 → (조건 분류, 조건 필드명) */
     private static final List<CodeField> CODE_FIELDS = List.of(
@@ -71,6 +74,7 @@ public class YouthPolicyNormalizationService {
     private final ApplicationWindowRepository windowRepository;
     private final OpportunityRegionRepository opportunityRegionRepository;
     private final RegionRepository regionRepository;
+    private final YouthPolicyDetailRepository detailRepository;
 
     @Transactional
     public NormalizationResult normalize(NormalizationCommand command) {
@@ -103,6 +107,7 @@ public class YouthPolicyNormalizationService {
 
         Map<String, Object> snapshot = snapshot(raw, age.result(), periods.periods(), region);
         putConditions(snapshot, codes, income, raw);
+        putDetail(snapshot, raw);
 
         Optional<OpportunitySource> existing = sourceRepository.findBySourceIdAndExternalId(command.sourceId(), raw.plcyNo());
         Opportunity opportunity;
@@ -139,6 +144,7 @@ public class YouthPolicyNormalizationService {
                 .personalizationStatus(personalizationStatus(age.result()))
                 .normalizationVersion(NORMALIZATION_VERSION)
                 .build());
+        detailRepository.save(detail(version, raw));
         conditionRepository.save(ageCondition(version, age));
         conditionRepository.save(regionCondition(version, region));
         for (CodeField f : CODE_FIELDS) {
@@ -199,6 +205,74 @@ public class YouthPolicyNormalizationService {
         usage.put("exclusionReasons", exclusionReasons(age, periods, region));
         snapshot.put("usage", usage);
         return snapshot;
+    }
+
+    /** 상세 정보를 스냅샷에 더한다. 비교용이라 원문은 공백을 정리하고, 날짜는 읽은 값만 넣는다 */
+    static void putDetail(Map<String, Object> snapshot, YouthPolicyRaw raw) {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        putIfNotNull(policy, "description", normalizedText(raw.plcyExplnCn()));
+        putIfNotNull(policy, "supportContent", normalizedText(raw.plcySprtCn()));
+        putIfNotNull(policy, "keywords", normalizedText(raw.plcyKywdNm()));
+        putIfNotNull(policy, "supervisingInstitutionName", normalizedText(raw.sprvsnInstCdNm()));
+        putIfNotNull(policy, "operatingInstitutionName", normalizedText(raw.operInstCdNm()));
+        putIfNotNull(policy, "applicationMethod", normalizedText(raw.plcyAplyMthdCn()));
+        putIfNotNull(policy, "screeningMethod", normalizedText(raw.srngMthdCn()));
+        putIfNotNull(policy, "submissionDocuments", normalizedText(raw.sbmsnDcmntCn()));
+        putIfNotNull(policy, "applicationUrl", blankToNull(raw.aplyUrlAddr()));
+        putIfNotNull(policy, "referenceUrl1", blankToNull(raw.refUrlAddr1()));
+        putIfNotNull(policy, "referenceUrl2", blankToNull(raw.refUrlAddr2()));
+        putIfNotNull(policy, "supportScale", blankToNull(raw.sprtSclCnt()));
+        putIfNotNull(policy, "otherNotes", normalizedText(raw.etcMttrCn()));
+        putIfNotNull(policy, "firstRegisteredDate", dateText(parseDate(raw.frstRegDt())));
+        snapshot.put("policy", policy);
+
+        Map<String, Object> business = new LinkedHashMap<>();
+        putIfNotNull(business, "startDate", dateText(parseDate(raw.bizPrdBgngYmd())));
+        putIfNotNull(business, "endDate", dateText(parseDate(raw.bizPrdEndYmd())));
+        putIfNotNull(business, "text", normalizedText(raw.bizPrdEtcCn()));
+        snapshot.put("businessPeriod", business);
+    }
+
+    /** 화면용 상세. 원문은 줄바꿈을 살려 앞뒤 공백만 제거한다 */
+    static YouthPolicyDetail detail(OpportunityVersion version, YouthPolicyRaw raw) {
+        return YouthPolicyDetail.builder()
+                .version(version)
+                .policyNo(raw.plcyNo().trim())
+                .description(blankToNull(raw.plcyExplnCn()))
+                .supportContent(blankToNull(raw.plcySprtCn()))
+                .keywords(blankToNull(raw.plcyKywdNm()))
+                .supervisingInstitutionName(blankToNull(raw.sprvsnInstCdNm()))
+                .operatingInstitutionName(blankToNull(raw.operInstCdNm()))
+                .applicationMethod(blankToNull(raw.plcyAplyMthdCn()))
+                .screeningMethod(blankToNull(raw.srngMthdCn()))
+                .submissionDocuments(blankToNull(raw.sbmsnDcmntCn()))
+                .applicationUrl(blankToNull(raw.aplyUrlAddr()))
+                .referenceUrl1(blankToNull(raw.refUrlAddr1()))
+                .referenceUrl2(blankToNull(raw.refUrlAddr2()))
+                .businessStartDate(parseDate(raw.bizPrdBgngYmd()))
+                .businessEndDate(parseDate(raw.bizPrdEndYmd()))
+                .businessPeriodText(blankToNull(raw.bizPrdEtcCn()))
+                .supportScale(blankToNull(raw.sprtSclCnt()))
+                .otherNotes(blankToNull(raw.etcMttrCn()))
+                .firstRegisteredDate(parseDate(raw.frstRegDt()))
+                .build();
+    }
+
+    /** 숫자만 모아 앞 8자리를 yyyyMMdd로 읽는다 ("20260101", "2026-01-01 10:00:00" 모두 가능). 읽을 수 없으면 null */
+    static LocalDate parseDate(String value) {
+        if (value == null) {
+            return null;
+        }
+        String digits = value.replaceAll("\\D", "");
+        if (digits.length() < 8) {
+            return null;
+        }
+        try {
+            return LocalDate.of(Integer.parseInt(digits.substring(0, 4)), Integer.parseInt(digits.substring(4, 6)),
+                    Integer.parseInt(digits.substring(6, 8)));
+        } catch (DateTimeException e) {
+            return null;
+        }
     }
 
     /** 코드·소득·자유텍스트 조건을 스냅샷과 활용 제한 사유에 더한다 */
@@ -428,7 +502,7 @@ public class YouthPolicyNormalizationService {
 
     /** 공백만 다른 원문은 같은 조건으로 본다 */
     static String normalizedText(String value) {
-        return value == null || value.isBlank() ? null : value.trim().replaceAll("\s+", " ");
+        return value == null || value.isBlank() ? null : value.trim().replaceAll("\\s+", " ");
     }
 
     private static String codeValue(YouthPolicyRaw raw, String field) {

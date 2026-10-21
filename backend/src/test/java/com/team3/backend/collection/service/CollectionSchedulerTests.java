@@ -64,4 +64,32 @@ class CollectionSchedulerTests {
         verify(sync, never()).startScheduled(CollectionSource.YOUTH_POLICY);
         verify(sync).startScheduled(CollectionSource.EMPLOYMENT24);
     }
+
+    @Test
+    void scheduledAttemptPreventsAnotherAttemptOnEveryRestart() {
+        var now = ZonedDateTime.parse("2026-10-18T10:00:00+09:00[Asia/Seoul]");
+        var from = now.toLocalDate().atStartOfDay(now.getZone()).toOffsetDateTime();
+        var until = from.plusDays(1);
+        when(histories.existsBySourceSourceCodeAndSyncTypeAndStartedAtGreaterThanEqualAndStartedAtLessThan(
+                "YOUTH_POLICY", "SCHEDULED", from, until)).thenReturn(true);
+
+        scheduler.recoverMissedSchedule(now);
+        scheduler.recoverMissedSchedule(now.plusHours(1));
+
+        verify(sync, never()).startScheduled(CollectionSource.YOUTH_POLICY);
+        verify(sync, times(2)).startScheduled(CollectionSource.EMPLOYMENT24);
+    }
+
+    @Test
+    void nextDayWithoutAnAttemptCanCatchUpAgain() {
+        var firstDay = ZonedDateTime.parse("2026-10-18T10:00:00+09:00[Asia/Seoul]");
+        var from = firstDay.toLocalDate().atStartOfDay(firstDay.getZone()).toOffsetDateTime();
+        when(histories.existsBySourceSourceCodeAndSyncTypeAndStartedAtGreaterThanEqualAndStartedAtLessThan(
+                "YOUTH_POLICY", "SCHEDULED", from, from.plusDays(1))).thenReturn(true);
+
+        scheduler.recoverMissedSchedule(firstDay);
+        scheduler.recoverMissedSchedule(firstDay.plusDays(1));
+
+        verify(sync).startScheduled(CollectionSource.YOUTH_POLICY);
+    }
 }

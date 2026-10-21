@@ -4,6 +4,7 @@ import com.team3.backend.auth.domain.entity.RefreshToken;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -52,5 +53,10 @@ public interface RefreshTokenRepository
             String sessionId
     );
 
-    void deleteAllByUserId(Long userId);
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+    delete from RefreshToken rt
+    where rt.user.id = :userId
+    """)
+    int deleteAllByUserId(@Param("userId") Long userId);
 }

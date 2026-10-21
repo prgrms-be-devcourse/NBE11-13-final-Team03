@@ -9,6 +9,7 @@ import com.team3.backend.eligibility.domain.entity.ConditionMatchResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
+import com.team3.backend.eligibility.dto.EligibilityStatusRow;
 import com.team3.backend.eligibility.exception.EligibilityErrorCode;
 import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.global.exception.BusinessException;
@@ -63,9 +64,37 @@ public class LocalEligibilityProvider implements EligibilityProvider {
                 page, size, results.getTotalElements(), results.hasNext());
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, EligibilityStatus> findFreshStatuses(Long userId, Collection<Long> opportunityIds, LocalDate today) {
+        Objects.requireNonNull(userId, "userId");
+        Objects.requireNonNull(opportunityIds, "opportunityIds");
+        Objects.requireNonNull(today, "today");
+        List<Long> ids = opportunityIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return resultRepository.findFreshStatuses(userId, ids, EligibilityResultService.RULE_VERSION, today).stream()
+                .collect(Collectors.toUnmodifiableMap(EligibilityStatusRow::opportunityId, EligibilityStatusRow::status));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<EligibilitySnapshot> findFreshEligibility(Long userId, Long opportunityId, LocalDate today) {
+        Objects.requireNonNull(userId, "userId");
+        Objects.requireNonNull(opportunityId, "opportunityId");
+        Objects.requireNonNull(today, "today");
+        return resultRepository.findFresh(userId, opportunityId, EligibilityResultService.RULE_VERSION, today)
+                .map(r -> withOpportunities(List.of(r), today).getFirst());
+    }
+
     private List<EligibilitySnapshot> withOpportunities(List<EligibilityResult> results) {
+        return withOpportunities(results, LocalDate.now(KST));
+    }
+
+    private List<EligibilitySnapshot> withOpportunities(List<EligibilityResult> results, LocalDate today) {
         Map<Long, OpportunityInfo> infos = opportunityInfoAssembler.assemble(
-                results.stream().map(EligibilityResult::getOpportunityId).toList(), LocalDate.now(KST));
+                results.stream().map(EligibilityResult::getOpportunityId).toList(), today);
         return results.stream().map(r -> toSnapshot(r, infos.get(r.getOpportunityId()))).toList();
     }
 
