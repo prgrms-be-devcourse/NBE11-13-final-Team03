@@ -1,5 +1,6 @@
 package com.team3.backend.user.controller;
 
+import com.team3.backend.auth.cookie.TokenCookieManager;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.user.dto.UserMeResponseDto;
 import com.team3.backend.user.service.UserService;
@@ -8,9 +9,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class UserController {
     private final UserService userService;
+    private final TokenCookieManager tokenCookieManager;
 
     @Operation(
             summary = "내 정보 조회",
@@ -55,5 +59,41 @@ public class UserController {
         return ResponseEntity.ok(
                 userService.getMyInfo(userDetails.getUserId())
         );
+    }
+
+    @Operation(
+            summary = "회원 탈퇴",
+            description = """
+                현재 로그인한 사용자의 계정과 관련 데이터를 삭제합니다.
+
+                Refresh Token, 맞춤 조건 및 신청 가능성 판정 결과를 삭제하고
+                인증 Cookie를 만료시킵니다.
+                """
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "204",
+                    description = "회원 탈퇴 성공"
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "인증되지 않은 사용자"
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "사용자를 찾을 수 없음"
+            )
+    })
+    @SecurityRequirement(name = "cookieAuth")
+    @DeleteMapping("/me")
+    public ResponseEntity<Void> withdraw(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            HttpServletResponse response
+    ) {
+        userService.withdraw(userDetails.getUserId());
+
+        tokenCookieManager.deleteTokenCookies(response);
+
+        return ResponseEntity.noContent().build();
     }
 }

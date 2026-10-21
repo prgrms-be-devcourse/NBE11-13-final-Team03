@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +38,15 @@ public class SyncJobService {
 
     @Transactional
     public SyncStartResponse create(CollectionSource sourceType) {
+        return create(sourceType, "MANUAL");
+    }
+
+    @Transactional
+    public SyncStartResponse createScheduled(CollectionSource sourceType) {
+        return create(sourceType, "SCHEDULED");
+    }
+
+    private SyncStartResponse create(CollectionSource sourceType, String syncType) {
         boolean youth = sourceType == CollectionSource.YOUTH_POLICY;
         sources.registerIfAbsent(sourceType.name(), youth ? "온통청년" : "고용24",
                 youth ? youthPolicyUrl : employment24Url);
@@ -48,8 +58,9 @@ public class SyncJobService {
         if (histories.existsBySourceIdAndStatusIn(source.getId(), ACTIVE)) {
             throw new IllegalStateException("해당 출처의 최신화가 이미 대기 중이거나 실행 중입니다.");
         }
-        var history = histories.save(SyncHistory.pendingManual(source, OffsetDateTime.now()));
-        return new SyncStartResponse(history.getId(), sourceType.name(), history.getStatus(), "수동 최신화 요청을 접수했습니다.");
+        var history = histories.save(SyncHistory.pending(source, syncType, OffsetDateTime.now()));
+        return new SyncStartResponse(history.getId(), sourceType.name(), history.getStatus(),
+                "MANUAL".equals(syncType) ? "수동 최신화 요청을 접수했습니다." : "정기 최신화 요청을 접수했습니다.");
     }
 
     @Transactional(readOnly = true)
@@ -95,10 +106,11 @@ public class SyncJobService {
     }
 
     @EventListener(ApplicationReadyEvent.class)
+    @Order(0)
     @Transactional
     public void recoverInterrupted() {
         // ponytail: 단일 앱 인스턴스의 재시작 복구다. 다중 인스턴스 전환 시 소유권·임대 기반 복구가 필요하다.
-        for (var history : histories.findBySyncTypeAndStatusInAndStartedAtBefore("MANUAL", ACTIVE, applicationStartedAt)) {
+        for (var history : histories.findByStatusInAndStartedAtBefore(ACTIVE, applicationStartedAt)) {
             history.fail("애플리케이션 재시작으로 수집 실행이 중단되었습니다.", true, OffsetDateTime.now());
         }
     }

@@ -19,8 +19,8 @@ import java.util.Map;
  * - 휘발성 메타데이터를 넣지 않는다: 수집·확인 시각(verifiedAt), lastMdfcnDt, payload_hash, raw id 등.
  *   (근거 추적용 정보는 조건의 evidence에 둔다)
  * - 사업기간(bizPrdSeCd/bizPrdBgngYmd/bizPrdEndYmd/bizPrdEtcCn)은 "businessPeriod"로 분리하며 신청기간으로 쓰지 않는다.
- * - 정책 고유 속성(plcyExplnCn, plcySprtCn, plcyKywdNm, mclsfNm, 기관, aplyUrlAddr, refUrlAddr1/2 등)은
- *   YouthPolicy 테이블이 합의되기 전까지 이 스냅샷에 둔다.
+ * - 청년정책 상세 속성(plcyExplnCn, plcySprtCn, plcyKywdNm, 기관, aplyUrlAddr, refUrlAddr1/2 등)은 "policy"로 넣고,
+ *   화면용 값은 YouthPolicyDetail에 저장한다. 직업훈련 속성은 "training" + TrainingCourseDetail.
  * - "usage": 기준일과 무관한 값만 담는다. {"trackingEligible": true, "exclusionReasons": ["AGE_UNKNOWN", ...]}
  *   recommendationEligible·notificationEligible은 현재 신청 상태(OPEN/ALWAYS_OPEN/CLOSED 등)에 따라 달라지므로
  *   저장하지 않고, 조회 시점에 personalization_status·exclusionReasons·근거 신뢰도와 함께 계산한다.

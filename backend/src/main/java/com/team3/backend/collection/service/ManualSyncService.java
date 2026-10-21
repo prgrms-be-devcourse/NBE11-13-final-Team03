@@ -21,10 +21,18 @@ public class ManualSyncService {
     }
 
     public SyncStartResponse start(CollectionSource source, int pageSize, int maxPages) {
+        return start(source, pageSize, maxPages, false);
+    }
+
+    public SyncStartResponse startScheduled(CollectionSource source) {
+        return start(source, 100, 1000, true);
+    }
+
+    private SyncStartResponse start(CollectionSource source, int pageSize, int maxPages, boolean scheduled) {
         if (pageSize < 1 || pageSize > 100 || maxPages < 1 || maxPages > 1000) {
             throw new IllegalArgumentException("페이지 크기는 1~100, 최대 페이지 수는 1~1000이어야 합니다.");
         }
-        var response = jobs.create(source);
+        var response = scheduled ? jobs.createScheduled(source) : jobs.create(source);
         try {
             executor.execute(() -> worker.run(response.jobId(), source, pageSize, maxPages));
         } catch (TaskRejectedException exception) {
