@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 
 @RestControllerAdvice(assignableTypes = {RawRecordController.class, ManualSyncController.class})
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -37,8 +38,8 @@ public class CollectionExceptionHandler {
         return global.handleBusinessException(new BusinessException(CollectionErrorCode.INVALID_BODY));
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> invalidArgument(IllegalArgumentException exception) {
+    @ExceptionHandler({IllegalArgumentException.class, MissingServletRequestParameterException.class})
+    public ResponseEntity<ErrorResponse> invalidArgument(Exception exception) {
         return global.handleBusinessException(new BusinessException(CollectionErrorCode.INVALID_ARGUMENT));
     }
 

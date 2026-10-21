@@ -12,7 +12,9 @@ import com.team3.backend.collection.dto.response.SyncStartResponse;
 import com.team3.backend.collection.domain.repository.ExternalSourceRepository;
 import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
 import jakarta.persistence.EntityNotFoundException;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -70,6 +72,18 @@ public class SyncJobService {
         }
         return SyncJobResponse.from(histories.findById(jobId)
                 .orElseThrow(() -> new EntityNotFoundException("수집 실행을 찾을 수 없습니다.")));
+    }
+
+    @Transactional(readOnly = true)
+    public List<SyncJobResponse> listByDate(LocalDate date) {
+        if (date == null || date.getYear() < 1 || date.getYear() > 9999) {
+            throw new IllegalArgumentException("조회 날짜는 yyyy-MM-dd 형식의 유효한 날짜여야 합니다.");
+        }
+        var zone = ZoneId.of("Asia/Seoul");
+        var from = date.atStartOfDay(zone).toOffsetDateTime();
+        var until = date.plusDays(1).atStartOfDay(zone).toOffsetDateTime();
+        return histories.findByStartedAtGreaterThanEqualAndStartedAtLessThanOrderByStartedAtDescIdDesc(from, until)
+                .stream().map(SyncJobResponse::from).toList();
     }
 
     @Transactional
