@@ -46,3 +46,7 @@ app:
     secure: false
     same-site: Lax
     path: /
+yon:
+  normalization:
+    ingest:
+      enabled: false

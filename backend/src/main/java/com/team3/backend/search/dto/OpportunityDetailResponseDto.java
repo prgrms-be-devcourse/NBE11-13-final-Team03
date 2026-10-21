@@ -49,7 +49,7 @@ public record OpportunityDetailResponseDto(
                                 List<String> values, String bornOnOrAfter, String bornOnOrBefore,
                                 String incomeType, String period, String subject,
                                 Boolean minInclusive, Boolean maxInclusive, Boolean unitConfirmed,
-                                String evidenceText, String reason) {
+                                String evidenceText) {
         public static ConditionItem from(OpportunityCondition condition) {
             Map<String, Object> expression = condition.getExpression();
             Map<String, Object> evidence = condition.getEvidence();
@@ -73,8 +73,7 @@ public record OpportunityDetailResponseDto(
                     income ? booleanValue(expression.get("minInclusive")) : null,
                     income ? booleanValue(expression.get("maxInclusive")) : null,
                     income ? booleanValue(expression.get("unitConfirmed")) : null,
-                    evidence == null ? null : stringValue(evidence.get("evidenceText")),
-                    evidence == null ? null : stringValue(evidence.get("reason")));
+                    evidence == null ? null : stringValue(evidence.get("evidenceText")));
         }
 
         private static Number bound(Object value, boolean income) {
