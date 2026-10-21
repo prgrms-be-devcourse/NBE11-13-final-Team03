@@ -58,7 +58,9 @@ class NormalizationNotificationListenerTests {
     @Test
     void reconnectsAndSignalsPersistedRequestsWithoutNewNotification() throws Exception {
         var properties = new DataSourceProperties();
-        properties.setUrl(POSTGRES.getJdbcUrl() + "?ApplicationName=normalization-reconnect-test");
+        var jdbcUrl = POSTGRES.getJdbcUrl();
+        properties.setUrl(jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?")
+                + "ApplicationName=normalization-reconnect-test");
         properties.setUsername(POSTGRES.getUsername());
         properties.setPassword(POSTGRES.getPassword());
         var signals = new LinkedBlockingQueue<Object>();
