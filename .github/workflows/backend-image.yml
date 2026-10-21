@@ -1,8 +1,11 @@
 name: Publish backend image
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,6 +15,21 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      IMAGE_PLATFORM: ${{ vars.IMAGE_PLATFORM || 'linux/amd64' }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: yon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d yon_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,30 +48,71 @@ jobs:
         working-directory: backend
         run: bash ./gradlew --no-daemon clean test bootJar
         env:
-          SPRING_PROFILES_ACTIVE: test
+          YON_TEST_DB_URL: jdbc:postgresql://localhost:5432/yon_test
+          YON_TEST_DB_USERNAME: postgres
+          YON_TEST_DB_PASSWORD: test
+
+      - name: Summarize test results
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          suites = [ET.parse(path).getroot() for path in pathlib.Path('backend/build/test-results/test').glob('TEST-*.xml')]
+          counts = {key: sum(int(suite.attrib.get(key, 0)) for suite in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
+          print(counts)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write(f"Tests: {counts['tests']}, failures: {counts['failures']}, errors: {counts['errors']}, skipped: {counts['skipped']}\n")
+              for suite in suites:
+                  if int(suite.attrib.get('skipped', 0)):
+                      summary.write(f"- Skipped: {suite.attrib['name']} ({suite.attrib['skipped']})\n")
+          PY
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-image-test-reports
+          path: |
+            backend/build/reports/tests/test
+            backend/build/test-results/test
+
+      - name: Set up QEMU
+        if: env.IMAGE_PLATFORM != 'linux/amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
+        if: github.event_name == 'push'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-      - name: Build and push image
-        env:
-          IMAGE_PLATFORM: ${{ vars.IMAGE_PLATFORM || 'linux/amd64' }}
+      - name: Build image and publish on main push
         run: |
           set -euo pipefail
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/backend"
+          OUTPUT=--load
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            OUTPUT=--push
+          fi
           docker buildx build backend \
             --platform "$IMAGE_PLATFORM" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --tag "$IMAGE:sha-$GITHUB_SHA" \
             --metadata-file image-metadata.json \
-            --push
-          DIGEST=$(jq -er '."containerimage.digest"' image-metadata.json)
-          printf 'Commit: `%s`\n\nImage: `%s:sha-%s`\n\nDeploy: `%s@%s`\n' \
-            "$GITHUB_SHA" "$IMAGE" "$GITHUB_SHA" "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+            "$OUTPUT"
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            DIGEST=$(jq -er '."containerimage.digest"' image-metadata.json)
+            printf 'Commit: `%s`\n\nImage: `%s:sha-%s`\n\nDeploy: `%s@%s`\n' \
+              "$GITHUB_SHA" "$IMAGE" "$GITHUB_SHA" "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Log out of GHCR
-        if: always()
+        if: always() && github.event_name == 'push'
         run: docker logout ghcr.io
