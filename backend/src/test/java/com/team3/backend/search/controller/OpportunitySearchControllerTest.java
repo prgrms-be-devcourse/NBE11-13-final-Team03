@@ -3,10 +3,10 @@ package com.team3.backend.search.controller;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
-import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.domain.entity.EmploymentStatus;
 import com.team3.backend.eligibility.service.EligibilityResultService;
+import com.team3.backend.eligibility.support.EligibilityResultFixtures;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
@@ -661,12 +661,8 @@ class OpportunitySearchControllerTest {
     }
 
     private void addEligibilityResult(Long userId, Opportunity opportunity, EligibilityStatus status) {
-        entityManager.persist(EligibilityResult.builder()
-                .userId(userId).opportunityId(opportunity.getId())
-                .opportunityVersionId(opportunity.getCurrentVersion().getId())
-                .profileVersion(1L).ruleVersion(EligibilityResultService.RULE_VERSION)
-                .eligibilityStatus(status).conditionResults(java.util.List.of())
-                .evaluatedAt(LocalDateTime.now()).build());
+        EligibilityResultFixtures.result(entityManager, userId, opportunity, status, 1L,
+                EligibilityResultService.RULE_VERSION, null);
     }
 
     @Test

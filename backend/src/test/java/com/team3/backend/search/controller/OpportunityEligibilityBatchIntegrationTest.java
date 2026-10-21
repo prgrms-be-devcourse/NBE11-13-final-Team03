@@ -115,7 +115,12 @@ class OpportunityEligibilityBatchIntegrationTest {
         // 한 사용자의 실패는 다른 사용자의 트랜잭션을 막지 않고, 실패 사용자는 미판정으로 남는다.
         doThrow(new IllegalStateException("재현용 사용자 처리 실패"))
                 .doCallRealMethod().when(resultService).refreshStale(eq(failedUserId), any(OffsetDateTime.class));
-        assertThat(batchRefresher.refreshAllUsers(now)).isEqualTo(5);
+        // 판정은 조건 묶음 단위다. 정책 A와 C는 조건·지역이 같아 한 묶음이므로 공고 5개 = 묶음 4개
+        assertThat(batchRefresher.refreshAllUsers(now)).isEqualTo(4);
+        assertThat(resultRepository.findByOpportunities(ownerId, List.of(first.opportunityId(), third.opportunityId())))
+                .hasSize(2).extracting(e -> e.result().getId()).containsOnly(
+                        resultRepository.findByOpportunities(ownerId, List.of(first.opportunityId()))
+                                .getFirst().result().getId());
         assertThat(item(first.opportunityId(), failedUserId).get("eligibilityStatus")).isNull();
         assertThat(detail(first.opportunityId(), failedUserId).get("eligibility")).isNull();
         assertThat(filtered(failedUserId, "ELIGIBLE", 0, 10).get("totalElements")).isEqualTo(0);
@@ -164,10 +169,10 @@ class OpportunityEligibilityBatchIntegrationTest {
                 .longValue()).toList()).containsExactlyInAnyOrder(first.opportunityId(), third.opportunityId());
 
         // 재시도는 실패 사용자만 판정하고, 이미 최신인 사용자는 다시 판정하지 않는다.
-        assertThat(batchRefresher.refreshAllUsers(now)).isEqualTo(5);
+        assertThat(batchRefresher.refreshAllUsers(now)).isEqualTo(4);
         assertThat(item(first.opportunityId(), failedUserId).get("eligibilityStatus")).isEqualTo("ELIGIBLE");
         assertThat(item(first.opportunityId(), failedUserId).get("saved")).isEqualTo(false);
-        assertThat(resultRepository.findByUserIdAndOpportunityIdIn(noProfileUserId,
+        assertThat(resultRepository.findByOpportunities(noProfileUserId,
                 List.of(first.opportunityId(), second.opportunityId(), third.opportunityId()))).isEmpty();
         assertThat(batchRefresher.refreshAllUsers(now)).isZero();
 
@@ -181,9 +186,13 @@ class OpportunityEligibilityBatchIntegrationTest {
         assertThat(item(first.opportunityId(), ownerId).get("eligibilityStatus")).isEqualTo("NOT_ELIGIBLE");
         assertThat(((Map<?, ?>) detail(first.opportunityId(), ownerId).get("eligibility")).get("status"))
                 .isEqualTo("NOT_ELIGIBLE");
-        assertThat(resultRepository.findByUserIdAndOpportunityIdIn(ownerId, List.of(first.opportunityId())))
-                .singleElement().satisfies(result -> assertThat(result.getOpportunityVersionId())
-                        .isEqualTo(changed.versionId()));
+        assertThat(resultRepository.findByOpportunities(ownerId, List.of(first.opportunityId())))
+                .singleElement().satisfies(result -> {
+                    assertThat(result.opportunityVersionId()).isEqualTo(changed.versionId());
+                    assertThat(result.result().getEligibilityStatus()).isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
+                });
+        // 정책 C는 조건 묶음이 바뀌지 않았으므로 기존 결과를 그대로 쓴다
+        assertThat(item(third.opportunityId(), ownerId).get("eligibilityStatus")).isEqualTo("ELIGIBLE");
         assertThat(batchRefresher.refreshAllUsers(now)).isZero();
     }
 

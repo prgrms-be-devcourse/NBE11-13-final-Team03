@@ -3,10 +3,10 @@ package com.team3.backend.search.controller;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
-import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.domain.entity.EmploymentStatus;
 import com.team3.backend.eligibility.service.EligibilityResultService;
+import com.team3.backend.eligibility.support.EligibilityResultFixtures;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
@@ -46,7 +46,6 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.util.ArrayList;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.HashMap;
@@ -135,7 +134,7 @@ class OpportunitySearchPostgresTest {
             window(policy, PeriodType.FIXED, start, end, ValidationStatus.VALID);
             eligibilityResult(userId, policy,
                     policy == possible ? EligibilityStatus.POSSIBLY_ELIGIBLE : EligibilityStatus.ELIGIBLE,
-                    null, 1L, EligibilityResultService.RULE_VERSION, null);
+                    false, 1L, EligibilityResultService.RULE_VERSION, null);
         }
         UserOpportunityPreference preference = UserOpportunityPreference.builder()
                 .user(account).opportunity(near).build();
@@ -220,28 +219,28 @@ class OpportunitySearchPostgresTest {
         trainingDetail(trainingToday, today);
         trainingDetail(trainingPast, today.minusDays(1));
 
-        eligibilityResult(userId, eligible, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, eligible, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, possible, EligibilityStatus.POSSIBLY_ELIGIBLE, null, 1L,
+        eligibilityResult(userId, possible, EligibilityStatus.POSSIBLY_ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, today.plusDays(1));
-        eligibilityResult(userId, notEligible, EligibilityStatus.NOT_ELIGIBLE, null, 1L,
+        eligibilityResult(userId, notEligible, EligibilityStatus.NOT_ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, unknown, EligibilityStatus.UNKNOWN, null, 1L,
+        eligibilityResult(userId, unknown, EligibilityStatus.UNKNOWN, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
         eligibilityResult(userId, staleOpportunity, EligibilityStatus.ELIGIBLE,
-                staleOpportunity.getCurrentVersion().getId() + 1000, 1L,
+                true, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, staleProfile, EligibilityStatus.ELIGIBLE, null, 2L,
+        eligibilityResult(userId, staleProfile, EligibilityStatus.ELIGIBLE, false, 2L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, staleRule, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, staleRule, EligibilityStatus.ELIGIBLE, false, 1L,
                 "old-rule", null);
-        eligibilityResult(userId, expired, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, expired, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, today);
-        eligibilityResult(otherUserId, otherOnly, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(otherUserId, otherOnly, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, trainingToday, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, trainingToday, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, trainingPast, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, trainingPast, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
         entityManager.flush();
         entityManager.clear();
@@ -345,15 +344,13 @@ class OpportunitySearchPostgresTest {
     }
 
     private void eligibilityResult(Long userId, Opportunity opportunity, EligibilityStatus status,
-                                   Long opportunityVersionId, Long profileVersion, String ruleVersion,
+                                   boolean staleConditionSet, Long profileVersion, String ruleVersion,
                                    LocalDate validUntil) {
-        entityManager.persist(EligibilityResult.builder()
-                .userId(userId).opportunityId(opportunity.getId())
-                .opportunityVersionId(opportunityVersionId == null
-                        ? opportunity.getCurrentVersion().getId() : opportunityVersionId)
-                .profileVersion(profileVersion).ruleVersion(ruleVersion)
-                .eligibilityStatus(status).conditionResults(List.of())
-                .validUntil(validUntil).evaluatedAt(LocalDateTime.now()).build());
+        Long conditionSetId = staleConditionSet
+                ? EligibilityResultFixtures.newConditionSet(entityManager)
+                : EligibilityResultFixtures.conditionSetOf(entityManager, opportunity.getCurrentVersion());
+        EligibilityResultFixtures.result(entityManager, userId, conditionSetId, status, profileVersion, ruleVersion,
+                validUntil);
     }
 
     @Test
@@ -383,24 +380,24 @@ class OpportunitySearchPostgresTest {
         Opportunity staleRule = opportunity("PG display stale rule", OpportunityType.YOUTH_POLICY);
         Opportunity expired = opportunity("PG display expired", OpportunityType.YOUTH_POLICY);
         Opportunity noResult = opportunity("PG display no result", OpportunityType.YOUTH_POLICY);
-        eligibilityResult(account.getId(), eligible, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), eligible, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), possible, EligibilityStatus.POSSIBLY_ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), possible, EligibilityStatus.POSSIBLY_ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), notEligible, EligibilityStatus.NOT_ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), notEligible, EligibilityStatus.NOT_ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), unknown, EligibilityStatus.UNKNOWN, null, 1L,
+        eligibilityResult(account.getId(), unknown, EligibilityStatus.UNKNOWN, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
         eligibilityResult(account.getId(), staleVersion, EligibilityStatus.ELIGIBLE,
-                staleVersion.getCurrentVersion().getId() + 1000, 1L,
+                true, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), staleProfile, EligibilityStatus.ELIGIBLE, null, 2L,
+        eligibilityResult(account.getId(), staleProfile, EligibilityStatus.ELIGIBLE, false, 2L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), staleRule, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), staleRule, EligibilityStatus.ELIGIBLE, false, 1L,
                 "old-rule", null);
-        eligibilityResult(account.getId(), expired, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), expired, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, today);
-        eligibilityResult(otherAccount.getId(), noResult, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(otherAccount.getId(), noResult, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
 
         UserOpportunityPreference both = UserOpportunityPreference.builder()

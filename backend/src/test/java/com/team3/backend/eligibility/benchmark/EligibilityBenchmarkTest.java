@@ -382,28 +382,30 @@ class EligibilityBenchmarkTest {
     }
 
     /**
-     * 판정 결과 저장·재사용 (운영 코드 그대로).
-     * cold: 저장된 결과를 지운 뒤 refreshAll → 전체 판정 + 저장 (삭제 시간은 제외)
+     * 판정 결과 저장·재사용 (운영 코드 그대로). 결과는 조건 묶음 단위라, 복제본은 원본 템플릿의 묶음을 함께 쓴다.
+     * cold: 저장된 결과를 지운 뒤 refreshAll → 조건 묶음 수만큼 판정 + 저장 (삭제 시간은 제외)
      * warm: 모두 최신인 상태에서 refreshAll → 최신 여부 확인만
      * candidates: 추천 후보 5건 getEligibilities (최신 결과 + 기회 요약)
      * statusPage: findByStatuses(ELIGIBLE, POSSIBLY_ELIGIBLE) 0페이지 20건 (refreshAll warm 포함)
      */
     private ResultStoreResult measureResultStore(int size, int coldIterations, int warmIterations) {
+        int conditionSets = count("SELECT count(DISTINCT v.condition_set_id) FROM opportunities o "
+                + "JOIN opportunity_versions v ON v.id = o.current_version_id");
         List<Double> cold = new ArrayList<>();
         long coldQueries = 0;
         for (int i = 0; i < coldIterations + 1; i++) {
-            jdbc.update("DELETE FROM eligibility_results WHERE user_id = ?", USER_ID);
+            jdbc.update("DELETE FROM eligibility_set_results WHERE user_id = ?", USER_ID);
             long q0 = statistics.getPrepareStatementCount();
             long t0 = System.nanoTime();
             int judged = resultService.refreshAll(USER_ID, NOW);
             long t1 = System.nanoTime();
-            assertThat(judged).isEqualTo(size);
+            assertThat(judged).isEqualTo(conditionSets);
             if (i > 0) {  // 첫 회는 워밍업
                 cold.add((t1 - t0) / 1_000_000.0);
                 coldQueries = statistics.getPrepareStatementCount() - q0;
             }
         }
-        int savedRows = count("SELECT count(*) FROM eligibility_results WHERE user_id = " + USER_ID);
+        int savedRows = count("SELECT count(*) FROM eligibility_set_results WHERE user_id = " + USER_ID);
 
         List<Double> warm = new ArrayList<>();
         long warmQueries = 0;
@@ -602,8 +604,8 @@ class EligibilityBenchmarkTest {
             cloneSql("INSERT INTO opportunities (id, opportunity_type, title, category, detail_url, current_version_id, created_at, updated_at) "
                     + "SELECT x.id, o.opportunity_type, o.title || ' #' || x.id, o.category, o.detail_url, NULL, now(), now() "
                     + "FROM opportunities o, unnest(?::bigint[]) AS x(id) WHERE o.id = ?", cloneIds, t.opportunityId());
-            cloneSql("INSERT INTO opportunity_versions (id, opportunity_id, version_no, normalized_snapshot, personalization_status, normalization_version, created_at) "
-                    + "SELECT x.id, x.id, v.version_no, v.normalized_snapshot, v.personalization_status, v.normalization_version, now() "
+            cloneSql("INSERT INTO opportunity_versions (id, opportunity_id, version_no, normalized_snapshot, personalization_status, normalization_version, condition_set_id, created_at) "
+                    + "SELECT x.id, x.id, v.version_no, v.normalized_snapshot, v.personalization_status, v.normalization_version, v.condition_set_id, now() "
                     + "FROM opportunity_versions v, unnest(?::bigint[]) AS x(id) WHERE v.id = ?", cloneIds, t.versionId());
             cloneSql("INSERT INTO opportunity_conditions (version_id, condition_type, requirement_type, condition_field, expression, evidence, validation_status, created_at) "
                     + "SELECT x.id, c.condition_type, c.requirement_type, c.condition_field, c.expression, c.evidence, c.validation_status, now() "
@@ -627,8 +629,8 @@ class EligibilityBenchmarkTest {
     }
 
     private void clearClones() {
-        // 복제본 ID를 다음 데이터셋에서 다시 쓰므로 저장된 판정 결과도 지운다 (남아 있으면 최신으로 오인)
-        jdbc.update("DELETE FROM eligibility_results WHERE opportunity_id >= ?", CLONE_BASE);
+        // 데이터셋마다 처음부터 판정하도록 저장된 판정 결과도 지운다
+        jdbc.update("DELETE FROM eligibility_set_results");
         jdbc.update("UPDATE opportunities SET current_version_id = NULL WHERE id >= ?", CLONE_BASE);
         jdbc.update("DELETE FROM opportunity_regions WHERE version_id >= ?", CLONE_BASE);
         jdbc.update("DELETE FROM application_windows WHERE version_id >= ?", CLONE_BASE);
