@@ -24,6 +24,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -68,6 +69,8 @@ class YouthPolicyNormalizationServiceTest {
     private OpportunityRegionRepository opportunityRegionRepository;
     @Autowired
     private RegionDirectory regionDirectory;
+    @Autowired
+    private YouthPolicyDetailRepository detailRepository;
     @PersistenceContext
     private EntityManager em;
 
@@ -213,6 +216,79 @@ class YouthPolicyNormalizationServiceTest {
         assertThat(service.normalize(command(raw, DAY2, List.of())).newVersion()).isFalse();
     }
 
+    @Test
+    void 상세_정보를_버전별_상세와_스냅샷에_저장한다() {
+        NormalizationResult result = service.normalize(command(detailRaw("월 최대 20만 원 지원\n최대 12개월"), DAY1, List.of()));
+        flushAndClear();
+
+        YouthPolicyDetail detail = detailRepository.findByVersionId(result.versionId()).orElseThrow();
+        assertThat(detail.getPolicyNo()).isEqualTo("R2026-1");
+        assertThat(detail.getDescription()).isEqualTo("청년의 주거비 부담을 덜어 준다");
+        assertThat(detail.getSupportContent()).isEqualTo("월 최대 20만 원 지원\n최대 12개월");
+        assertThat(detail.getKeywords()).isEqualTo("주거,월세");
+        assertThat(detail.getSupervisingInstitutionName()).isEqualTo("국토교통부");
+        assertThat(detail.getOperatingInstitutionName()).isEqualTo("서울특별시");
+        assertThat(detail.getApplicationMethod()).isEqualTo("온라인 신청");
+        assertThat(detail.getScreeningMethod()).isEqualTo("서류 심사");
+        assertThat(detail.getSubmissionDocuments()).isEqualTo("임대차계약서");
+        assertThat(detail.getApplicationUrl()).isEqualTo("https://apply.example.com");
+        assertThat(detail.getReferenceUrl1()).isEqualTo("https://ref.example.com");
+        assertThat(detail.getReferenceUrl2()).isNull();
+        assertThat(detail.getBusinessStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
+        assertThat(detail.getBusinessEndDate()).isEqualTo(LocalDate.of(2026, 12, 31));
+        assertThat(detail.getBusinessPeriodText()).isNull();
+        assertThat(detail.getSupportScale()).isEqualTo("100");
+        assertThat(detail.getOtherNotes()).isEqualTo("중복 지원 불가");
+        assertThat(detail.getFirstRegisteredDate()).isEqualTo(LocalDate.of(2025, 2, 14));
+
+        OpportunityVersion version = versionRepository.findById(result.versionId()).orElseThrow();
+        assertThat(version.getNormalizedSnapshot().get("policy")).asInstanceOf(InstanceOfAssertFactories.MAP)
+                .containsEntry("supportContent", "월 최대 20만 원 지원 최대 12개월")
+                .containsEntry("firstRegisteredDate", "2025-02-14")
+                .doesNotContainKey("referenceUrl2");
+        assertThat(version.getNormalizedSnapshot().get("businessPeriod")).asInstanceOf(InstanceOfAssertFactories.MAP)
+                .containsEntry("startDate", "2026-01-01").containsEntry("endDate", "2026-12-31");
+    }
+
+    @Test
+    void 상세_정보만_바뀌어도_새_버전을_만들고_공백만_다르면_유지한다() {
+        NormalizationResult first = service.normalize(command(detailRaw("월 최대 20만 원 지원\n최대 12개월"), DAY1, List.of()));
+        flushAndClear();
+
+        NormalizationResult sameText = service.normalize(command(detailRaw("월 최대 20만 원 지원  최대 12개월 "), DAY2, List.of()));
+        flushAndClear();
+        assertThat(sameText.newVersion()).isFalse();
+
+        NormalizationResult changed = service.normalize(command(detailRaw("월 최대 30만 원 지원"), DAY2, List.of()));
+        flushAndClear();
+        assertThat(changed.newVersion()).isTrue();
+        assertThat(detailRepository.findByVersionId(changed.versionId()).orElseThrow().getSupportContent())
+                .isEqualTo("월 최대 30만 원 지원");
+        assertThat(detailRepository.findByVersionId(first.versionId()).orElseThrow().getSupportContent())
+                .isEqualTo("월 최대 20만 원 지원\n최대 12개월");
+    }
+
+    @Test
+    void 상세_정보가_비어_있어도_상세_행은_만든다() {
+        NormalizationResult result = service.normalize(command(raw("19", "34", "20261001 ~ 20261031"), DAY1, List.of()));
+        flushAndClear();
+
+        YouthPolicyDetail detail = detailRepository.findByVersionId(result.versionId()).orElseThrow();
+        assertThat(detail.getPolicyNo()).isEqualTo("R2026-1");
+        assertThat(detail.getSupportContent()).isNull();
+        assertThat(detail.getBusinessStartDate()).isNull();
+    }
+
+    @Test
+    void 날짜는_숫자_8자리를_읽고_읽을_수_없으면_null() {
+        assertThat(YouthPolicyNormalizationService.parseDate("20260101")).isEqualTo(LocalDate.of(2026, 1, 1));
+        assertThat(YouthPolicyNormalizationService.parseDate("2025-02-14 10:20:30")).isEqualTo(LocalDate.of(2025, 2, 14));
+        assertThat(YouthPolicyNormalizationService.parseDate("")).isNull();
+        assertThat(YouthPolicyNormalizationService.parseDate("2026")).isNull();
+        assertThat(YouthPolicyNormalizationService.parseDate("20261332")).isNull();
+        assertThat(YouthPolicyNormalizationService.parseDate(null)).isNull();
+    }
+
     private OpportunityCondition condition(Long versionId, ConditionType type) {
         return conditionRepository.findByVersionId(versionId).stream()
                 .filter(c -> c.getConditionType() == type).findFirst().orElseThrow();
@@ -229,6 +305,21 @@ class YouthPolicyNormalizationServiceTest {
 
     private static YouthPolicyRaw raw(String min, String max, String aplyYmd) {
         return raw(min, max, aplyYmd, null);
+    }
+
+    private static YouthPolicyRaw detailRaw(String supportContent) {
+        return YouthPolicyRaw.builder()
+                .plcyNo("R2026-1").plcyNm("청년 월세 지원")
+                .sprtTrgtMinAge("19").sprtTrgtMaxAge("34").sprtTrgtAgeLmtYn("Y")
+                .aplyPrdSeCd("0057001").aplyYmd("20261001 ~ 20261031")
+                .lclsfNm("주거").mclsfNm("주거지원")
+                .plcyExplnCn("청년의 주거비 부담을 덜어 준다").plcySprtCn(supportContent).plcyKywdNm("주거,월세")
+                .sprvsnInstCdNm("국토교통부").operInstCdNm("서울특별시")
+                .plcyAplyMthdCn("온라인 신청").srngMthdCn("서류 심사").sbmsnDcmntCn("임대차계약서")
+                .aplyUrlAddr("https://apply.example.com").refUrlAddr1("https://ref.example.com").refUrlAddr2(" ")
+                .bizPrdBgngYmd("20260101").bizPrdEndYmd("20261231").bizPrdEtcCn("")
+                .sprtSclCnt("100").etcMttrCn("중복 지원 불가").frstRegDt("2025-02-14 10:20:30")
+                .build();
     }
 
     private static YouthPolicyRaw raw(String min, String max, String aplyYmd, String zipCd) {
