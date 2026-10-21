@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ActiveProfiles("test")
@@ -28,7 +29,10 @@ class SecurityIntegrationTest {
     @DisplayName("비회원도 기회 목록을 조회할 수 있다")
     void opportunityListIsPublic() throws Exception {
         mockMvc.perform(get("/api/opportunities"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20));
     }
 
     @Test
@@ -83,11 +87,6 @@ class SecurityIntegrationTest {
      */
     @RestController
     public static class TestEndpointController {
-
-        @GetMapping("/api/opportunities")
-        public String opportunities() {
-            return "opportunities";
-        }
 
         @GetMapping("/api/opportunities/{opportunityId}")
         public String opportunity(
