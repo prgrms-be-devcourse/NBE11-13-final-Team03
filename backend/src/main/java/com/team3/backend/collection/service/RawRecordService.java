@@ -13,6 +13,8 @@ import com.team3.backend.collection.domain.repository.RawNormalizationRequestRep
 import java.time.OffsetDateTime;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.Objects;
+import java.util.List;
+import com.team3.backend.collection.domain.entity.SyncHistory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,21 +38,51 @@ public class RawRecordService {
         saveInternal(request, true);
     }
 
+    @Transactional
+    public void saveBatchForSync(List<RawRecordSaveRequest> requests) {
+        if (requests.isEmpty()) {
+            return;
+        }
+        var sync = lockSync(requests.getFirst());
+        sources.findByIdForUpdate(sync.getSource().getId())
+                .orElseThrow(() -> new EntityNotFoundException("수집 출처를 찾을 수 없습니다."));
+        for (var request : requests) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("수집 실행이 중단되었습니다.");
+            }
+            if (!Objects.equals(request.syncId(), requests.getFirst().syncId())) {
+                throw new IllegalArgumentException("같은 수집 실행의 원본만 함께 저장할 수 있습니다.");
+            }
+            saveRecord(request, true, sync);
+        }
+    }
+
     private RawRecordResponse saveInternal(RawRecordSaveRequest request, boolean recordProgress) {
+        var sync = lockSync(request);
+        if (request.collectedAt().isBefore(sync.getStartedAt())) {
+            throw new IllegalArgumentException("수집 시각은 실행 시작 시각보다 빠를 수 없습니다.");
+        }
+        sources.findByIdForUpdate(sync.getSource().getId())
+                .orElseThrow(() -> new EntityNotFoundException("수집 출처를 찾을 수 없습니다."));
+        return saveRecord(request, recordProgress, sync);
+    }
+
+    private SyncHistory lockSync(RawRecordSaveRequest request) {
         Objects.requireNonNull(request, "원본 저장 요청이 필요합니다.");
         var sync = syncHistories.findByIdForUpdate(request.syncId())
                 .orElseThrow(() -> new EntityNotFoundException("수집 실행을 찾을 수 없습니다."));
         if (sync.getStatus() != SyncJobStatus.RUNNING) {
             throw new IllegalStateException("진행 중인 수집 실행에만 원본을 저장할 수 있습니다.");
         }
+        return sync;
+    }
+
+    private RawRecordResponse saveRecord(RawRecordSaveRequest request, boolean recordProgress, SyncHistory sync) {
         if (request.collectedAt().isBefore(sync.getStartedAt())) {
             throw new IllegalArgumentException("수집 시각은 실행 시작 시각보다 빠를 수 없습니다.");
         }
-        // ponytail: 출처 단위로 직렬화한다. 병목이 확인되면 외부 키별 현재 상태 행 잠금으로 변경한다.
-        var source = sources.findByIdForUpdate(sync.getSource().getId())
-                .orElseThrow(() -> new EntityNotFoundException("수집 출처를 찾을 수 없습니다."));
         var previous = records.findFirstBySourceIdAndExternalIdOrderByIdDesc(
-                source.getId(), request.externalId());
+                sync.getSource().getId(), request.externalId());
         var payload = request.payload();
         var payloadHash = fingerprint.hash(payload);
         if (previous.isPresent()) {

@@ -56,6 +56,21 @@ public class ManualSyncWorker {
             return;
         }
         jobs.recordFetchedPage(jobId, records.size());
+        for (int start = 0; start < records.size(); start += 100) {
+            var batch = records.subList(start, Math.min(start + 100, records.size()));
+            checkInterrupted();
+            try {
+                var requests = batch.stream().map(payload -> new RawRecordSaveRequest(jobId,
+                        fingerprint.externalId(source, payload), payload, OffsetDateTime.now())).toList();
+                rawRecords.saveBatchForSync(requests);
+            } catch (IllegalArgumentException | org.springframework.dao.DataAccessException exception) {
+                // The proxied batch transaction has rolled back before retrying individual records.
+                processIndividually(jobId, source, offset + start, batch);
+            }
+        }
+    }
+
+    private void processIndividually(Long jobId, CollectionSource source, int offset, List<JsonNode> records) {
         for (int index = 0; index < records.size(); index++) {
             checkInterrupted();
             String externalId = null;

@@ -54,6 +54,29 @@ class RawRecordServiceTests {
     }
 
     @Test
+    void batchLocksOnceAndPreservesRepeatedIdsAndProgress() {
+        var batch = List.of(request("A", 1), request("A", 2), request("B", 3)).stream()
+                .map(request -> new RawRecordSaveRequest(request.syncId(), request.externalId(),
+                        new RawRecordFingerprint().hash(request.payload()), request.payload(), request.collectedAt()))
+                .toList();
+        service.saveBatchForSync(batch);
+        verify(syncHistories).findByIdForUpdate(10L);
+        verify(sources).findByIdForUpdate(1L);
+        assertEquals(2, snapshots.size());
+        assertEquals(1, sync.getNewCount());
+        assertEquals(1, sync.getUpdatedCount());
+        assertEquals(1, sync.getUnchangedCount());
+    }
+
+    @Test
+    void batchRejectsMixedExecutions() {
+        var other = new RawRecordSaveRequest(11L, "policy-2", "hash",
+                request("B", 2).payload(), startedAt.plusMinutes(2));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.saveBatchForSync(List.of(request("A", 1), other)));
+    }
+
+    @Test
     void savesFirstSnapshotAfterLockingSource() {
         var response = service.save(request("A", 1));
         assertEquals(1L, response.rawRecordId());
