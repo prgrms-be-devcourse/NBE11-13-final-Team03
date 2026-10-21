@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -174,7 +175,7 @@ class OpportunityDetailControllerTest {
         entityManager.flush();
         entityManager.clear();
 
-        mockMvc.perform(get("/api/opportunities/{id}", policy.getId()))
+        var response = mockMvc.perform(get("/api/opportunities/{id}", policy.getId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.conditions[0].bornOnOrAfter").value("1990-01-01"))
                 .andExpect(jsonPath("$.conditions[0].bornOnOrBefore").value("2008-12-31"))
@@ -190,7 +191,9 @@ class OpportunityDetailControllerTest {
                 .andExpect(jsonPath("$.conditions[2].status").doesNotExist())
                 .andExpect(jsonPath("$.conditions[2].evidenceText").value("추가 자격 원문"))
                 .andExpect(jsonPath("$.conditions[3].requirement").value("EXCLUSION"))
-                .andExpect(jsonPath("$.conditions[3].evidenceText").value("기존 수혜자는 제외"));
+                .andExpect(jsonPath("$.conditions[3].evidenceText").value("기존 수혜자는 제외"))
+                .andReturn();
+        assertFalse(response.getResponse().getContentAsString().contains("\"reason\""));
     }
 
     @Test
@@ -256,6 +259,7 @@ class OpportunityDetailControllerTest {
                 .andExpect(jsonPath("$.eligibility.status").value("UNKNOWN"))
                 .andExpect(jsonPath("$.eligibility.reason").value("판정 사유"))
                 .andExpect(jsonPath("$.eligibility.conditions[0].result").value("MATCHED"))
+                .andExpect(jsonPath("$.eligibility.conditions[0].reason").value("조건 충족"))
                 .andExpect(jsonPath("$.saved").value(true))
                 .andExpect(jsonPath("$.hidden").doesNotExist());
         mockMvc.perform(get("/api/opportunities/{id}", policy.getId()).with(user(principal(other))))
