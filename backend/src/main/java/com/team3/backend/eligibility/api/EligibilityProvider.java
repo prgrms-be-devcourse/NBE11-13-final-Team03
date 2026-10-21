@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 다른 영역(추천 등)이 판정 결과를 받아 가는 유일한 진입점.
@@ -20,7 +21,7 @@ import java.util.Map;
  * getEligibilities·findByStatuses는 오래되거나 없는 판정 결과를 먼저 다시 판정한 뒤 돌려준다.
  * 결과마다 추천에 필요한 기회 요약(OpportunityInfo: 분류, NCS, 모집 상태, 마감일, 교육 시작일, 등록일)을 함께 담는다.
  * 판정 프로필이 없는 사용자는 BusinessException(PROFILE_NOT_FOUND).
- * findFreshStatuses는 재판정하지 않고 저장된 최신 결과의 상태만 읽는다 (검색 목록 표시용).
+ * findFreshStatuses·findFreshEligibility는 재판정하지 않고 저장된 최신 결과만 읽는다 (검색 목록·상세 표시용).
  */
 public interface EligibilityProvider {
 
@@ -43,4 +44,12 @@ public interface EligibilityProvider {
      * 판정 프로필이 없는 사용자는 빈 맵을 돌려준다 (예외 아님). today는 한국 시간 날짜를 넘긴다.
      */
     Map<Long, EligibilityStatus> findFreshStatuses(Long userId, Collection<Long> opportunityIds, LocalDate today);
+
+    /**
+     * 저장된 최신 판정 결과 하나를 상태·사유·조건별 결과까지 조회한다 (예: 기회 상세 페이지). DB 조회 전용, 재판정하지 않는다.
+     * 최신 기준은 findFreshStatuses·EligibilitySpecifications와 같다. 반환 형식은 getEligibilities와 같은 EligibilitySnapshot.
+     * 결과가 없거나 오래됐으면, 또는 판정 프로필이 없는 사용자면 빈 값 (예외 아님, 검색 목록과 같이 미판정으로 다룬다).
+     * today는 한국 시간 날짜를 넘긴다 (기회 요약의 모집 상태도 이 날짜로 계산한다).
+     */
+    Optional<EligibilitySnapshot> findFreshEligibility(Long userId, Long opportunityId, LocalDate today);
 }

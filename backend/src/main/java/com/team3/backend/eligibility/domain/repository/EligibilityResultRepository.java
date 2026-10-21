@@ -14,6 +14,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 public interface EligibilityResultRepository extends JpaRepository<EligibilityResult, Long>,
         EligibilityResultUpsertRepository {
@@ -53,4 +54,19 @@ public interface EligibilityResultRepository extends JpaRepository<EligibilityRe
                                                  @Param("opportunityIds") Collection<Long> opportunityIds,
                                                  @Param("ruleVersion") String ruleVersion,
                                                  @Param("today") LocalDate today);
+
+    /**
+     * 저장된 최신 판정 결과 한 건 (상세 조회용, 재판정하지 않음). 최신 기준은 findFreshStatuses와 같다.
+     * 결과가 없거나 오래됐거나, 기회에 현재 버전이 없거나, 판정 프로필이 없으면 빈 값.
+     */
+    @Query("select r from EligibilityResult r, Opportunity o "
+            + "where o.id = r.opportunityId and r.userId = :userId and r.opportunityId = :opportunityId "
+            + "and r.opportunityVersionId = o.currentVersion.id "
+            + "and r.profileVersion = (select p.profileVersion from EligibilityProfile p where p.userId = :userId) "
+            + "and r.ruleVersion = :ruleVersion "
+            + "and (r.validUntil is null or r.validUntil > :today)")
+    Optional<EligibilityResult> findFresh(@Param("userId") Long userId,
+                                          @Param("opportunityId") Long opportunityId,
+                                          @Param("ruleVersion") String ruleVersion,
+                                          @Param("today") LocalDate today);
 }
