@@ -41,6 +41,7 @@ internal:
   api-key: test-internal-api-key
 
 app:
+  role: api
   admin-kakao-ids: ""
   auth-cookie:
     secure: false

@@ -1,5 +1,6 @@
 package com.team3.backend.global.exception;
 
+import com.team3.backend.global.role.ApiRole;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@ApiRole
 @Tag(
         name = "Error Code",
         description = "도메인별 업무 오류 코드 조회 API"

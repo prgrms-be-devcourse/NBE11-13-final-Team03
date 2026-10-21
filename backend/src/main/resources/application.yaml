@@ -45,6 +45,7 @@ spring:
       thread-name-prefix: yon-scheduling-
 
 app:
+  role: ${APP_ROLE:api}
   admin-kakao-ids: ${ADMIN_KAKAO_IDS:}
 
   auth-cookie:
