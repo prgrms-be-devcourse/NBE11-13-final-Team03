@@ -36,10 +36,11 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    @DisplayName("비회원도 기회 상세를 조회할 수 있다")
+    @DisplayName("비회원 기회 상세 요청은 인증 검사 없이 경로 변수 검증에 도달한다")
     void opportunityDetailIsPublic() throws Exception {
-        mockMvc.perform(get("/api/opportunities/1"))
-                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/opportunities/not-a-number"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
     }
 
     @Test
@@ -81,19 +82,9 @@ class SecurityIntegrationTest {
                 .andExpect(status().isOk());
     }
 
-    /*
-     * 실제 OpportunityController가 아직 없더라도
-     * SecurityConfig의 경로별 권한을 검증하기 위한 테스트 전용 Controller
-     */
+    /* 실제 API와 겹치지 않는 경로의 보안 설정을 검증한다. */
     @RestController
     public static class TestEndpointController {
-
-        @GetMapping("/api/opportunities/{opportunityId}")
-        public String opportunity(
-                @PathVariable Long opportunityId
-        ) {
-            return "opportunity-" + opportunityId;
-        }
 
         @GetMapping("/api/security-test/protected")
         public String protectedEndpoint() {
