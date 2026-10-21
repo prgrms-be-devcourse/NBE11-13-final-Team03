@@ -1,24 +1,23 @@
 package com.team3.backend.eligibility.service;
 
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
-import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultUpsertRepository.UpsertRow;
+import com.team3.backend.eligibility.dto.ConditionSetRef;
 import com.team3.backend.eligibility.dto.EligibilityResultFreshness;
+import com.team3.backend.eligibility.dto.OpportunityEligibility;
 import com.team3.backend.eligibility.engine.ConditionEvaluation;
 import com.team3.backend.eligibility.engine.EligibilityEvaluation;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.opportunity.domain.repository.OpportunityRepository;
-import com.team3.backend.opportunity.dto.OpportunityVersionRef;
+import com.team3.backend.opportunity.dto.OpportunitySetRef;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
@@ -37,10 +36,12 @@ import static com.team3.backend.eligibility.exception.EligibilityErrorCode.PROFI
 /**
  * 판정 결과 저장·재사용 (ERD ELIGIBILITY_RESULT). 추천·검색은 이 서비스로 최신화한 뒤 저장된 결과를 조회한다.
  *
- * - refresh: 지정한 기회들(예: 추천 후보)만 최신화
- * - refreshAll: 사용자의 정규화된 기회 전체를 최신화 (신청 가능성 필터 검색 전, 프로필 변경 후)
- * - refreshStale: 결과가 없거나 오래된 기회만 DB에서 골라 최신화 (신규·변경 공고 배치, EligibilityBatchRefresher)
- * 최신 결과는 다시 판정하지 않고, 없거나 오래된 결과만 판정해 저장한다 (기준은 EligibilityResult 참고).
+ * 판정 결과는 (사용자, 조건 묶음) 단위로 저장한다. 기회의 결과 = 기회 현재 버전의 조건 묶음 결과 (EligibilityResult 참고).
+ * 조건 묶음마다 대표 버전 하나로 판정한다 (같은 묶음이면 판정 입력이 같아 결과가 같다).
+ *
+ * - refresh: 지정한 기회들(예: 추천 후보)의 조건 묶음만 최신화
+ * - refreshAll / refreshStale: 사용자의 결과가 없거나 오래된 조건 묶음을 모두 최신화 (프로필 변경 후, 배치)
+ * 최신 결과는 다시 판정하지 않고, 없거나 오래된 결과만 판정해 저장한다.
  * 판정 결과가 없는 기회는 NOT_ELIGIBLE이 아니라 미판정이다.
  * 저장은 yon.eligibility.result-write-batch-size(기본 1,000)건씩 SQL 1개로 묶어 한다 (EligibilityResultUpsertRepository).
  */
@@ -51,8 +52,9 @@ import static com.team3.backend.eligibility.exception.EligibilityErrorCode.PROFI
 public class EligibilityResultService {
 
     /** 판정 규칙 버전. 판정 엔진 규칙이 바뀌면 올린다 → 기존 결과가 모두 오래된 것이 된다
-     *  1 → 2 (2026-10-19): 국민내일배움카드(TRAINING_CARD)·K-디지털 트레이닝 1회 한정(PARTICIPATION_HISTORY) 판정 추가 */
-    public static final String RULE_VERSION = "2";
+     *  1 → 2 (2026-10-19): 국민내일배움카드(TRAINING_CARD)·K-디지털 트레이닝 1회 한정(PARTICIPATION_HISTORY) 판정 추가
+     *  2 → 3 (2026-10-21): 판정 결과를 조건 묶음 단위로 저장 (새 테이블, 조건별 결과 순서 고정) */
+    public static final String RULE_VERSION = "3";
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CHUNK = 1_000;
@@ -70,46 +72,46 @@ public class EligibilityResultService {
     @Value("${yon.eligibility.result-write-batch-size:1000}")
     private int writeBatchSize = 1_000;
 
-    public List<EligibilityResult> refresh(Long userId, Collection<Long> opportunityIds) {
+    public List<OpportunityEligibility> refresh(Long userId, Collection<Long> opportunityIds) {
         return refresh(userId, opportunityIds, OffsetDateTime.now(KST));
     }
 
-    /** 지정한 기회들의 판정 결과를 최신화해 돌려준다. 정규화되지 않은 기회는 결과에서 빠진다 */
-    public List<EligibilityResult> refresh(Long userId, Collection<Long> opportunityIds, OffsetDateTime now) {
+    /**
+     * 지정한 기회들의 판정 결과를 최신화해 돌려준다 (기회별, 순서 보장 없음).
+     * 정규화되지 않았거나 조건 묶음이 아직 없는 기회는 결과에서 빠진다 (= 미판정).
+     */
+    public List<OpportunityEligibility> refresh(Long userId, Collection<Long> opportunityIds, OffsetDateTime now) {
         EligibilityProfile profile = findProfile(userId);
         if (opportunityIds.isEmpty()) {
             return List.of();
         }
-        List<OpportunityVersionRef> refs = opportunityRepository.findCurrentVersionRefs(opportunityIds);
-        if (refreshTargets(profile, refs, today(now), now) > 0) {
+        Map<Long, Long> representative = new LinkedHashMap<>();
+        for (OpportunitySetRef ref : opportunityRepository.findCurrentSetRefs(opportunityIds)) {
+            if (ref.conditionSetId() != null) {
+                representative.putIfAbsent(ref.conditionSetId(), ref.versionId());
+            }
+        }
+        List<ConditionSetRef> sets = representative.entrySet().stream()
+                .map(e -> new ConditionSetRef(e.getKey(), e.getValue())).toList();
+        if (refreshTargets(profile, sets, today(now), now) > 0) {
             // 저장은 영속성 컨텍스트를 거치지 않으므로, 이미 읽어 둔 결과 엔티티가 있으면 버리고 새로 읽는다
             em.flush();
             em.clear();
         }
-        return resultRepository.findByUserIdAndOpportunityIdIn(userId,
-                refs.stream().map(OpportunityVersionRef::opportunityId).toList());
+        return resultRepository.findByOpportunities(userId, opportunityIds);
     }
 
     public int refreshAll(Long userId) {
         return refreshAll(userId, OffsetDateTime.now(KST));
     }
 
-    /** 정규화된 기회 전체를 1,000건씩 최신화한다. @return 새로 판정한 건수 */
+    /**
+     * 사용자의 결과가 없거나 오래된 조건 묶음을 모두 최신화한다 (refreshStale과 같고, 판정 프로필이 없으면 PROFILE_NOT_FOUND).
+     * 바깥 트랜잭션 안에서 부르면 거기에 합류한다. @return 새로 판정한 조건 묶음 수
+     */
     public int refreshAll(Long userId, OffsetDateTime now) {
-        EligibilityProfile profile = findProfile(userId);
-        LocalDate today = today(now);
-        int judged = 0;
-        int page = 0;
-        Page<OpportunityVersionRef> refs;
-        do {
-            refs = opportunityRepository.findAllCurrentVersionRefs(
-                    PageRequest.of(page++, CHUNK, Sort.by(Sort.Direction.ASC, "id")));
-            judged += refreshTargets(profile, refs.getContent(), today, now);
-            resultRepository.flush();
-            em.clear();
-            profile = findProfile(userId);
-        } while (refs.hasNext());
-        return judged;
+        findProfile(userId);
+        return refreshStale(userId, now);
     }
 
     @Transactional(propagation = Propagation.SUPPORTS)
@@ -118,15 +120,15 @@ public class EligibilityResultService {
     }
 
     /**
-     * 판정 결과가 없거나 오래된 기회만 DB에서 1,000건씩 골라 최신화한다 (신규 기회, 새 버전, 생일·규칙 변경).
-     * refreshAll과 달리 최신 결과가 있는 기회는 읽지 않는다. 판정 프로필이 없으면 0을 돌려준다(예외 없음).
+     * 판정 결과가 없거나 오래된 조건 묶음만 DB에서 1,000개씩 골라 최신화한다 (새 조건 묶음, 생일·프로필·규칙 변경).
+     * 기회에 새 버전이 생겨도 조건 묶음이 같으면 다시 판정하지 않는다. 판정 프로필이 없으면 0을 돌려준다(예외 없음).
      *
      * 트랜잭션: 바깥 트랜잭션이 없으면(배치) 1,000건 묶음마다 따로 커밋한다. 실패해도 앞 묶음은 남고, 다음 실행이 남은 것부터 처리한다.
      * 바깥 트랜잭션이 있으면(테스트 등) 거기에 합류한다.
      * 통계: 판정 결과 테이블에 열 통계가 없으면(새로 만든 테이블) 첫 묶음을 커밋한 뒤 ANALYZE를 한 번 한다.
      * 통계가 없으면 PostgreSQL이 결과 테이블을 빈 것으로 보고 기회마다 테이블을 훑는 계획을 골라, 첫 사용자 판정이
      * 크게 느려진다 (실데이터 14.1만 건: 통계 없음 300초, 계획 캐시까지 끄면 136초, 통계 있음 9초. 2026-10-21 홈서버).
-     * @return 새로 판정한 건수
+     * @return 새로 판정한 조건 묶음 수
      */
     @Transactional(propagation = Propagation.SUPPORTS)
     public int refreshStale(Long userId, OffsetDateTime now) {
@@ -135,16 +137,16 @@ public class EligibilityResultService {
         boolean analyzeAfterFirstChunk = Boolean.TRUE.equals(tx.execute(status -> resultRepository.lacksStatistics()));
         int judged = 0;
         int chunks = 0;
-        long afterOpportunityId = 0L;
+        long afterConditionSetId = 0L;
         while (true) {
-            long cursor = afterOpportunityId;
+            long cursor = afterConditionSetId;
             StaleChunk chunk = tx.execute(status -> refreshStaleChunk(userId, today, now, cursor));
             if (chunk == null || chunk.fetched() == 0) {
                 break;
             }
             judged += chunk.judged();
             chunks++;
-            afterOpportunityId = chunk.lastOpportunityId();
+            afterConditionSetId = chunk.lastConditionSetId();
             if (analyzeAfterFirstChunk) {
                 analyzeAfterFirstChunk = false;
                 analyzeResults(tx, userId);
@@ -170,40 +172,40 @@ public class EligibilityResultService {
     }
 
     /** 묶음 1개 (현재 트랜잭션 안에서). 프로필이 없어지면 fetched=0으로 멈춘다 */
-    private StaleChunk refreshStaleChunk(Long userId, LocalDate today, OffsetDateTime now, long afterOpportunityId) {
+    private StaleChunk refreshStaleChunk(Long userId, LocalDate today, OffsetDateTime now, long afterConditionSetId) {
         Optional<EligibilityProfile> found = profileRepository.findByUserId(userId);
         if (found.isEmpty()) {
-            return new StaleChunk(0, 0, afterOpportunityId);
+            return new StaleChunk(0, 0, afterConditionSetId);
         }
         EligibilityProfile profile = found.get();
-        List<OpportunityVersionRef> refs = resultRepository.findStaleVersionRefs(userId, profile.getProfileVersion(),
-                RULE_VERSION, today, afterOpportunityId, PageRequest.of(0, CHUNK));
-        if (refs.isEmpty()) {
-            return new StaleChunk(0, 0, afterOpportunityId);
+        List<ConditionSetRef> sets = resultRepository.findStaleConditionSets(userId, profile.getProfileVersion(),
+                RULE_VERSION, today, afterConditionSetId, PageRequest.of(0, CHUNK));
+        if (sets.isEmpty()) {
+            return new StaleChunk(0, 0, afterConditionSetId);
         }
-        int judged = refreshTargets(profile, refs, today, now);
+        int judged = refreshTargets(profile, sets, today, now);
         resultRepository.flush();
         em.clear();
-        return new StaleChunk(refs.size(), judged, refs.getLast().opportunityId());
+        return new StaleChunk(sets.size(), judged, sets.getLast().conditionSetId());
     }
 
-    private record StaleChunk(int fetched, int judged, long lastOpportunityId) {
+    private record StaleChunk(int fetched, int judged, long lastConditionSetId) {
     }
 
-    /** 없거나 오래된 결과만 판정해 저장한다. @return 판정한 건수 */
-    private int refreshTargets(EligibilityProfile profile, List<OpportunityVersionRef> refs, LocalDate today,
+    /** 없거나 오래된 조건 묶음 결과만 대표 버전으로 판정해 저장한다. @return 판정한 조건 묶음 수 */
+    private int refreshTargets(EligibilityProfile profile, List<ConditionSetRef> sets, LocalDate today,
                                OffsetDateTime now) {
-        if (refs.isEmpty()) {
+        if (sets.isEmpty()) {
             return 0;
         }
-        List<Long> opportunityIds = refs.stream().map(OpportunityVersionRef::opportunityId).toList();
-        Map<Long, EligibilityResultFreshness> freshness = resultRepository.findFreshness(profile.getUserId(), opportunityIds)
-                .stream().collect(Collectors.toMap(EligibilityResultFreshness::opportunityId, Function.identity()));
+        List<Long> setIds = sets.stream().map(ConditionSetRef::conditionSetId).toList();
+        Map<Long, EligibilityResultFreshness> freshness = resultRepository.findFreshness(profile.getUserId(), setIds)
+                .stream().collect(Collectors.toMap(EligibilityResultFreshness::conditionSetId, Function.identity()));
 
-        List<OpportunityVersionRef> stale = refs.stream()
-                .filter(r -> {
-                    EligibilityResultFreshness f = freshness.get(r.opportunityId());
-                    return f == null || !f.isFresh(r.versionId(), profile.getProfileVersion(), RULE_VERSION, today);
+        List<ConditionSetRef> stale = sets.stream()
+                .filter(s -> {
+                    EligibilityResultFreshness f = freshness.get(s.conditionSetId());
+                    return f == null || !f.isFresh(profile.getProfileVersion(), RULE_VERSION, today);
                 })
                 .toList();
         if (stale.isEmpty()) {
@@ -211,17 +213,17 @@ public class EligibilityResultService {
         }
 
         Map<Long, EligibilityEvaluator.Judgement> judgements = evaluator.judge(profile,
-                stale.stream().map(OpportunityVersionRef::versionId).collect(Collectors.toSet()), today);
+                stale.stream().map(ConditionSetRef::versionId).collect(Collectors.toSet()), today);
 
         LocalDate validUntil = nextBirthday(profile.getBirthDate(), today);
         var evaluatedAt = now.atZoneSameInstant(KST).toLocalDateTime();
         List<UpsertRow> rows = new ArrayList<>(stale.size());
-        for (OpportunityVersionRef ref : stale) {
+        for (ConditionSetRef ref : stale) {
             EligibilityEvaluation evaluation = judgements.get(ref.versionId()).evaluation();
             List<Map<String, Object>> conditions = evaluation.conditions().stream()
                     .map(EligibilityResultService::toMap).toList();
-            rows.add(new UpsertRow(ref.opportunityId(), ref.versionId(), evaluation.status(), evaluation.reason(),
-                    conditions, validUntil));
+            rows.add(new UpsertRow(ref.conditionSetId(), evaluation.status(), evaluation.reason(), conditions,
+                    validUntil));
         }
         int batchSize = Math.max(1, writeBatchSize);
         for (int from = 0; from < rows.size(); from += batchSize) {
