@@ -1,0 +1,53 @@
+name: Collection PostgreSQL tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/collection-postgres-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+      - name: Require Docker
+        run: docker info
+      - name: Run all backend tests
+        working-directory: backend
+        run: |
+          chmod +x gradlew
+          ./gradlew clean test --no-daemon --console=plain
+      - name: Require executed PostgreSQL notification tests
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          report = pathlib.Path('backend/build/test-results/test/TEST-com.team3.backend.collection.service.NormalizationNotificationListenerTests.xml')
+          suite = ET.parse(report).getroot()
+          assert int(suite.attrib['tests']) > 0, 'Notification tests did not run'
+          for key in ('skipped', 'failures', 'errors'):
+              assert int(suite.attrib[key]) == 0, f'Notification tests: {key}={suite.attrib[key]}'
+          print(f"PostgreSQL notification tests passed: {suite.attrib['tests']}")
+          PY
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: |
+            backend/build/reports/tests/test
+            backend/build/test-results/test
