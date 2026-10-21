@@ -1,5 +1,6 @@
 package com.team3.backend.opportunity.service;
 
+import com.team3.backend.opportunity.conditionset.ConditionSetKey;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.*;
 import com.team3.backend.opportunity.dto.NormalizationCommand;
@@ -75,6 +76,7 @@ public class YouthPolicyNormalizationService {
     private final OpportunityRegionRepository opportunityRegionRepository;
     private final RegionRepository regionRepository;
     private final YouthPolicyDetailRepository detailRepository;
+    private final ConditionSetRepository conditionSetRepository;
 
     @Transactional
     public NormalizationResult normalize(NormalizationCommand command) {
@@ -137,24 +139,19 @@ public class YouthPolicyNormalizationService {
                     false, false, age.outcome(), periods.outcome());
         }
 
+        // 조건 묶음 키는 저장할 조건·거주지역과 같은 값으로 만든다 (버전 연결 전 임시 조건으로 계산)
+        Long conditionSetId = conditionSetRepository.resolveId(ConditionSetKey.hash(
+                conditions(null, age, region, codes, income, raw), residenceCodes(region)));
         OpportunityVersion version = versionRepository.save(OpportunityVersion.builder()
                 .opportunity(opportunity)
                 .versionNo(current == null ? 1 : current.getVersionNo() + 1)
                 .normalizedSnapshot(snapshot)
                 .personalizationStatus(personalizationStatus(age.result()))
                 .normalizationVersion(NORMALIZATION_VERSION)
+                .conditionSetId(conditionSetId)
                 .build());
         detailRepository.save(detail(version, raw));
-        conditionRepository.save(ageCondition(version, age));
-        conditionRepository.save(regionCondition(version, region));
-        for (CodeField f : CODE_FIELDS) {
-            conditionRepository.save(codeCondition(version, f, codes.get(f.field())));
-        }
-        conditionRepository.save(incomeCondition(version, income));
-        textCondition(version, ConditionType.OTHER, RequirementType.REQUIRED, "additionalQualification",
-                "addAplyQlfcCndCn", raw.addAplyQlfcCndCn()).ifPresent(conditionRepository::save);
-        textCondition(version, ConditionType.OTHER, RequirementType.EXCLUSION, "participationRestriction",
-                "ptcpPrpTrgtCn", raw.ptcpPrpTrgtCn()).ifPresent(conditionRepository::save);
+        conditionRepository.saveAll(conditions(version, age, region, codes, income, raw));
         windowRepository.saveAll(windows(version, periods.periods()));
         opportunityRegionRepository.saveAll(regions(version, region));
 
@@ -342,6 +339,30 @@ public class YouthPolicyNormalizationService {
     }
 
     // ── 엔티티 변환 ──
+
+    /** 버전의 자격 조건 전체 (저장 순서대로). version이 null이면 조건 묶음 키 계산용 임시 조건 */
+    private static List<OpportunityCondition> conditions(OpportunityVersion version, SupplementedAge age,
+                                                         RegionNormalization region,
+                                                         Map<String, CodeNormalization> codes,
+                                                         IncomeNormalization income, YouthPolicyRaw raw) {
+        List<OpportunityCondition> list = new ArrayList<>();
+        list.add(ageCondition(version, age));
+        list.add(regionCondition(version, region));
+        for (CodeField f : CODE_FIELDS) {
+            list.add(codeCondition(version, f, codes.get(f.field())));
+        }
+        list.add(incomeCondition(version, income));
+        textCondition(version, ConditionType.OTHER, RequirementType.REQUIRED, "additionalQualification",
+                "addAplyQlfcCndCn", raw.addAplyQlfcCndCn()).ifPresent(list::add);
+        textCondition(version, ConditionType.OTHER, RequirementType.EXCLUSION, "participationRestriction",
+                "ptcpPrpTrgtCn", raw.ptcpPrpTrgtCn()).ifPresent(list::add);
+        return list;
+    }
+
+    /** 거주지역(RESIDENCE) 행으로 저장하는 코드. regions()와 같은 기준 */
+    private static List<String> residenceCodes(RegionNormalization region) {
+        return region.status() == RegionStatus.SPECIFIC ? region.regionCodes() : List.of();
+    }
 
     private static OpportunityCondition ageCondition(OpportunityVersion version, SupplementedAge age) {
         AgeNormalization result = age.result();

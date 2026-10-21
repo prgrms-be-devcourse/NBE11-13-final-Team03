@@ -66,6 +66,13 @@ public class OpportunityVersion {
     @Column(name = "normalization_version", nullable = false, length = 50)
     private String normalizationVersion;
 
+    /**
+     * 조건 묶음 ID (ConditionSet). 판정 입력(자격 조건 + 거주지역)이 같은 버전은 같은 값.
+     * 정규화가 버전을 만들 때 넣는다. 이 컬럼이 생기기 전에 만든 버전은 NULL이며 ConditionSetBackfill이 채운다
+     */
+    @Column(name = "condition_set_id")
+    private Long conditionSetId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
