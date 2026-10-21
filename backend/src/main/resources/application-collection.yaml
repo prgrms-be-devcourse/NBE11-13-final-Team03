@@ -5,7 +5,8 @@ spring:
 
 collection:
   normalization:
-    enabled: ${NORMALIZATION_ENABLED:true}
+    # 정제 소비자가 준비된 api/all 역할에서만 명시적으로 활성화한다.
+    enabled: ${NORMALIZATION_ENABLED:false}
   employment24:
     url: https://www.work24.go.kr/cm/openApi/call/hr/callOpenApiSvcInfo310L01.do
     api-key: ${EMPLOYMENT24_API_KEY:}
