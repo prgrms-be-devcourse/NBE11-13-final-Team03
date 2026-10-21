@@ -2,6 +2,7 @@ package com.team3.backend.eligibility.service;
 
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
+import com.team3.backend.eligibility.domain.repository.EligibilityResultUpsertRepository;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.opportunity.dto.NormalizationCommand;
 import com.team3.backend.opportunity.dto.NormalizationResult;
@@ -297,6 +298,38 @@ class EligibilityResultServiceTest {
     }
 
     @Test
+    void 늦게_끝난_옛_기회_버전_판정은_새_버전_결과를_덮어쓰지_않는다() {
+        Long opportunityId = normalizePolicy("R2026-1", "11680", "34");
+        Long oldVersionId = currentVersionId(opportunityId);
+        persistProfile(gangnam);
+        service.refreshStale(USER, NOW);
+
+        normalizePolicy("R2026-1", "11680", "39");
+        Long newVersionId = currentVersionId(opportunityId);
+        assertThat(service.refreshStale(USER, NOW)).isEqualTo(1);
+
+        int written = resultRepository.upsert(USER, 1L, EligibilityResultService.RULE_VERSION,
+                LocalDateTime.of(2026, 10, 15, 10, 0), List.of(new EligibilityResultUpsertRepository.UpsertRow(
+                        opportunityId, oldVersionId, EligibilityStatus.NOT_ELIGIBLE, "옛 버전 판정", List.of(), null)));
+        em.clear();
+
+        assertThat(written).isZero();
+        assertThat(resultRepository.findByUserIdAndOpportunityIdIn(USER, List.of(opportunityId))).singleElement()
+                .extracting(EligibilityResult::getOpportunityVersionId).isEqualTo(newVersionId);
+    }
+
+    @Test
+    void 결과_테이블_통계가_없으면_분석해서_만든다() {
+        normalizePolicy("R2026-1", "11680", "34");
+        persistProfile(gangnam);
+        service.refreshStale(USER, NOW);
+
+        resultRepository.analyze();
+
+        assertThat(resultRepository.lacksStatistics()).isFalse();
+    }
+
+    @Test
     void 다음_생일은_오늘이_생일이면_내년이다() {
         LocalDate birth = LocalDate.of(1998, 5, 15);
         assertThat(EligibilityResultService.nextBirthday(birth, LocalDate.of(2026, 5, 14))).isEqualTo(LocalDate.of(2026, 5, 15));
@@ -313,6 +346,11 @@ class EligibilityResultServiceTest {
 
     private EligibilityStatus statusOf(Long opportunityId) {
         return resultRepository.findByUserIdAndOpportunityIdIn(USER, List.of(opportunityId)).getFirst().getEligibilityStatus();
+    }
+
+    private Long currentVersionId(Long opportunityId) {
+        return em.createQuery("select o.currentVersion.id from Opportunity o where o.id = :id", Long.class)
+                .setParameter("id", opportunityId).getSingleResult();
     }
 
     private Long normalizePolicy(String plcyNo, String zipCd, String maxAge) {

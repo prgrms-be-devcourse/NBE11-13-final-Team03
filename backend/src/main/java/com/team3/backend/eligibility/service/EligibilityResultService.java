@@ -14,12 +14,16 @@ import com.team3.backend.opportunity.dto.OpportunityVersionRef;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -40,6 +44,7 @@ import static com.team3.backend.eligibility.exception.EligibilityErrorCode.PROFI
  * 판정 결과가 없는 기회는 NOT_ELIGIBLE이 아니라 미판정이다.
  * 저장은 yon.eligibility.result-write-batch-size(기본 1,000)건씩 SQL 1개로 묶어 한다 (EligibilityResultUpsertRepository).
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -51,11 +56,14 @@ public class EligibilityResultService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CHUNK = 1_000;
+    /** refreshStale 진행 로그 간격 (묶음 수) */
+    private static final int PROGRESS_LOG_CHUNKS = 10;
 
     private final EligibilityProfileRepository profileRepository;
     private final EligibilityResultRepository resultRepository;
     private final OpportunityRepository opportunityRepository;
     private final EligibilityEvaluator evaluator;
+    private final PlatformTransactionManager transactionManager;
     @PersistenceContext
     private EntityManager em;
     /** 저장 SQL 1개에 담는 행 수. refreshAll은 CHUNK건씩 판정하므로 CHUNK보다 크게 잡아도 한 번에 CHUNK건까지만 담긴다 */
@@ -104,6 +112,7 @@ public class EligibilityResultService {
         return judged;
     }
 
+    @Transactional(propagation = Propagation.SUPPORTS)
     public int refreshStale(Long userId) {
         return refreshStale(userId, OffsetDateTime.now(KST));
     }
@@ -111,31 +120,74 @@ public class EligibilityResultService {
     /**
      * 판정 결과가 없거나 오래된 기회만 DB에서 1,000건씩 골라 최신화한다 (신규 기회, 새 버전, 생일·규칙 변경).
      * refreshAll과 달리 최신 결과가 있는 기회는 읽지 않는다. 판정 프로필이 없으면 0을 돌려준다(예외 없음).
+     *
+     * 트랜잭션: 바깥 트랜잭션이 없으면(배치) 1,000건 묶음마다 따로 커밋한다. 실패해도 앞 묶음은 남고, 다음 실행이 남은 것부터 처리한다.
+     * 바깥 트랜잭션이 있으면(테스트 등) 거기에 합류한다.
+     * 통계: 판정 결과 테이블에 열 통계가 없으면(새로 만든 테이블) 첫 묶음을 커밋한 뒤 ANALYZE를 한 번 한다.
+     * 통계가 없으면 PostgreSQL이 결과 테이블을 빈 것으로 보고 기회마다 테이블을 훑는 계획을 골라, 첫 사용자 판정이
+     * 크게 느려진다 (실데이터 14.1만 건: 통계 없음 300초, 계획 캐시까지 끄면 136초, 통계 있음 9초. 2026-10-21 홈서버).
      * @return 새로 판정한 건수
      */
+    @Transactional(propagation = Propagation.SUPPORTS)
     public int refreshStale(Long userId, OffsetDateTime now) {
-        Optional<EligibilityProfile> found = profileRepository.findByUserId(userId);
-        if (found.isEmpty()) {
-            return 0;
-        }
-        EligibilityProfile profile = found.get();
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
         LocalDate today = today(now);
+        boolean analyzeAfterFirstChunk = Boolean.TRUE.equals(tx.execute(status -> resultRepository.lacksStatistics()));
         int judged = 0;
+        int chunks = 0;
         long afterOpportunityId = 0L;
-        List<OpportunityVersionRef> refs;
-        do {
-            refs = resultRepository.findStaleVersionRefs(userId, profile.getProfileVersion(), RULE_VERSION, today,
-                    afterOpportunityId, PageRequest.of(0, CHUNK));
-            if (refs.isEmpty()) {
+        while (true) {
+            long cursor = afterOpportunityId;
+            StaleChunk chunk = tx.execute(status -> refreshStaleChunk(userId, today, now, cursor));
+            if (chunk == null || chunk.fetched() == 0) {
                 break;
             }
-            judged += refreshTargets(profile, refs, today, now);
-            afterOpportunityId = refs.getLast().opportunityId();
-            resultRepository.flush();
-            em.clear();
-            profile = findProfile(userId);
-        } while (refs.size() == CHUNK);
+            judged += chunk.judged();
+            chunks++;
+            afterOpportunityId = chunk.lastOpportunityId();
+            if (analyzeAfterFirstChunk) {
+                analyzeAfterFirstChunk = false;
+                analyzeResults(tx, userId);
+            }
+            if (chunks % PROGRESS_LOG_CHUNKS == 0) {
+                log.info("Eligibility stale refresh in progress: userId={}, chunks={}, judged={}", userId, chunks, judged);
+            }
+            if (chunk.fetched() < CHUNK) {
+                break;
+            }
+        }
         return judged;
+    }
+
+    /** 통계 갱신은 성능 보조라, 실패해도(권한 등) 판정은 계속한다 */
+    private void analyzeResults(TransactionTemplate tx, Long userId) {
+        try {
+            tx.executeWithoutResult(status -> resultRepository.analyze());
+            log.info("Eligibility results analyzed after first chunk (table had no statistics): userId={}", userId);
+        } catch (RuntimeException e) {
+            log.warn("Eligibility results analyze failed, continuing without statistics: userId={}", userId, e);
+        }
+    }
+
+    /** 묶음 1개 (현재 트랜잭션 안에서). 프로필이 없어지면 fetched=0으로 멈춘다 */
+    private StaleChunk refreshStaleChunk(Long userId, LocalDate today, OffsetDateTime now, long afterOpportunityId) {
+        Optional<EligibilityProfile> found = profileRepository.findByUserId(userId);
+        if (found.isEmpty()) {
+            return new StaleChunk(0, 0, afterOpportunityId);
+        }
+        EligibilityProfile profile = found.get();
+        List<OpportunityVersionRef> refs = resultRepository.findStaleVersionRefs(userId, profile.getProfileVersion(),
+                RULE_VERSION, today, afterOpportunityId, PageRequest.of(0, CHUNK));
+        if (refs.isEmpty()) {
+            return new StaleChunk(0, 0, afterOpportunityId);
+        }
+        int judged = refreshTargets(profile, refs, today, now);
+        resultRepository.flush();
+        em.clear();
+        return new StaleChunk(refs.size(), judged, refs.getLast().opportunityId());
+    }
+
+    private record StaleChunk(int fetched, int judged, long lastOpportunityId) {
     }
 
     /** 없거나 오래된 결과만 판정해 저장한다. @return 판정한 건수 */

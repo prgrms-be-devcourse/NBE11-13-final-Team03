@@ -115,6 +115,16 @@ class EligibilityResultUpsertRepositoryTest {
     }
 
     @Test
+    void 더_낮은_정책_버전은_덮어쓰지_않는다() {
+        upsert(1L, rows(2, 11L, EligibilityStatus.ELIGIBLE), AT);
+
+        assertThat(upsert(1L, rows(2, 10L, EligibilityStatus.NOT_ELIGIBLE), AT.plusHours(1))).isZero();
+        assertThat(jdbc.queryForList("SELECT DISTINCT opportunity_version_id || ':' || eligibility_status "
+                + "FROM eligibility_results", String.class))
+                .containsExactly("11:ELIGIBLE");
+    }
+
+    @Test
     void 프로필_버전이_오르면_갱신하고_더_낮은_버전은_덮어쓰지_않는다() {
         upsert(1L, rows(2, 10L, EligibilityStatus.ELIGIBLE), AT);
         assertThat(upsert(2L, rows(2, 10L, EligibilityStatus.NOT_ELIGIBLE), AT.plusHours(1))).isEqualTo(2);
