@@ -14,7 +14,7 @@ import java.util.Map;
  *
  * expression: 조건 유형별 구조화 값. status는 항상 포함하며, 확인되지 않은 값은 넣지 않는다(NULL ≠ 제한 없음).
  *   AGE    {"status": RANGE|MIN_ONLY|MAX_ONLY|DATE_BOUND|NO_LIMIT|NOT_APPLICABLE|UNKNOWN,
- *           "min": 19, "max": 34, "bornAfter"/"bornBefore": "1986-01-01"}
+ *           "min": 19, "max": 34, "bornOnOrAfter"/"bornOnOrBefore": "1986-01-01"}
  *          sprtTrgtMinAge=0, sprtTrgtMaxAge=0, sprtTrgtAgeLmtYn=Y 는 NO_LIMIT로 처리하지 않는다.
  *          근거 확인 전: status=UNKNOWN, validation_status=DATA_CONFLICT.
  *          ptcpPrpTrgtCn·addAplyQlfcCndCn·공식 공고로 확인되면 해당 상태(RANGE, NOT_APPLICABLE 등)로 저장하되

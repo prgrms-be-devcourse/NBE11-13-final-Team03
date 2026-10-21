@@ -4,6 +4,7 @@ import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.dto.EligibilityResultFreshness;
 import com.team3.backend.eligibility.dto.EligibilityStatusRow;
+import com.team3.backend.opportunity.dto.OpportunityVersionRef;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -69,4 +70,25 @@ public interface EligibilityResultRepository extends JpaRepository<EligibilityRe
                                           @Param("opportunityId") Long opportunityId,
                                           @Param("ruleVersion") String ruleVersion,
                                           @Param("today") LocalDate today);
+
+    /**
+     * 사용자의 판정 결과가 없거나 오래된 기회의 현재 버전 (배치 최신화용, 기회 ID 순서로 pageable 크기만큼).
+     * 오래됨의 기준은 findFreshStatuses의 최신 기준의 반대다: 신규 기회, 새 버전이 생긴 기회, 프로필·규칙 버전이 바뀐 결과,
+     * validUntil(다음 생일)이 지난 결과. 현재 버전이 없는 기회는 빠진다.
+     */
+    @Query("select new com.team3.backend.opportunity.dto.OpportunityVersionRef(o.id, o.currentVersion.id) "
+            + "from Opportunity o where o.currentVersion is not null and o.id > :afterOpportunityId "
+            + "and not exists (select 1 from EligibilityResult r "
+            + "where r.userId = :userId and r.opportunityId = o.id "
+            + "and r.opportunityVersionId = o.currentVersion.id "
+            + "and r.profileVersion = :profileVersion "
+            + "and r.ruleVersion = :ruleVersion "
+            + "and (r.validUntil is null or r.validUntil > :today)) "
+            + "order by o.id")
+    List<OpportunityVersionRef> findStaleVersionRefs(@Param("userId") Long userId,
+                                                     @Param("profileVersion") Long profileVersion,
+                                                     @Param("ruleVersion") String ruleVersion,
+                                                     @Param("today") LocalDate today,
+                                                     @Param("afterOpportunityId") Long afterOpportunityId,
+                                                     Pageable pageable);
 }

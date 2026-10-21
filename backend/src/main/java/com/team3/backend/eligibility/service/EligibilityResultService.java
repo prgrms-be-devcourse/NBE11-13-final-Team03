@@ -35,6 +35,7 @@ import static com.team3.backend.eligibility.exception.EligibilityErrorCode.PROFI
  *
  * - refresh: 지정한 기회들(예: 추천 후보)만 최신화
  * - refreshAll: 사용자의 정규화된 기회 전체를 최신화 (신청 가능성 필터 검색 전, 프로필 변경 후)
+ * - refreshStale: 결과가 없거나 오래된 기회만 DB에서 골라 최신화 (신규·변경 공고 배치, EligibilityBatchRefresher)
  * 최신 결과는 다시 판정하지 않고, 없거나 오래된 결과만 판정해 저장한다 (기준은 EligibilityResult 참고).
  * 판정 결과가 없는 기회는 NOT_ELIGIBLE이 아니라 미판정이다.
  * 저장은 yon.eligibility.result-write-batch-size(기본 1,000)건씩 SQL 1개로 묶어 한다 (EligibilityResultUpsertRepository).
@@ -100,6 +101,40 @@ public class EligibilityResultService {
             em.clear();
             profile = findProfile(userId);
         } while (refs.hasNext());
+        return judged;
+    }
+
+    public int refreshStale(Long userId) {
+        return refreshStale(userId, OffsetDateTime.now(KST));
+    }
+
+    /**
+     * 판정 결과가 없거나 오래된 기회만 DB에서 1,000건씩 골라 최신화한다 (신규 기회, 새 버전, 생일·규칙 변경).
+     * refreshAll과 달리 최신 결과가 있는 기회는 읽지 않는다. 판정 프로필이 없으면 0을 돌려준다(예외 없음).
+     * @return 새로 판정한 건수
+     */
+    public int refreshStale(Long userId, OffsetDateTime now) {
+        Optional<EligibilityProfile> found = profileRepository.findByUserId(userId);
+        if (found.isEmpty()) {
+            return 0;
+        }
+        EligibilityProfile profile = found.get();
+        LocalDate today = today(now);
+        int judged = 0;
+        long afterOpportunityId = 0L;
+        List<OpportunityVersionRef> refs;
+        do {
+            refs = resultRepository.findStaleVersionRefs(userId, profile.getProfileVersion(), RULE_VERSION, today,
+                    afterOpportunityId, PageRequest.of(0, CHUNK));
+            if (refs.isEmpty()) {
+                break;
+            }
+            judged += refreshTargets(profile, refs, today, now);
+            afterOpportunityId = refs.getLast().opportunityId();
+            resultRepository.flush();
+            em.clear();
+            profile = findProfile(userId);
+        } while (refs.size() == CHUNK);
         return judged;
     }
 

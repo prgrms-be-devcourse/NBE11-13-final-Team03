@@ -49,7 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
-@Import({EligibilityResultService.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
+@Import({EligibilityResultService.class, EligibilityBatchRefresher.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
         YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
         YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
@@ -62,6 +62,8 @@ class EligibilityResultServiceTest {
     private EligibilityResultService service;
     @Autowired
     private EligibilityResultRepository resultRepository;
+    @Autowired
+    private EligibilityBatchRefresher batchRefresher;
     @Autowired
     private YouthPolicyNormalizationService normalizationService;
     @Autowired
@@ -240,6 +242,61 @@ class EligibilityResultServiceTest {
     }
 
     @Test
+    void 오래된_결과만_고르는_최신화는_새_기회와_새_버전만_판정한다() {
+        Long changed = normalizePolicy("R2026-1", "11680", "34");
+        normalizePolicy("R2026-2", "11440", "34");
+        persistProfile(gangnam);
+        assertThat(service.refreshStale(USER, NOW)).isEqualTo(2);
+        assertThat(service.refreshStale(USER, NOW)).isZero();
+
+        Long added = normalizePolicy("R2026-3", "11680", "34");
+        normalizePolicy("R2026-1", "11680", "39");
+        Long newVersionId = em.createQuery("select o.currentVersion.id from Opportunity o where o.id = :id", Long.class)
+                .setParameter("id", changed).getSingleResult();
+
+        assertThat(service.refreshStale(USER, NOW)).isEqualTo(2);
+        assertThat(service.refreshStale(USER, NOW)).isZero();
+        assertThat(resultRepository.count()).isEqualTo(3);
+        assertThat(resultRepository.findByUserIdAndOpportunityIdIn(USER, List.of(changed))).singleElement()
+                .extracting(EligibilityResult::getOpportunityVersionId).isEqualTo(newVersionId);
+        assertThat(resultRepository.findByUserIdAndOpportunityIdIn(USER, List.of(added))).hasSize(1);
+    }
+
+    @Test
+    void 오래된_결과만_고르는_최신화는_프로필_변경과_생일을_반영하고_프로필이_없으면_0() {
+        assertThat(service.refreshStale(USER, NOW)).isZero();
+
+        normalizePolicy("R2026-1", "11680", "34");
+        normalizePolicy("R2026-2", "11440", "34");
+        persistProfile(gangnam);
+        service.refreshStale(USER, NOW);
+
+        assertThat(service.refreshStale(USER, OffsetDateTime.parse("2027-05-14T10:00:00+09:00"))).isZero();
+        assertThat(service.refreshStale(USER, OffsetDateTime.parse("2027-05-15T10:00:00+09:00"))).isEqualTo(2);
+
+        em.createQuery("update EligibilityProfile p set p.profileVersion = p.profileVersion + 1 where p.userId = :userId")
+                .setParameter("userId", USER)
+                .executeUpdate();
+        em.clear();
+        assertThat(service.refreshStale(USER, NOW)).isEqualTo(2);
+    }
+
+    @Test
+    void 배치는_프로필이_있는_사용자마다_오래된_결과만_판정한다() {
+        normalizePolicy("R2026-1", "11680", "34");
+        normalizePolicy("R2026-2", "11440", "34");
+        persistProfile(USER, gangnam);
+        persistProfile(2L, mapo);
+
+        assertThat(batchRefresher.refreshAllUsers(NOW)).isEqualTo(4);
+        assertThat(batchRefresher.refreshAllUsers(NOW)).isZero();
+
+        normalizePolicy("R2026-3", "11680", "34");
+        assertThat(batchRefresher.refreshAllUsers(NOW)).isEqualTo(2);
+        assertThat(resultRepository.count()).isEqualTo(6);
+    }
+
+    @Test
     void 다음_생일은_오늘이_생일이면_내년이다() {
         LocalDate birth = LocalDate.of(1998, 5, 15);
         assertThat(EligibilityResultService.nextBirthday(birth, LocalDate.of(2026, 5, 14))).isEqualTo(LocalDate.of(2026, 5, 15));
@@ -273,8 +330,12 @@ class EligibilityResultServiceTest {
     }
 
     private void persistProfile(Region residence) {
+        persistProfile(USER, residence);
+    }
+
+    private void persistProfile(Long userId, Region residence) {
         em.persist(EligibilityProfile.builder()
-                .userId(USER)
+                .userId(userId)
                 .birthDate(LocalDate.of(1998, 5, 15))
                 .residenceRegion(em.getReference(Region.class, residence.getRegionCode()))
                 .employmentStatus(EmploymentStatus.UNEMPLOYED)
