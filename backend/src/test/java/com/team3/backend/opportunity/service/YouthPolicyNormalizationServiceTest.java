@@ -161,6 +161,28 @@ class YouthPolicyNormalizationServiceTest {
     }
 
     @Test
+    void API_자유텍스트로만_보완한_연령은_UNVERIFIED로_저장하고_개인화하지_않는다() {
+        YouthPolicyRaw raw = YouthPolicyRaw.builder()
+                .plcyNo("R2026-1").plcyNm("청년 월세 지원")
+                .sprtTrgtMinAge("0").sprtTrgtMaxAge("0").sprtTrgtAgeLmtYn("N")
+                .addAplyQlfcCndCn("공고일 기준 만 19세 이상 34세 이하 무주택 청년")
+                .aplyPrdSeCd("0057001").aplyYmd("20261001 ~ 20261031")
+                .lclsfNm("주거").mclsfNm("주거지원")
+                .build();
+
+        NormalizationResult result = service.normalize(command(raw, DAY1, List.of()));
+        flushAndClear();
+
+        assertThat(result.ageOutcome()).isEqualTo(SupplementOutcome.FILLED);
+        OpportunityCondition age = condition(result.versionId(), ConditionType.AGE);
+        assertThat(age.getValidationStatus()).isEqualTo(ValidationStatus.UNVERIFIED);
+        assertThat(age.getExpression()).containsEntry("min", 19).containsEntry("max", 34);
+        assertThat(age.getEvidence()).containsEntry("sourceType", "API_TEXT");
+        assertThat(em.find(OpportunityVersion.class, result.versionId()).getPersonalizationStatus())
+                .isEqualTo(PersonalizationStatus.UNKNOWN);
+    }
+
+    @Test
     void zipCd를_지역_사전으로_매핑해_거주지_조건과_지역_행을_저장한다() {
         Region seoul = Region.builder().regionCode("1100000000").regionName("서울특별시").build();
         Region gyeonggi = Region.builder().regionCode("4100000000").regionName("경기도").build();
