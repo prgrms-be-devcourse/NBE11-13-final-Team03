@@ -22,10 +22,27 @@ class NcsClassificationTest {
     }
 
     @Test
+    void 중분류는_코드_앞_4자리로_찾는다() {
+        assertThat(NcsClassification.middleName("20010202")).hasValue("정보기술");
+        assertThat(NcsClassification.middleName("14070106")).hasValue("건설기계운전·정비");
+        assertThat(NcsClassification.middleName("140302")).hasValue("건축");
+    }
+
+    @Test
+    void 중분류는_모두_대분류_아래에_있다() {
+        var names = NcsClassification.load();
+        assertThat(names.keySet()).allMatch(code -> code.length() == 2 || code.length() == 4);
+        assertThat(names.keySet()).filteredOn(code -> code.length() == 4)
+                .isNotEmpty()
+                .allMatch(code -> names.containsKey(code.substring(0, 2)));
+    }
+
+    @Test
     void 코드가_없거나_짧거나_표에_없으면_빈_값() {
         assertThat(NcsClassification.majorName(null)).isEmpty();
         assertThat(NcsClassification.majorName("2")).isEmpty();
         assertThat(NcsClassification.majorName("99010101")).isEmpty();
         assertThat(NcsClassification.middleName("200")).isEmpty();
+        assertThat(NcsClassification.middleName("20990101")).isEmpty();
     }
 }
