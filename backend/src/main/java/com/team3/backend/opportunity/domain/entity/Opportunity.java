@@ -33,6 +33,10 @@ public class Opportunity {
     @Column(name = "sub_category", length = 100)
     private String subCategory;
 
+    /** 세 번째 분류. 직업훈련: NCS 2차분류(중분류) 이름. 청년정책은 없음(null) */
+    @Column(name = "detail_category", length = 100)
+    private String detailCategory;
+
     @Column(name = "detail_url", length = 2000)
     private String detailUrl;
 
@@ -77,9 +81,15 @@ public class Opportunity {
     }
 
     public void updateSummary(String title, String category, String subCategory, String detailUrl) {
+        updateSummary(title, category, subCategory, null, detailUrl);
+    }
+
+    public void updateSummary(String title, String category, String subCategory, String detailCategory,
+                              String detailUrl) {
         this.title = Objects.requireNonNull(title, "title");
         this.category = category;
         this.subCategory = subCategory;
+        this.detailCategory = detailCategory;
         this.detailUrl = detailUrl;
     }
 }

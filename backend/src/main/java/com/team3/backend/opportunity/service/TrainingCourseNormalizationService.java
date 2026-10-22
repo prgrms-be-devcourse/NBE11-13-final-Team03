@@ -6,6 +6,7 @@ import com.team3.backend.opportunity.domain.repository.*;
 import com.team3.backend.opportunity.dto.TrainingCourseRaw;
 import com.team3.backend.opportunity.dto.TrainingNormalizationCommand;
 import com.team3.backend.opportunity.dto.TrainingNormalizationResult;
+import com.team3.backend.opportunity.normalization.NcsClassification;
 import com.team3.backend.opportunity.normalization.RegionNormalization;
 import com.team3.backend.opportunity.normalization.RegionNormalizer;
 import com.team3.backend.opportunity.normalization.RegionStatus;
@@ -58,6 +59,7 @@ public class TrainingCourseNormalizationService {
     static final String KDT_TARGET_CODE = "C0104";
     /** 온통청년 대분류 (가운데 점은 원본과 같은 반각 ･ U+FF65) */
     public static final String CATEGORY = "교육･직업훈련";
+    /** NCS 코드가 없거나 분류표에 없을 때의 2차 분류 */
     public static final String SUB_CATEGORY = "직업훈련";
 
     private final RegionNormalizer regionNormalizer;
@@ -116,7 +118,8 @@ public class TrainingCourseNormalizationService {
                     .opportunityType(OpportunityType.VOCATIONAL_TRAINING)
                     .title(title)
                     .category(CATEGORY)
-                    .subCategory(SUB_CATEGORY)
+                    .subCategory(subCategory(raw))
+                    .detailCategory(detailCategory(raw))
                     .detailUrl(detailUrl)
                     .build());
             sourceRepository.save(OpportunitySource.builder()
@@ -131,6 +134,9 @@ public class TrainingCourseNormalizationService {
 
         OpportunityVersion current = opportunity.getCurrentVersion();
         if (current != null && snapshot.equals(current.getNormalizedSnapshot())) {
+            // 분류는 스냅샷에 없어서(NCS 코드만 있음), 분류표가 바뀌어도 새 버전 없이 요약만 맞춘다. 값이 같으면 UPDATE 없음
+            opportunity.updateSummary(opportunity.getTitle(), CATEGORY, subCategory(raw), detailCategory(raw),
+                    opportunity.getDetailUrl());
             return Outcome.UNCHANGED;
         }
 
@@ -156,8 +162,18 @@ public class TrainingCourseNormalizationService {
         opportunityRegionRepository.saveAll(regions(version, region));
 
         opportunity.changeCurrentVersion(version);
-        opportunity.updateSummary(title, CATEGORY, SUB_CATEGORY, detailUrl);
+        opportunity.updateSummary(title, CATEGORY, subCategory(raw), detailCategory(raw), detailUrl);
         return existing.isEmpty() ? Outcome.CREATED : Outcome.NEW_VERSION;
+    }
+
+    /** 2차 분류: NCS 1차분류(대분류) 이름. 코드가 없거나 표에 없으면 "직업훈련" */
+    static String subCategory(TrainingCourseRaw raw) {
+        return NcsClassification.majorName(raw.ncsCd()).orElse(SUB_CATEGORY);
+    }
+
+    /** 3차 분류: NCS 2차분류(중분류) 이름. 코드가 없거나 표에 없으면 null */
+    static String detailCategory(TrainingCourseRaw raw) {
+        return NcsClassification.middleName(raw.ncsCd()).orElse(null);
     }
 
     static String externalId(TrainingCourseRaw raw) {
