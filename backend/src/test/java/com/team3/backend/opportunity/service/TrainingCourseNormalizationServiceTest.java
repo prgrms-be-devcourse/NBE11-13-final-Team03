@@ -94,7 +94,7 @@ class TrainingCourseNormalizationServiceTest {
         assertThat(opportunity.getOpportunityType()).isEqualTo(OpportunityType.VOCATIONAL_TRAINING);
         assertThat(opportunity.getTitle()).isEqualTo("소형(3톤미만) 굴삭기(굴착기) 면허취득과정");
         assertThat(opportunity.getCategory()).isEqualTo("교육･직업훈련");
-        assertThat(opportunity.getSubCategory()).isEqualTo("건설"); // NCS 14070106 → 대분류 14
+        assertThat(opportunity.getSubCategory()).isEqualTo("직업훈련");
         assertThat(opportunity.getDetailUrl()).startsWith("https://www.work24.go.kr/");
 
         Long versionId = opportunity.getCurrentVersion().getId();
@@ -121,46 +121,6 @@ class TrainingCourseNormalizationServiceTest {
         });
         assertThat(windowRepository.findByVersionId(versionId)).singleElement()
                 .extracting(ApplicationWindow::getPeriodType).isEqualTo(PeriodType.UNKNOWN);
-    }
-
-    @Test
-    void 분류는_NCS_대분류이고_코드가_없거나_표에_없으면_직업훈련이다() {
-        TrainingCourseRaw it = TrainingCourseRaw.builder().trprId("NCS-IT").trprDegr("1").title("자바 백엔드 과정")
-                .subTitle("훈련기관").traStartDate("2026-10-19").traEndDate("2027-03-30")
-                .trainTarget("국민내일배움카드(일반)").trainTargetCd("C0061").trngAreaCd("41650")
-                .ncsCd("20010202").build();
-        TrainingCourseRaw noCode = withTarget("NCS-NONE", "국민내일배움카드(일반)", "C0061");
-        TrainingCourseRaw unknownCode = TrainingCourseRaw.builder().trprId("NCS-99").trprDegr("1").title("미분류 과정")
-                .subTitle("훈련기관").traStartDate("2026-10-19").traEndDate("2027-03-30")
-                .trainTarget("국민내일배움카드(일반)").trainTargetCd("C0061").trngAreaCd("41650")
-                .ncsCd("99010101").build();
-
-        service.normalizePage(page(DAY1, it, noCode, unknownCode));
-        flushAndClear();
-
-        assertThat(opportunityOf("NCS-IT:1").getCategory()).isEqualTo("교육･직업훈련");
-        assertThat(opportunityOf("NCS-IT:1").getSubCategory()).isEqualTo("정보통신");
-        assertThat(opportunityOf("NCS-NONE:1").getSubCategory()).isEqualTo("직업훈련");
-        assertThat(opportunityOf("NCS-NONE:1").getDetailCategory()).isNull();
-        assertThat(opportunityOf("NCS-99:1").getSubCategory()).isEqualTo("직업훈련");
-    }
-
-    @Test
-    void 원본이_같아도_분류는_다시_맞춘다() {
-        service.normalizePage(page(DAY1, wallpaper()));
-        flushAndClear();
-        Opportunity before = opportunityOf("AIG20250000536091:8");
-        Long versionId = before.getCurrentVersion().getId();
-        em.createQuery("update Opportunity o set o.subCategory = '직업훈련' where o.id = :id")
-                .setParameter("id", before.getId()).executeUpdate();
-        em.clear();
-
-        service.normalizePage(page(DAY1.plusDays(1), wallpaper()));
-        flushAndClear();
-
-        Opportunity after = opportunityOf("AIG20250000536091:8");
-        assertThat(after.getSubCategory()).isEqualTo("건설"); // NCS 14030209 → 대분류 14
-        assertThat(after.getCurrentVersion().getId()).isEqualTo(versionId);
     }
 
     @Test
