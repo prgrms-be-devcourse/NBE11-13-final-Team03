@@ -95,6 +95,7 @@ class TrainingCourseNormalizationServiceTest {
         assertThat(opportunity.getTitle()).isEqualTo("소형(3톤미만) 굴삭기(굴착기) 면허취득과정");
         assertThat(opportunity.getCategory()).isEqualTo("교육･직업훈련");
         assertThat(opportunity.getSubCategory()).isEqualTo("건설"); // NCS 14070106 → 대분류 14
+        assertThat(opportunity.getDetailCategory()).isEqualTo("건설기계운전·정비"); // → 중분류 1407
         assertThat(opportunity.getDetailUrl()).startsWith("https://www.work24.go.kr/");
 
         Long versionId = opportunity.getCurrentVersion().getId();
@@ -140,6 +141,7 @@ class TrainingCourseNormalizationServiceTest {
 
         assertThat(opportunityOf("NCS-IT:1").getCategory()).isEqualTo("교육･직업훈련");
         assertThat(opportunityOf("NCS-IT:1").getSubCategory()).isEqualTo("정보통신");
+        assertThat(opportunityOf("NCS-IT:1").getDetailCategory()).isEqualTo("정보기술");
         assertThat(opportunityOf("NCS-NONE:1").getSubCategory()).isEqualTo("직업훈련");
         assertThat(opportunityOf("NCS-NONE:1").getDetailCategory()).isNull();
         assertThat(opportunityOf("NCS-99:1").getSubCategory()).isEqualTo("직업훈련");
@@ -160,6 +162,7 @@ class TrainingCourseNormalizationServiceTest {
 
         Opportunity after = opportunityOf("AIG20250000536091:8");
         assertThat(after.getSubCategory()).isEqualTo("건설"); // NCS 14030209 → 대분류 14
+        assertThat(after.getDetailCategory()).isEqualTo("건축"); // → 중분류 1403
         assertThat(after.getCurrentVersion().getId()).isEqualTo(versionId);
     }
 
