@@ -80,6 +80,11 @@ class ConditionSetKeyTest {
     }
 
     @Test
+    void 정규_형식은_키_규칙_버전으로_시작한다() {
+        assertThat(ConditionSetKey.canonical(List.of(), List.of())).startsWith("v" + ConditionSetKey.VERSION + "\n");
+    }
+
+    @Test
     void 목록_순서는_유지해서_비교한다() {
         assertThat(ConditionSetKey.canonicalValue(List.of("A", "B")))
                 .isNotEqualTo(ConditionSetKey.canonicalValue(List.of("B", "A")));
