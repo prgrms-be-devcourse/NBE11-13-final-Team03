@@ -3,6 +3,9 @@ package com.team3.backend.architecture;
 import com.team3.backend.BackendApplication;
 import com.team3.backend.auth.SecurityConfig;
 import com.team3.backend.global.config.ApplicationJpaConfig;
+import com.team3.backend.interest.domain.entity.UserInterest;
+import com.team3.backend.interest.domain.repository.InterestOptionRepository;
+import com.team3.backend.interest.domain.repository.UserInterestRepository;
 import com.team3.backend.notification.boundary.NotificationBoundaryComponent;
 import com.team3.backend.notification.boundary.NotificationBoundaryEntity;
 import com.team3.backend.notification.boundary.NotificationBoundaryRepository;
@@ -63,9 +66,12 @@ class ApplicationContextBoundaryTest {
         assertThat(entityManagerFactory.getMetamodel().entity(RawIngestState.class)).isNotNull();
         assertThat(entityManagerFactory.getMetamodel().entity(UserOpportunityPreference.class)).isNotNull();
         assertThat(entityManagerFactory.getMetamodel().entity(ConditionSet.class)).isNotNull();
+        assertThat(entityManagerFactory.getMetamodel().entity(UserInterest.class)).isNotNull();
         assertThat(context.getBeansOfType(UserOpportunityPreferenceRepository.class)).hasSize(1);
         assertThat(context.getBeansOfType(OpportunitySearchRepository.class)).hasSize(1);
         assertThat(context.getBeansOfType(ConditionSetRepository.class)).hasSize(1);
+        assertThat(context.getBeansOfType(UserInterestRepository.class)).hasSize(1);
+        assertThat(context.getBeansOfType(InterestOptionRepository.class)).hasSize(1);
 
         assertThatThrownBy(() -> entityManagerFactory.getMetamodel().entity(NotificationBoundaryEntity.class))
                 .isInstanceOf(IllegalArgumentException.class);
