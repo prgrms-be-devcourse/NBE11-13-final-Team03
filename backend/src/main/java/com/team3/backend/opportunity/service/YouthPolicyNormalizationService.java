@@ -139,7 +139,9 @@ public class YouthPolicyNormalizationService {
                     false, false, age.outcome(), periods.outcome());
         }
 
-        // 조건 묶음 키는 저장할 조건·거주지역과 같은 값으로 만든다 (버전 연결 전 임시 조건으로 계산)
+        // 조건 묶음 키는 저장할 조건·거주지역과 같은 값으로 만든다.
+        // 조건 엔티티는 불변이라 버전을 나중에 넣을 수 없고, 버전에는 묶음 ID가 먼저 있어야 한다.
+        // 그래서 버전 없는 조건으로 키를 계산하고, 버전 저장 뒤 같은 값으로 다시 만들어 저장한다 (중복 아님, 지우지 말 것)
         Long conditionSetId = conditionSetRepository.resolveId(ConditionSetKey.hash(
                 conditions(null, age, region, codes, income, raw), residenceCodes(region)));
         OpportunityVersion version = versionRepository.save(OpportunityVersion.builder()

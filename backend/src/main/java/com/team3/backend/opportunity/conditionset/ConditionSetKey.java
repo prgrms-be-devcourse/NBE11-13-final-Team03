@@ -18,8 +18,15 @@ import java.util.*;
  * - 조건 행과 지역 코드는 정렬한다 (저장 순서와 무관)
  * - expression의 맵 키는 정렬하고, 숫자는 값으로 비교한다 (19, 19L, 19.0은 같음). 목록은 순서를 유지한다
  * 판정 엔진이 읽는 입력이 바뀌면 이 키도 함께 바꿔야 한다.
+ *
+ * 키 규칙을 바꿀 때는 VERSION을 올린다. 정규 형식 맨 앞에 버전이 들어가므로 새 키는 이전 키와 절대 겹치지 않는다.
+ * 기존 버전에 반영하려면 opportunity_versions.condition_set_id를 NULL로 돌리고 백필(ConditionSetBackfill)을 다시 돌린다.
+ * 이전 키의 조건 묶음과 그 판정 결과는 어느 버전도 가리키지 않게 되어 쓰이지 않는다.
  */
 public final class ConditionSetKey {
+
+    /** 키 규칙 버전. 정규 형식이나 포함하는 입력이 바뀌면 올린다 */
+    static final String VERSION = "1";
 
     private ConditionSetKey() {
     }
@@ -48,7 +55,7 @@ public final class ConditionSetKey {
         Collections.sort(sortedLines);
         List<String> codes = new ArrayList<>(residenceRegionCodes == null ? List.of() : residenceRegionCodes);
         Collections.sort(codes);
-        return String.join("\n", sortedLines) + "\nresidence=" + String.join(",", codes);
+        return "v" + VERSION + "\n" + String.join("\n", sortedLines) + "\nresidence=" + String.join(",", codes);
     }
 
     private static String line(Enum<?> type, Enum<?> requirement, String field, Map<String, Object> expression,
