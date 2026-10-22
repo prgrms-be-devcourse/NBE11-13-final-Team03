@@ -24,6 +24,8 @@ import static com.team3.backend.eligibility.domain.entity.ConditionMatchResult.*
  * - 정책 조건 원문(UNSTRUCTURED)은 사용자 확인 필요(CHECK_REQUIRED).
  * - 정책 데이터에 조건이 비어 있으면 NOT_SPECIFIED (집계 제외). 단 연령·지역이 비어 있으면 ELIGIBLE을 확정하지 않도록 CHECK_REQUIRED.
  * - 조건 검증 상태가 INVALID·DATA_CONFLICT면 결과와 관계없이 가장 먼저 DATA_UNCLEAR. NEEDS_REVIEW 조건은 사용자 값과 일치하면 MATCHED, 아니면 DATA_UNCLEAR.
+ * - UNVERIFIED(공식 출처로 확인 못 한 보완 값) 조건은 어느 쪽으로도 확정하지 않는다: 일치하면 CHECK_REQUIRED, 불일치면 DATA_UNCLEAR.
+ *   그래서 UNVERIFIED 조건만으로는 ELIGIBLE도 NOT_ELIGIBLE도 되지 않는다.
  * - 조건이 하나도 없으면 UNKNOWN. 정규화는 버전마다 연령·지역·코드·소득 조건 행을 항상 만들고 "제한 없음"도 NO_LIMIT 행으로 저장하므로,
  *   조건이 없다는 것은 제한이 없다는 뜻이 아니라 정규화 데이터 누락이다.
  * - 사용자 값이 없거나 "모름"이면 USER_INFO_MISSING.
@@ -91,6 +93,14 @@ public class EligibilityEngine {
         }
         if (v == ValidationStatus.NEEDS_REVIEW && e.result() != MATCHED && e.result() != CHECK_REQUIRED) {
             return with(e, DATA_UNCLEAR, "정책 조건이 검토 중이어서 판정할 수 없습니다.");
+        }
+        if (v == ValidationStatus.UNVERIFIED) {
+            if (e.result() == NOT_MATCHED) {
+                return with(e, DATA_UNCLEAR, "정책 조건이 공식 출처로 확인되지 않아 불충족으로 확정할 수 없습니다.");
+            }
+            if (e.result() == MATCHED) {
+                return with(e, CHECK_REQUIRED, "정책 조건이 공식 출처로 확인되지 않아 공고에서 직접 확인이 필요합니다.");
+            }
         }
         return e;
     }

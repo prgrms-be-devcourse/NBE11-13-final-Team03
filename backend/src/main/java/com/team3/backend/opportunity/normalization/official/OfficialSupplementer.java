@@ -25,7 +25,8 @@ import java.util.stream.Collectors;
  * - 원문에 정책명이 없거나, 이 정책의 연도 단서와 다른 연도 문서면 반영하지 않는다 (DOCUMENT_MISMATCH).
  * - 연도 단서(정책명·aplyYmd)가 없으면 신청기간은 자동으로 채우지 않는다 (이전 연도 공고 혼입 방지).
  * - 근거가 여러 개로 갈리면(대상별 연령, 예외) 고르지 않고 NEEDS_REVIEW.
- * - API 값이 없거나 모순이면 근거로 채운다 (FILLED).
+ * - API 값이 없거나 모순이면 근거로 채운다 (FILLED). 공식 출처(HIGH)면 VALID, 그 외(API 자유텍스트 등)는 UNVERIFIED.
+ *   UNVERIFIED 값은 이후 공식 출처 근거로 다시 채워질 때만 VALID가 된다.
  * - API와 근거가 다르면: 공식 출처(HIGH)는 근거 우선 + dataConflict, 그 외는 자동 반영하지 않음 (NEEDS_REVIEW).
  * - 신뢰도 LOW 출처는 자동 반영하지 않는다.
  * - 수집 쪽에서 여러 정책이 함께 있는 페이지는 해당 정책 구간만 잘라 넘기는 것을 전제로 한다.
@@ -122,7 +123,10 @@ public class OfficialSupplementer {
         Confidence confidence = doc.sourceType().confidence();
 
         if (confidence == Confidence.LOW || candidates.size() > 1) {
-            AgeNormalization review = withValidation(api, ValidationStatus.NEEDS_REVIEW, api.dataConflict(),
+            // 이미 UNVERIFIED로 채운 값은 NEEDS_REVIEW로 바꾸지 않는다 (NEEDS_REVIEW는 일치하면 MATCHED로 판정되므로)
+            ValidationStatus reviewStatus = api.validationStatus() == ValidationStatus.UNVERIFIED
+                    ? ValidationStatus.UNVERIFIED : ValidationStatus.NEEDS_REVIEW;
+            AgeNormalization review = withValidation(api, reviewStatus, api.dataConflict(),
                     candidates.size() > 1 ? "서로 다른 연령 조건이 여러 개 있음 (대상별 분리·예외 확인 필요)"
                             : "신뢰도가 낮은 출처라 자동 반영하지 않음");
             return new SupplementedAge(review, evidence(doc, evidenceText, api.dataConflict()),
@@ -151,8 +155,10 @@ public class OfficialSupplementer {
         }
 
         boolean conflict = api.dataConflict() || api.validationStatus() == ValidationStatus.INVALID;
-        AgeNormalization filled = withValidation(found, ValidationStatus.VALID, conflict,
-                "API 값이 없거나 모순이어서 근거로 보완");
+        AgeNormalization filled = confidence == Confidence.HIGH
+                ? withValidation(found, ValidationStatus.VALID, conflict, "API 값이 없거나 모순이어서 공식 원문으로 보완")
+                : withValidation(found, ValidationStatus.UNVERIFIED, conflict,
+                        "API 값이 없거나 모순이어서 근거로 보완 (공식 출처로 확인 전)");
         return new SupplementedAge(filled, evidence(doc, evidenceText, conflict), SupplementOutcome.FILLED, filled.reason());
     }
 

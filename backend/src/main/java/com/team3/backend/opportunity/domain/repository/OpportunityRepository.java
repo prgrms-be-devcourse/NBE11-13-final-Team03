@@ -27,6 +27,11 @@ public interface OpportunityRepository extends JpaRepository<Opportunity, Long> 
             + "from Opportunity o where o.id in :ids and o.currentVersion is not null")
     List<OpportunityVersionRef> findCurrentVersionRefs(@Param("ids") Collection<Long> ids);
 
+    /** 주어진 기회 중 정규화된 것의 현재 버전과 조건 묶음 (판정 결과 최신화용) */
+    @Query("select new com.team3.backend.opportunity.dto.OpportunitySetRef(o.id, v.id, v.conditionSetId) "
+            + "from Opportunity o join o.currentVersion v where o.id in :ids")
+    List<com.team3.backend.opportunity.dto.OpportunitySetRef> findCurrentSetRefs(@Param("ids") Collection<Long> ids);
+
     /** 정규화된 기회 전체의 현재 버전 (페이지 단위) */
     @Query(value = "select new com.team3.backend.opportunity.dto.OpportunityVersionRef(o.id, o.currentVersion.id) "
             + "from Opportunity o where o.currentVersion is not null",

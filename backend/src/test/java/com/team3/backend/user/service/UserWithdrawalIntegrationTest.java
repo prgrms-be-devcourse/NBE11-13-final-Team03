@@ -151,8 +151,7 @@ class UserWithdrawalIntegrationTest {
         resultRepository.saveAndFlush(
                 EligibilityResult.builder()
                         .userId(userId)
-                        .opportunityId(100L)
-                        .opportunityVersionId(200L)
+                        .conditionSetId(300L)
                         .profileVersion(1L)
                         .ruleVersion("v1")
                         .eligibilityStatus(
@@ -182,9 +181,9 @@ class UserWithdrawalIntegrationTest {
         ).isEmpty();
 
         assertThat(
-                resultRepository.findByUserIdAndOpportunityIdIn(
+                resultRepository.findFreshness(
                         userId,
-                        List.of(100L)
+                        List.of(300L)
                 )
         ).isEmpty();
     }

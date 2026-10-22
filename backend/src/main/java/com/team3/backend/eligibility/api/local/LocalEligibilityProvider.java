@@ -10,6 +10,7 @@ import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.dto.EligibilityStatusRow;
+import com.team3.backend.eligibility.dto.OpportunityEligibility;
 import com.team3.backend.eligibility.exception.EligibilityErrorCode;
 import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.global.exception.BusinessException;
@@ -17,7 +18,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,9 +46,9 @@ public class LocalEligibilityProvider implements EligibilityProvider {
     @Override
     public List<EligibilitySnapshot> getEligibilities(Long userId, Collection<Long> opportunityIds) {
         List<Long> ids = opportunityIds.stream().distinct().toList();
-        Map<Long, EligibilityResult> byId = resultService.refresh(userId, ids).stream()
-                .collect(Collectors.toMap(EligibilityResult::getOpportunityId, Function.identity()));
-        List<EligibilityResult> ordered = ids.stream().map(byId::get).filter(Objects::nonNull).toList();
+        Map<Long, OpportunityEligibility> byId = resultService.refresh(userId, ids).stream()
+                .collect(Collectors.toMap(OpportunityEligibility::opportunityId, Function.identity()));
+        List<OpportunityEligibility> ordered = ids.stream().map(byId::get).filter(Objects::nonNull).toList();
         return withOpportunities(ordered);
     }
 
@@ -58,8 +58,8 @@ public class LocalEligibilityProvider implements EligibilityProvider {
             throw new BusinessException(EligibilityErrorCode.INVALID_PAGE_REQUEST);
         }
         resultService.refreshAll(userId);
-        Page<EligibilityResult> results = resultRepository.findByUserIdAndEligibilityStatusIn(userId, statuses,
-                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "opportunityId")));
+        Page<OpportunityEligibility> results = resultRepository.findByStatuses(userId, statuses,
+                PageRequest.of(page, size));
         return new EligibilitySnapshotPage(withOpportunities(results.getContent()),
                 page, size, results.getTotalElements(), results.hasNext());
     }
@@ -88,25 +88,27 @@ public class LocalEligibilityProvider implements EligibilityProvider {
                 .map(r -> withOpportunities(List.of(r), today).getFirst());
     }
 
-    private List<EligibilitySnapshot> withOpportunities(List<EligibilityResult> results) {
+    private List<EligibilitySnapshot> withOpportunities(List<OpportunityEligibility> results) {
         return withOpportunities(results, LocalDate.now(KST));
     }
 
-    private List<EligibilitySnapshot> withOpportunities(List<EligibilityResult> results, LocalDate today) {
+    private List<EligibilitySnapshot> withOpportunities(List<OpportunityEligibility> results, LocalDate today) {
         Map<Long, OpportunityInfo> infos = opportunityInfoAssembler.assemble(
-                results.stream().map(EligibilityResult::getOpportunityId).toList(), today);
-        return results.stream().map(r -> toSnapshot(r, infos.get(r.getOpportunityId()))).toList();
+                results.stream().map(OpportunityEligibility::opportunityId).toList(), today);
+        return results.stream().map(e -> toSnapshot(e, infos.get(e.opportunityId()))).toList();
     }
 
-    static EligibilitySnapshot toSnapshot(EligibilityResult r, OpportunityInfo opportunity) {
+    /** 기회 하나의 결과. 판정 결과는 조건 묶음 단위라, 기회 ID·기회 버전은 결과가 아니라 기회의 현재 값이다 */
+    static EligibilitySnapshot toSnapshot(OpportunityEligibility e, OpportunityInfo opportunity) {
+        EligibilityResult r = e.result();
         return new EligibilitySnapshot(
                 r.getUserId(),
-                r.getOpportunityId(),
+                e.opportunityId(),
                 opportunity,
                 r.getEligibilityStatus(),
                 r.getReason(),
                 r.getConditionResults().stream().map(LocalEligibilityProvider::toCondition).toList(),
-                r.getOpportunityVersionId(),
+                e.opportunityVersionId(),
                 r.getProfileVersion(),
                 r.getRuleVersion(),
                 r.getValidUntil(),
