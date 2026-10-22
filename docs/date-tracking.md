@@ -24,6 +24,9 @@ Application(backend)에서 날짜 이벤트를 생성·저장한다. Notificatio
 기존 이벤트 처리 상태/Repository 기반은 재사용하지만 실제 Worker의 점유·완료·복구 소유권은
 4단계에서 추가 검증·보강한다.
 
+후속 4단계의 실제 Worker·사용자 순회·Outbox 구성은
+[이벤트 Outbox 문서](event-fanout-outbox.md)를 따른다.
+
 ## 수집·정규화 연결
 
 수집/정규화의 업무 트랜잭션이나 실행 코드를 수정하지 않고 저장된 상태를 폴링한다.

@@ -11,11 +11,58 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 
 public interface OpportunityEventRepository
         extends JpaRepository<OpportunityEvent, Long> {
 
     boolean existsByDedupKey(String dedupKey);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select e from OpportunityEvent e where e.id = :id")
+    Optional<OpportunityEvent> lockForFanout(@Param("id") Long id);
+
+    @Query("""
+            select e.id from OpportunityEvent e
+            where e.retryCount < :maxAttempts
+              and ((e.processingStatus = :pending and e.nextRetryAt <= :now)
+                or (e.processingStatus = :processing and e.processingStartedAt <= :staleBefore))
+            order by e.nextRetryAt, e.id
+            """)
+    List<Long> findFanoutCandidates(@Param("now") Instant now, @Param("staleBefore") Instant staleBefore,
+            @Param("maxAttempts") int maxAttempts, @Param("pending") OpportunityEventProcessingStatus pending,
+            @Param("processing") OpportunityEventProcessingStatus processing, Pageable pageable);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update OpportunityEvent e set e.processingStatus = :processing,
+                e.processingStartedAt = :now, e.leaseToken = :token,
+                e.retryCount = e.retryCount + 1, e.lastError = null,
+                e.fanoutSkipReason = null, e.processedAt = null
+            where e.id = :id and e.retryCount < :maxAttempts
+              and ((e.processingStatus = :pending and e.nextRetryAt <= :now)
+                or (e.processingStatus = :processing and e.processingStartedAt <= :staleBefore))
+            """)
+    int claimFanout(@Param("id") Long id, @Param("token") UUID token, @Param("now") Instant now,
+            @Param("staleBefore") Instant staleBefore, @Param("maxAttempts") int maxAttempts,
+            @Param("pending") OpportunityEventProcessingStatus pending,
+            @Param("processing") OpportunityEventProcessingStatus processing);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update OpportunityEvent e set e.processingStatus = :failed, e.processedAt = :now,
+                e.processingStartedAt = null, e.leaseToken = null, e.lastError = 'FANOUT_ATTEMPTS_EXHAUSTED'
+            where e.retryCount >= :maxAttempts
+              and ((e.processingStatus = :pending and e.nextRetryAt <= :now)
+                or (e.processingStatus = :processing and e.processingStartedAt <= :staleBefore))
+            """)
+    int failExhaustedFanouts(@Param("now") Instant now, @Param("staleBefore") Instant staleBefore,
+            @Param("maxAttempts") int maxAttempts, @Param("pending") OpportunityEventProcessingStatus pending,
+            @Param("processing") OpportunityEventProcessingStatus processing,
+            @Param("failed") OpportunityEventProcessingStatus failed);
 
     /**
      * 현재 처리 가능한 이벤트 ID를 조회한다.

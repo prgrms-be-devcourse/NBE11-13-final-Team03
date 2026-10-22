@@ -32,6 +32,7 @@ import java.util.UUID;
                         name = "idx_opportunity_events_processing",
                         columnList = "processing_status, next_retry_at"
                 ),
+                @Index(name = "idx_opportunity_events_lease", columnList = "processing_status, processing_started_at"),
                 @Index(
                         name = "idx_opportunity_events_opportunity",
                         columnList = "opportunity_id"
@@ -144,6 +145,15 @@ public class OpportunityEvent {
     @Column(name = "processing_started_at")
     private Instant processingStartedAt;
 
+    @Column(name = "lease_token")
+    private UUID leaseToken;
+
+    @Column(name = "last_user_id", nullable = false)
+    private long lastUserId;
+
+    @Column(name = "fanout_skip_reason", length = 80)
+    private String fanoutSkipReason;
+
     @Column(name = "retry_count", nullable = false)
     private int retryCount;
 
@@ -221,6 +231,36 @@ public class OpportunityEvent {
         this.processedAt = now;
         this.processingStartedAt = null;
         this.lastError = null;
+        this.leaseToken = null;
+    }
+
+    public boolean ownedBy(UUID token) {
+        return processingStatus == OpportunityEventProcessingStatus.PROCESSING
+                && token != null && token.equals(leaseToken);
+    }
+
+    public void skipFanout(Instant now, String reason) {
+        complete(now);
+        fanoutSkipReason = Objects.requireNonNull(reason);
+    }
+
+    public void advanceFanout(long userId, Instant now) {
+        if (userId < lastUserId) throw new IllegalArgumentException("Cursor cannot move backwards");
+        lastUserId = userId;
+        processingStartedAt = Objects.requireNonNull(now, "now");
+    }
+
+    /** Claim attempts are counted by the atomic claim query, not again on failure. */
+    public void retryFanout(Instant now, Duration delay, String error, int maxAttempts) {
+        if (retryCount >= maxAttempts) {
+            fail(now, error);
+        } else {
+            processingStatus = OpportunityEventProcessingStatus.PENDING;
+            processingStartedAt = null;
+            nextRetryAt = now.plus(delay);
+            lastError = error;
+        }
+        leaseToken = null;
     }
 
     /** Set once before persistence; historical events keep their original occurrence time. */
@@ -252,6 +292,7 @@ public class OpportunityEvent {
         this.retryCount++;
         this.nextRetryAt = now.plus(delay);
         this.lastError = errorMessage;
+        this.leaseToken = null;
     }
 
     public void fail(
@@ -265,6 +306,7 @@ public class OpportunityEvent {
         this.processingStartedAt = null;
         this.processedAt = now;
         this.lastError = errorMessage;
+        this.leaseToken = null;
     }
 
     private static void validateDedupKey(String dedupKey) {

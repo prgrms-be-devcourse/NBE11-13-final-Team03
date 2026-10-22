@@ -1,0 +1,75 @@
+package com.team3.backend.tracking.service;
+
+import com.team3.backend.opportunity.domain.repository.ApplicationWindowRepository;
+import com.team3.backend.opportunity.domain.repository.OpportunityRepository;
+import com.team3.backend.opportunity.normalization.ApplicationPeriod;
+import com.team3.backend.outbox.domain.entity.OutboxEvent;
+import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
+import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceRepository;
+import com.team3.backend.tracking.config.EventFanoutProperties;
+import com.team3.backend.tracking.domain.model.EventFanoutExecution;
+import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.time.Clock;
+
+@Service
+@RequiredArgsConstructor
+public class EventFanoutBatch {
+    private final OpportunityEventRepository events;
+    private final OpportunityRepository opportunities;
+    private final ApplicationWindowRepository windows;
+    private final UserOpportunityPreferenceRepository preferences;
+    private final OutboxEventRepository outboxes;
+    private final DateNotificationMessageFactory messages;
+    private final EventFanoutProperties properties;
+    private final Clock clock;
+
+    /** Cursor, Outbox inserts and heartbeat/finish commit or roll back together. */
+    @Transactional
+    public boolean process(EventFanoutExecution execution) {
+        var event = events.lockForFanout(execution.eventId()).orElseThrow();
+        if (!event.ownedBy(execution.leaseToken())) throw new IllegalStateException("Event fanout ownership lost");
+        if (!messages.supports(event.getEventType())) {
+            event.fail(clock.instant(), "UNSUPPORTED_EVENT_TYPE");
+            return true;
+        }
+        if (!event.isNotificationEligible()) {
+            event.skipFanout(clock.instant(), "EVENT_SUPPRESSED");
+            return true;
+        }
+        var current = opportunities.lockForNotification(event.getOpportunity().getId());
+        if (current.isEmpty()) {
+            event.skipFanout(clock.instant(), "POLICY_UNAVAILABLE");
+            return true;
+        }
+        var periods = windows.findByVersionId(current.orElseThrow().getCurrentVersion().getId()).stream()
+                .map(w -> new ApplicationPeriod(w.getPeriodType(), w.getStartDate(), w.getEndDate(),
+                        w.getValidationStatus(), w.getPeriodText())).toList();
+        var prepared = messages.prepare(event, current.orElseThrow(), periods, clock.instant());
+        if (prepared.isEmpty()) {
+            event.skipFanout(clock.instant(), "POLICY_NOT_RELEVANT_OR_EXPIRED");
+            return true;
+        }
+        var userIds = preferences.findSavedUserIdsAfter(event.getOpportunity().getId(), event.getLastUserId(),
+                PageRequest.of(0, properties.batchSize()));
+        if (userIds.isEmpty()) {
+            event.complete(clock.instant());
+            return true;
+        }
+        for (var preference : preferences.lockSavedForNotification(event.getOpportunity().getId(), userIds)) {
+            var now = clock.instant();
+            if (!now.isBefore(prepared.orElseThrow().expiresAt())) break;
+            Long userId = preference.getUser().getId();
+            String key = OutboxEvent.notificationDedupKey(event.getEventId(), userId);
+            if (!outboxes.existsByDedupKey(key)) {
+                outboxes.save(messages.create(event, userId, prepared.orElseThrow(), now));
+            }
+        }
+        outboxes.flush();
+        event.advanceFanout(userIds.getLast(), clock.instant());
+        return false;
+    }
+}

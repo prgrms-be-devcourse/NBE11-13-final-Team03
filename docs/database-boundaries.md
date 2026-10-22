@@ -109,8 +109,12 @@ notify_raw_normalization_request() 함수도 이동한다.
 스키마 간 FK는 임의 처리하지 않고 전체 이전 트랜잭션을 롤백한다.
 추가 객체/확장 모듈이 있다면 별도 검토해 명시적 이전안을 준비한다.
 테이블 추가 시 allowlist도 검토한다. 3단계 날짜 추적의 opportunity_events와
-event_scan_history도 포함한다. 구 추적 테이블에 없는 event_id/correlation_id의
+event_scan_history, 4단계 outbox_events도 포함한다. 구 추적 테이블에 없는 event_id/correlation_id의
 추가·백필은 이 스키마 이동 SQL이 수행하지 않는다. 구 구조 DB는 별도 이전안이 필요하다.
+
+3단계 설치 DB의 이벤트 lease/cursor 추가와 Outbox 최초 설치는 별도
+event-fanout-outbox.sql을 사용한다. 상세 순서와 검증 범위는
+[이벤트 Outbox 문서](event-fanout-outbox.md)를 따른다.
 
 실패 시 두 스키마 데이터를 수동 합치거나 public을 삭제하지 않는다.
 프로비저닝과 이전은 별도 트랜잭션이므로 이전 실패 시에도 프로비저닝 권한 변경은 남는다.
