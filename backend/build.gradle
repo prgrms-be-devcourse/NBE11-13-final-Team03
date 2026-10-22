@@ -68,7 +68,7 @@ tasks.register('notificationBootJar', org.springframework.boot.gradle.tasks.bund
     archiveFileName = 'backend-notification.jar'
     mainClass = 'com.team3.backend.notification.NotificationApplication'
     targetJavaVersion = JavaVersion.VERSION_25
-    classpath = sourceSets.main.runtimeClasspath
+    classpath = tasks.named('bootJar').get().classpath
     dependsOn tasks.named('classes')
 }
 

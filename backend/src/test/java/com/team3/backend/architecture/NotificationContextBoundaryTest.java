@@ -2,7 +2,7 @@ package com.team3.backend.architecture;
 
 import com.team3.backend.auth.SecurityConfig;
 import com.team3.backend.collection.service.CollectionScheduler;
-import com.team3.backend.global.config.ApplicationJpaConfig;
+import com.team3.backend.config.ApplicationJpaConfig;
 import com.team3.backend.notification.NotificationApplication;
 import com.team3.backend.notification.boundary.NotificationBoundaryComponent;
 import com.team3.backend.notification.boundary.NotificationBoundaryEntity;
@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
+import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -57,6 +58,7 @@ class NotificationContextBoundaryTest {
         assertThat(context.getBeansOfType(SecurityConfig.class)).isEmpty();
         assertThat(context.getBeansOfType(OpportunitySearchService.class)).isEmpty();
         assertThat(context.getBeansOfType(CollectionScheduler.class)).isEmpty();
+        assertThat(context.getBeansOfType(ScheduledAnnotationBeanPostProcessor.class)).hasSize(1);
         assertThat(context.containsBean("securityFilterChain")).isFalse();
     }
 
@@ -77,5 +79,11 @@ class NotificationContextBoundaryTest {
     void deniesRequestsByDefault() throws Exception {
         mockMvc.perform(get("/"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("클래스패스의 모든 Notification Entity와 Repository가 등록되고 Application은 제외된다")
+    void allPersistenceTypesRespectBoundary() {
+        PersistenceBoundaryAssertions.assertComplete(context, entityManagerFactory, true);
     }
 }

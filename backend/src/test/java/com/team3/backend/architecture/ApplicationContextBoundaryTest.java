@@ -2,7 +2,7 @@ package com.team3.backend.architecture;
 
 import com.team3.backend.BackendApplication;
 import com.team3.backend.auth.SecurityConfig;
-import com.team3.backend.global.config.ApplicationJpaConfig;
+import com.team3.backend.config.ApplicationJpaConfig;
 import com.team3.backend.interest.domain.entity.UserInterest;
 import com.team3.backend.interest.domain.repository.InterestOptionRepository;
 import com.team3.backend.interest.domain.repository.UserInterestRepository;
@@ -76,5 +76,11 @@ class ApplicationContextBoundaryTest {
         assertThatThrownBy(() -> entityManagerFactory.getMetamodel().entity(NotificationBoundaryEntity.class))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(context.getBeansOfType(NotificationBoundaryRepository.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("클래스패스의 모든 Application Entity와 Repository가 등록되고 Notification은 제외된다")
+    void allPersistenceTypesRespectBoundary() {
+        PersistenceBoundaryAssertions.assertComplete(context, entityManagerFactory, false);
     }
 }

@@ -1,5 +1,6 @@
 package com.team3.backend;
 
+import com.team3.backend.global.role.ApplicationRoleInitializer;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -32,6 +33,7 @@ public class BackendApplication {
     public static void main(String[] args) {
         SpringApplication application = new SpringApplication(BackendApplication.class);
         application.setDefaultProperties(Map.of("app.role", "api"));
+        application.addInitializers(new ApplicationRoleInitializer("api"));
         application.run(args);
     }
 

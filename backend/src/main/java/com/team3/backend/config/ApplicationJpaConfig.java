@@ -1,4 +1,4 @@
-package com.team3.backend.global.config;
+package com.team3.backend.config;
 
 import com.team3.backend.global.role.ApiRole;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
