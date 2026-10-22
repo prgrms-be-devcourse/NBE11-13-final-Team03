@@ -1,0 +1,13 @@
+# Runtime DB boundary. Existing test slices keep their own test database configuration.
+spring:
+  datasource:
+    username: application_user
+    password: ${APPLICATION_DB_PASSWORD}
+    hikari:
+      connection-init-sql: SET search_path TO application, pg_catalog
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: application
