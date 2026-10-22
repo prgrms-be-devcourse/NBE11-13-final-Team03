@@ -62,7 +62,8 @@ public class UserService {
             throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
         }
 
-        // User를 참조하는 FK 데이터부터 삭제
+        // User를 직접 참조하는 데이터부터 삭제한다.
+        // user_interests와 user_opportunity_preferences는 DB ON DELETE CASCADE로 삭제된다.
         refreshTokenRepository.deleteAllByUserId(userId);
 
         // 사용자별 정책 판정 데이터 삭제

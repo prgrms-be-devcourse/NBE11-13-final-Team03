@@ -4,7 +4,11 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.team3.backend.collection.domain.CollectionSource;
 import com.team3.backend.collection.domain.SyncJobStatus;
+import com.team3.backend.collection.domain.RecordResultType;
+import com.team3.backend.collection.domain.entity.ExternalSource;
+import com.team3.backend.collection.domain.entity.SyncHistory;
 import com.team3.backend.collection.dto.response.SyncJobResponse;
+import com.team3.backend.collection.dto.response.SyncPageFailureResponse;
 import com.team3.backend.collection.domain.repository.ExternalSourceRepository;
 import com.team3.backend.collection.domain.repository.RawExternalRecordRepository;
 import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
@@ -178,6 +182,82 @@ class ManualSyncControllerIntegrationTests {
 
     private JsonNode body(MvcResult result) {
         return MAPPER.readTree(result.getResponse().getContentAsByteArray());
+    }
+
+    @Test
+    void listsEveryStatusByKoreanDateWithStableNewestFirstOrder() throws Exception {
+        var from = OffsetDateTime.parse("2026-10-20T15:00:00Z");
+        var until = from.plusDays(1);
+        var youth = sources.save(new ExternalSource("YOUTH_POLICY", "온통청년", "https://example.test", true, from));
+        var employment = sources.save(new ExternalSource("EMPLOYMENT24", "고용24", "https://example.test", true, from));
+        history(youth, SyncJobStatus.FAILED, from.minusNanos(1000));
+        var success = history(youth, SyncJobStatus.SUCCESS, from);
+        var pending = history(youth, SyncJobStatus.PENDING, from.plusHours(1));
+        var running = history(youth, SyncJobStatus.RUNNING, from.plusHours(2));
+        var partial = history(youth, SyncJobStatus.PARTIAL_SUCCESS, from.plusHours(3));
+        var failed = history(employment, SyncJobStatus.FAILED, until.minusNanos(1000));
+        var interrupted = history(youth, SyncJobStatus.INTERRUPTED, until.minusNanos(1000));
+        history(youth, SyncJobStatus.SUCCESS, until);
+
+        var result = mvc.perform(get(PATH).param("date", "2026-10-21"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(6))
+                .andExpect(jsonPath("$[0].status").value("INTERRUPTED"))
+                .andExpect(jsonPath("$[1].status").value("FAILED"))
+                .andExpect(jsonPath("$[1].source").value("EMPLOYMENT24"))
+                .andExpect(jsonPath("$[1].failureReason").value("테스트 수집 실패"))
+                .andExpect(jsonPath("$[2].status").value("PARTIAL_SUCCESS"))
+                .andExpect(jsonPath("$[2].failedPageCount").value(1))
+                .andExpect(jsonPath("$[2].pageFailures[0].errorCode").value("HTTP_500"))
+                .andExpect(jsonPath("$[3].status").value("RUNNING"))
+                .andExpect(jsonPath("$[3].completedAt").doesNotExist())
+                .andExpect(jsonPath("$[4].status").value("PENDING"))
+                .andExpect(jsonPath("$[5].status").value("SUCCESS"))
+                .andReturn();
+        assertEquals(List.of(interrupted.getId(), failed.getId(), partial.getId(), running.getId(), pending.getId(), success.getId()),
+                body(result).findValues("jobId").stream().map(JsonNode::asLong).toList());
+    }
+
+    private SyncHistory history(ExternalSource source, SyncJobStatus status, OffsetDateTime startedAt) {
+        var history = SyncHistory.pending(source, status == SyncJobStatus.SUCCESS ? "MANUAL" : "SCHEDULED", startedAt);
+        switch (status) {
+            case RUNNING -> history.start();
+            case SUCCESS, PARTIAL_SUCCESS -> {
+                history.start();
+                if (status == SyncJobStatus.PARTIAL_SUCCESS) {
+                    history.recordSuccess(RecordResultType.CREATED);
+                    history.recordCollection(1, List.of(new SyncPageFailureResponse(2, "HTTP_500", "외부 API 오류", true)), List.of(), List.of());
+                }
+                history.finish(status == SyncJobStatus.SUCCESS, startedAt.plusMinutes(1));
+            }
+            case FAILED, INTERRUPTED -> history.fail("테스트 수집 실패", status == SyncJobStatus.INTERRUPTED, startedAt.plusMinutes(1));
+            default -> { }
+        }
+        return histories.save(history);
+    }
+
+    @Test
+    void returnsEmptyHistoryForDateWithoutJobs() throws Exception {
+        mvc.perform(get(PATH).param("date", "2026-10-21"))
+                .andExpect(status().isOk()).andExpect(content().json("[]"));
+    }
+
+    @Test
+    void rejectsMissingOrInvalidHistoryDates() throws Exception {
+        mvc.perform(get(PATH)).andExpect(status().isBadRequest());
+        for (var date : List.of("", "invalid", "2026-02-30", "0000-01-01", "+1000000-01-01", "+999999999-12-31")) {
+            mvc.perform(get(PATH).param("date", date)).andExpect(status().isBadRequest());
+        }
+        assertEquals(0, histories.count());
+    }
+
+    @Test
+    void historyListRequiresAdmin() throws Exception {
+        mvc.perform(get(PATH).param("date", "2026-10-21").with(anonymous()).accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get(PATH).param("date", "2026-10-21").with(user("member")
+                        .authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("USER"))))
+                .andExpect(status().isForbidden());
     }
 
     @Test

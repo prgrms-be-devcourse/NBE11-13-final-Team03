@@ -73,7 +73,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 HttpMethod.GET,
                                 "/api/opportunities",
-                                "/api/opportunities/{opportunityId}"
+                                "/api/opportunities/{opportunityId}",
+                                "/api/interests/options"
                         )
                         .permitAll()
 
