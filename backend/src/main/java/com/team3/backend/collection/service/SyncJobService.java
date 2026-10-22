@@ -11,6 +11,7 @@ import com.team3.backend.collection.dto.response.SyncRecordResultResponse;
 import com.team3.backend.collection.dto.response.SyncStartResponse;
 import com.team3.backend.collection.domain.repository.ExternalSourceRepository;
 import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
+import com.team3.backend.global.role.ApiRole;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
+@ApiRole
 public class SyncJobService {
     private static final List<SyncJobStatus> ACTIVE = List.of(SyncJobStatus.PENDING, SyncJobStatus.RUNNING);
     private final ExternalSourceRepository sources;

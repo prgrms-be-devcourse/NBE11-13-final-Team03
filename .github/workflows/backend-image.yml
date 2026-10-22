@@ -49,10 +49,10 @@ jobs:
           YON_TEST_DB_USERNAME: postgres
           YON_TEST_DB_PASSWORD: test
 
-      - name: Build executable JAR on main push
+      - name: Build executable JARs on main push
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         working-directory: backend
-        run: bash ./gradlew --no-daemon bootJar
+        run: bash ./gradlew --no-daemon bootJar notificationBootJar
 
       - name: Summarize test results
         if: always()
@@ -95,21 +95,30 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-      - name: Build image and publish on main push
+      - name: Build images and publish on main push
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/backend"
-          docker buildx build backend \
-            --platform "$IMAGE_PLATFORM" \
-            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            --tag "$IMAGE:sha-$GITHUB_SHA" \
-            --metadata-file image-metadata.json \
-            --push
-          DIGEST=$(jq -er '."containerimage.digest"' image-metadata.json)
-          printf 'Commit: `%s`\n\nImage: `%s:sha-%s`\n\nDeploy: `%s@%s`\n' \
-            "$GITHUB_SHA" "$IMAGE" "$GITHUB_SHA" "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          for ROLE in application notification; do
+            IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/backend-$ROLE"
+            JAR_FILE="build/libs/backend-$ROLE.jar"
+            APP_ROLE="$ROLE"
+            if [ "$ROLE" = "application" ]; then
+              APP_ROLE="api"
+            fi
+            docker buildx build backend \
+              --platform "$IMAGE_PLATFORM" \
+              --build-arg "JAR_FILE=$JAR_FILE" \
+              --build-arg "APP_ROLE=$APP_ROLE" \
+              --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+              --tag "$IMAGE:sha-$GITHUB_SHA" \
+              --metadata-file "image-metadata-$ROLE.json" \
+              --push
+            DIGEST=$(jq -er '."containerimage.digest"' "image-metadata-$ROLE.json")
+            printf 'Commit: `%s`\n\nImage: `%s:sha-%s`\n\nDeploy: `%s@%s`\n\n' \
+              "$GITHUB_SHA" "$IMAGE" "$GITHUB_SHA" "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Log out of GHCR
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'

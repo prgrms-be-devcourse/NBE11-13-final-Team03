@@ -1,5 +1,6 @@
 package com.team3.backend.opportunity.conditionset;
 
+import com.team3.backend.global.role.ApiRole;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.repository.ConditionSetRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityConditionRepository;
@@ -42,6 +43,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ApiRole
 @ConditionalOnProperty(name = "yon.normalization.condition-set-backfill.enabled", havingValue = "true",
         matchIfMissing = true)
 public class ConditionSetBackfill {

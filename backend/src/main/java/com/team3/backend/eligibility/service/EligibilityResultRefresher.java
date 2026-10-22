@@ -1,5 +1,6 @@
 package com.team3.backend.eligibility.service;
 
+import com.team3.backend.global.role.ApiRole;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -14,6 +15,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ApiRole
 public class EligibilityResultRefresher {
 
     private final EligibilityResultService resultService;

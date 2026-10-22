@@ -1,10 +1,12 @@
 package com.team3.backend.config;
 
+import com.team3.backend.global.role.ApiRole;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 @Configuration
+@ApiRole
 public class CollectionExecutorConfig {
     @Bean("collectionExecutor")
     public ThreadPoolTaskExecutor collectionExecutor() {

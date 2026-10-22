@@ -54,5 +54,20 @@ tasks.named('test') {
 }
 
 tasks.named('bootJar') {
-    archiveFileName = 'app.jar'
+    archiveFileName = 'backend-application.jar'
+    mainClass = 'com.team3.backend.BackendApplication'
+}
+
+tasks.register('notificationBootJar', org.springframework.boot.gradle.tasks.bundling.BootJar) {
+    group = 'build'
+    description = 'Builds the executable Notification application archive.'
+    archiveFileName = 'backend-notification.jar'
+    mainClass = 'com.team3.backend.notification.NotificationApplication'
+    targetJavaVersion = JavaVersion.VERSION_25
+    classpath = sourceSets.main.runtimeClasspath
+    dependsOn tasks.named('classes')
+}
+
+tasks.named('assemble') {
+    dependsOn tasks.named('notificationBootJar')
 }

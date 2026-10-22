@@ -1,5 +1,6 @@
 package com.team3.backend.opportunity.ingest;
 
+import com.team3.backend.global.role.ApiRole;
 import lombok.extern.slf4j.Slf4j;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
@@ -23,6 +24,7 @@ import java.util.regex.Pattern;
  */
 @Slf4j
 @Component
+@ApiRole
 @ConditionalOnProperty(prefix = "yon.normalization.ingest", name = "enabled", havingValue = "true")
 public class RawIngestListener implements SmartLifecycle {
 

@@ -23,11 +23,14 @@ class CollectionSchedulerTests {
                 .withBean(ManualSyncService.class, () -> sync)
                 .withBean(SyncHistoryRepository.class, () -> histories)
                 .withUserConfiguration(CollectionScheduler.class);
-        runner.withPropertyValues("app.scheduling.enabled=false").run(context ->
+        runner.withPropertyValues("app.role=api", "app.scheduling.enabled=false").run(context ->
                 assertEquals(0, context.getBeansOfType(CollectionScheduler.class).size()));
-        runner.withPropertyValues("collection.schedule.enabled=false").run(context ->
+        runner.withPropertyValues("app.role=api", "collection.schedule.enabled=false").run(context ->
                 assertEquals(0, context.getBeansOfType(CollectionScheduler.class).size()));
-        runner.run(context -> assertEquals(1, context.getBeansOfType(CollectionScheduler.class).size()));
+        runner.withPropertyValues("app.role=notification").run(context ->
+                assertEquals(0, context.getBeansOfType(CollectionScheduler.class).size()));
+        runner.withPropertyValues("app.role=api").run(context ->
+                assertEquals(1, context.getBeansOfType(CollectionScheduler.class).size()));
     }
 
     @Test

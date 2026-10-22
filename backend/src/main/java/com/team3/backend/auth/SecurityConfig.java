@@ -8,6 +8,7 @@ import com.team3.backend.auth.oauth2.OAuth2SuccessHandler;
 import com.team3.backend.auth.security.CustomAuthenticationEntryPoint;
 import com.team3.backend.auth.service.CustomOAuth2UserService;
 import com.team3.backend.global.logging.TraceIdFilter;
+import com.team3.backend.global.role.ApiRole;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,6 +23,7 @@ import org.springframework.security.web.servlet.util.matcher.PathPatternRequestM
 @Configuration
 @EnableWebSecurity
 @RequiredArgsConstructor
+@ApiRole
 public class SecurityConfig {
 
     private final OAuth2SuccessHandler oAuth2SuccessHandler;

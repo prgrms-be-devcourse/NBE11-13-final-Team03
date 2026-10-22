@@ -1,5 +1,6 @@
 package com.team3.backend.region.service;
 
+import com.team3.backend.global.role.ApiRole;
 import com.team3.backend.region.dto.RegionSyncResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ApiRole
 @ConditionalOnProperty(name = "region-code-api.sync-on-startup", havingValue = "true")
 public class RegionSyncRunner implements ApplicationRunner {
 

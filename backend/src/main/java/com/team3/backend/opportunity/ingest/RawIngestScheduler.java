@@ -1,5 +1,6 @@
 package com.team3.backend.opportunity.ingest;
 
+import com.team3.backend.global.role.ApiRole;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ApiRole
 @ConditionalOnProperty(prefix = "yon.normalization.ingest", name = "enabled", havingValue = "true")
 public class RawIngestScheduler {
 

@@ -3,6 +3,7 @@ package com.team3.backend.collection.service;
 import com.team3.backend.collection.domain.CollectionSource;
 import com.team3.backend.collection.domain.SyncJobStatus;
 import com.team3.backend.collection.domain.repository.SyncHistoryRepository;
+import com.team3.backend.global.role.ApiRole;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.time.ZoneId;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ApiRole
 @ConditionalOnExpression("${app.scheduling.enabled:true} && ${collection.schedule.enabled:true}")
 public class CollectionScheduler {
     private final ManualSyncService sync;

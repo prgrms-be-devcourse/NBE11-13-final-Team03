@@ -3,6 +3,7 @@ package com.team3.backend.collection.service;
 import com.team3.backend.collection.domain.CollectionSource;
 import com.team3.backend.collection.dto.request.RawRecordSaveRequest;
 import com.team3.backend.collection.dto.external.CollectionSummary;
+import com.team3.backend.global.role.ApiRole;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -16,6 +17,7 @@ import tools.jackson.databind.JsonNode;
 
 @Service
 @RequiredArgsConstructor
+@ApiRole
 public class ManualSyncWorker {
     private static final Logger log = LoggerFactory.getLogger(ManualSyncWorker.class);
     private final SyncJobService jobs;

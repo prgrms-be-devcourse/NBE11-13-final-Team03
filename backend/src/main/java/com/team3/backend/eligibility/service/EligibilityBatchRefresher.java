@@ -1,6 +1,7 @@
 package com.team3.backend.eligibility.service;
 
 import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
+import com.team3.backend.global.role.ApiRole;
 import com.team3.backend.opportunity.conditionset.ConditionSetBackfill;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +31,7 @@ import java.util.List;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ApiRole
 @ConditionalOnExpression("${app.scheduling.enabled:true} && ${yon.eligibility.batch.enabled:true}")
 public class EligibilityBatchRefresher {
 
