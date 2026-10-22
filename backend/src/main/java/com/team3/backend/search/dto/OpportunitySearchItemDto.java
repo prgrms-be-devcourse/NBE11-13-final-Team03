@@ -19,6 +19,8 @@ public record OpportunitySearchItemDto(
         String category,
         @Schema(description = "중분류")
         String subCategory,
+        @Schema(description = "소분류. 직업훈련은 NCS 2차분류명이고 청년정책은 null이다", nullable = true)
+        String detailCategory,
         @Schema(description = "공고 최초 등록 시각")
         LocalDateTime createdAt,
         @Schema(description = "로그인 사용자의 저장된 최신 신청 가능성 판정이다. 비로그인·판정 없음·오래됨·프로필 없음은 null이고, 실제 UNKNOWN 판정은 UNKNOWN이다", nullable = true)
@@ -36,6 +38,7 @@ public record OpportunitySearchItemDto(
                 opportunity.getTitle(),
                 opportunity.getCategory(),
                 opportunity.getSubCategory(),
+                opportunity.getDetailCategory(),
                 opportunity.getCreatedAt(),
                 eligibilityStatus,
                 saved

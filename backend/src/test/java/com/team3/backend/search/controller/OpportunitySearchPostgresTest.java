@@ -181,6 +181,47 @@ class OpportunitySearchPostgresTest {
     }
 
     @Test
+    void detailCategoryFiltersBeforePostgresPagination() throws Exception {
+        Opportunity first = opportunity("PG detail category first", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity second = opportunity("PG detail category second", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity otherDetail = opportunity("PG detail category other", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity policy = opportunity("PG detail category policy", OpportunityType.YOUTH_POLICY);
+        for (Opportunity training : List.of(first, second, otherDetail)) {
+            training.updateSummary(training.getTitle(), "교육･직업훈련", "정보통신",
+                    training == otherDetail ? "하드웨어" : "소프트웨어", null);
+        }
+        policy.updateSummary(policy.getTitle(), "복지", "생활", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Long> actualIds = new ArrayList<>();
+        for (int page = 0; page < 2; page++) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG detail category")
+                            .param("type", "VOCATIONAL_TRAINING")
+                            .param("category", "교육･직업훈련")
+                            .param("subCategory", "정보통신")
+                            .param("detailCategory", "소프트웨어")
+                            .param("page", String.valueOf(page)).param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].detailCategory").value("소프트웨어"))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andReturn();
+            actualIds.addAll(opportunityIds(result));
+        }
+        assertEquals(List.of(second.getId(), first.getId()), actualIds);
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG detail category").param("type", "VOCATIONAL_TRAINING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG detail category policy").param("type", "YOUTH_POLICY"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
     void eligibilityFilterUsesFreshResultsBeforePostgresPagination() throws Exception {
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
         Long userId = 1001L;

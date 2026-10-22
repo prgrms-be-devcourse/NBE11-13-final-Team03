@@ -61,6 +61,8 @@ public class OpportunitySearchController {
             @RequestParam(required = false) String category,
             @Parameter(description = "중분류, 정확히 일치한다")
             @RequestParam(required = false) String subCategory,
+            @Parameter(description = "소분류, 앞뒤 공백 제거 후 정확히 일치한다. 직업훈련은 NCS 2차분류명이며 청년정책은 null이다")
+            @RequestParam(required = false) String detailCategory,
             @Parameter(description = "지역 코드. 정책은 거주 자격 지역과 전국 대상, 훈련은 실제 교육 지역을 조회한다. 시·도 선택은 하위 지역을 포함한다")
             @RequestParam(required = false) String region,
             @Parameter(description = "모집 상태: UPCOMING, OPEN, ALWAYS_OPEN, CLOSED, UNKNOWN. 훈련 OPEN은 개강 예정 검색 규칙을 적용한다")
@@ -86,7 +88,7 @@ public class OpportunitySearchController {
             throw new BusinessException(AuthErrorCode.ACCESS_TOKEN_NOT_FOUND);
         }
         return ResponseEntity.ok(searchService.search(
-                keyword, type, category, subCategory, region, applicationStatus,
+                keyword, type, category, subCategory, detailCategory, region, applicationStatus,
                 userDetails == null ? null : userDetails.getUserId(), eligibilityStatuses,
                 deadlineFrom, deadlineTo, startDateFrom, startDateTo, sort, page, size));
     }
