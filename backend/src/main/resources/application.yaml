@@ -3,7 +3,6 @@ spring:
     name: backend
   config:
     import:
-      - optional:file:.env[.properties]
       - optional:classpath:youth-policy-codes.yaml
       - classpath:application-collection.yaml
 
