@@ -750,6 +750,60 @@ class OpportunitySearchControllerTest {
     }
 
     @Test
+    void detailCategoryCombinesWithClassificationsAndKeepsPolicyWithoutFilter() throws Exception {
+        Opportunity first = createOpportunity("detail-category training first", OpportunityType.VOCATIONAL_TRAINING,
+                "교육･직업훈련", "정보통신", true);
+        Opportunity second = createOpportunity("detail-category training second", OpportunityType.VOCATIONAL_TRAINING,
+                "교육･직업훈련", "정보통신", true);
+        Opportunity otherDetail = createOpportunity("detail-category training other detail", OpportunityType.VOCATIONAL_TRAINING,
+                "교육･직업훈련", "정보통신", true);
+        Opportunity otherSub = createOpportunity("detail-category training other sub", OpportunityType.VOCATIONAL_TRAINING,
+                "교육･직업훈련", "기계", true);
+        Opportunity otherCategory = createOpportunity("detail-category training other category", OpportunityType.VOCATIONAL_TRAINING,
+                "기타", "정보통신", true);
+        Opportunity policy = createOpportunity("detail-category policy", OpportunityType.YOUTH_POLICY,
+                "복지", "생활", true);
+        for (Opportunity training : List.of(first, second, otherDetail, otherSub, otherCategory)) {
+            training.updateSummary(training.getTitle(), training.getCategory(), training.getSubCategory(),
+                    training == otherDetail ? "하드웨어" : "소프트웨어", null);
+        }
+        entityManager.flush();
+        entityManager.clear();
+
+        for (int page = 0; page < 2; page++) {
+            mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "detail-category training")
+                            .param("type", "VOCATIONAL_TRAINING")
+                            .param("category", "교육･직업훈련")
+                            .param("subCategory", "정보통신")
+                            .param("detailCategory", "  소프트웨어  ")
+                            .param("page", String.valueOf(page)).param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].opportunityId").value(page == 0 ? second.getId() : first.getId()))
+                    .andExpect(jsonPath("$.content[0].detailCategory").value("소프트웨어"))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andExpect(jsonPath("$.hasNext").value(page == 0));
+        }
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "detail-category training").param("type", "VOCATIONAL_TRAINING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(5));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "detail-category training").param("detailCategory", "  "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(5));
+        MvcResult policyResult = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "detail-category policy").param("type", "YOUTH_POLICY"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andReturn();
+        Map<String, Object> policyItem = JsonPath.read(policyResult.getResponse().getContentAsString(), "$.content[0]");
+        assertTrue(policyItem.containsKey("detailCategory"));
+        assertEquals(null, policyItem.get("detailCategory"));
+    }
+
+    @Test
     void pagesUseCreatedAtThenIdAndReportExactTotals() throws Exception {
         Opportunity first = createOpportunity("V1-1 paging first", OpportunityType.YOUTH_POLICY,
                 null, null, true);
@@ -824,7 +878,7 @@ class OpportunitySearchControllerTest {
 
         List<String> searchParameters = JsonPath.read(document,
                 "$['paths']['/api/opportunities']['get']['parameters'][*]['name']");
-        assertEquals(Set.of("keyword", "type", "category", "subCategory", "region",
+        assertEquals(Set.of("keyword", "type", "category", "subCategory", "detailCategory", "region",
                         "applicationStatus", "eligibilityStatuses", "deadlineFrom", "deadlineTo",
                         "startDateFrom", "startDateTo", "sort", "page", "size"),
                 Set.copyOf(searchParameters));
@@ -843,6 +897,9 @@ class OpportunitySearchControllerTest {
                 "$.components.schemas.OpportunitySearchItemDto.properties.saved.type"));
         assertTrue(JsonPath.<Map<String, Object>>read(document,
                 "$.components.schemas.OpportunitySearchItemDto.properties.eligibilityStatus")
+                .containsKey("description"));
+        assertTrue(JsonPath.<Map<String, Object>>read(document,
+                "$.components.schemas.OpportunitySearchItemDto.properties.detailCategory")
                 .containsKey("description"));
 
         for (String path : List.of("/api/opportunities/{id}/save", "/api/opportunities/{id}/hide")) {

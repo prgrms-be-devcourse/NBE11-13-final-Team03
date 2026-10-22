@@ -63,7 +63,7 @@ public class OpportunitySearchService {
     /** 공고를 DB에서 페이지 조회한 뒤 인증 사용자에게 현재 페이지의 개인화 상태를 덧붙인다. */
     @Transactional(readOnly = true)
     public OpportunitySearchResponseDto search(
-            String keyword, OpportunityType type, String category, String subCategory,
+            String keyword, OpportunityType type, String category, String subCategory, String detailCategory,
             String region, ApplicationStatus applicationStatus,
             Long userId, List<EligibilityStatus> eligibilityStatuses,
             LocalDate deadlineFrom, LocalDate deadlineTo,
@@ -116,6 +116,9 @@ public class OpportunitySearchService {
             }
             if (StringUtils.hasText(subCategory)) {
                 predicates.add(criteriaBuilder.equal(root.get("subCategory"), subCategory.trim()));
+            }
+            if (StringUtils.hasText(detailCategory)) {
+                predicates.add(criteriaBuilder.equal(root.get("detailCategory"), detailCategory.trim()));
             }
             if (matchingRegionCodes != null) {
                 predicates.add(regionMatches(root, query, criteriaBuilder, matchingRegionCodes));

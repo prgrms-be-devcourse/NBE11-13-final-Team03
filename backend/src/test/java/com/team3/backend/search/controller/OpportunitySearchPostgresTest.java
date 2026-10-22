@@ -20,6 +20,10 @@ import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
+import com.team3.backend.opportunity.domain.repository.OpportunitySourceRepository;
+import com.team3.backend.opportunity.dto.TrainingCourseRaw;
+import com.team3.backend.opportunity.dto.TrainingNormalizationCommand;
+import com.team3.backend.opportunity.service.TrainingCourseNormalizationService;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
@@ -46,6 +50,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.util.ArrayList;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.HashMap;
@@ -94,6 +99,12 @@ class OpportunitySearchPostgresTest {
 
     @Autowired
     private RegionDirectory regionDirectory;
+
+    @Autowired
+    private TrainingCourseNormalizationService trainingCourseNormalizationService;
+
+    @Autowired
+    private OpportunitySourceRepository opportunitySourceRepository;
 
     @Test
     void combinedPolicyFiltersSortAndPageWithoutExcludingSavedHiddenOpportunity() throws Exception {
@@ -177,6 +188,98 @@ class OpportunitySearchPostgresTest {
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andReturn();
         assertEquals(List.of(near.getId()), opportunityIds(publicSearch));
+    }
+
+    @Test
+    void detailCategoryFiltersBeforePostgresPagination() throws Exception {
+        Opportunity first = opportunity("PG detail category first", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity second = opportunity("PG detail category second", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity otherDetail = opportunity("PG detail category other", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity policy = opportunity("PG detail category policy", OpportunityType.YOUTH_POLICY);
+        for (Opportunity training : List.of(first, second, otherDetail)) {
+            training.updateSummary(training.getTitle(), "교육･직업훈련", "정보통신",
+                    training == otherDetail ? "하드웨어" : "소프트웨어", null);
+        }
+        policy.updateSummary(policy.getTitle(), "복지", "생활", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Long> actualIds = new ArrayList<>();
+        for (int page = 0; page < 2; page++) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG detail category")
+                            .param("type", "VOCATIONAL_TRAINING")
+                            .param("category", "교육･직업훈련")
+                            .param("subCategory", "정보통신")
+                            .param("detailCategory", "소프트웨어")
+                            .param("page", String.valueOf(page)).param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].detailCategory").value("소프트웨어"))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andReturn();
+            actualIds.addAll(opportunityIds(result));
+        }
+        assertEquals(List.of(second.getId(), first.getId()), actualIds);
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG detail category").param("type", "VOCATIONAL_TRAINING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG detail category policy").param("type", "YOUTH_POLICY"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void normalizedNcsCategoriesArePersistedAndSearchable() throws Exception {
+        Long sourceId = 990002L;
+        TrainingCourseRaw informationTechnology = TrainingCourseRaw.builder()
+                .trprId("PG-NCS-IT").trprDegr("1").title("PG NCS integration IT")
+                .ncsCd("20010202").build();
+        TrainingCourseRaw communicationTechnology = TrainingCourseRaw.builder()
+                .trprId("PG-NCS-COMM").trprDegr("1").title("PG NCS integration communication")
+                .ncsCd("20020101").build();
+
+        assertEquals(2, trainingCourseNormalizationService.normalizePage(new TrainingNormalizationCommand(
+                sourceId, List.of(informationTechnology, communicationTechnology), LocalDateTime.now())).created());
+        entityManager.flush();
+        entityManager.clear();
+
+        Opportunity informationOpportunity = opportunitySourceRepository
+                .findBySourceIdAndExternalId(sourceId, "PG-NCS-IT:1").orElseThrow().getOpportunity();
+        Opportunity communicationOpportunity = opportunitySourceRepository
+                .findBySourceIdAndExternalId(sourceId, "PG-NCS-COMM:1").orElseThrow().getOpportunity();
+        assertEquals("교육･직업훈련", informationOpportunity.getCategory());
+        assertEquals("정보통신", informationOpportunity.getSubCategory());
+        assertEquals("정보기술", informationOpportunity.getDetailCategory());
+        assertEquals("교육･직업훈련", communicationOpportunity.getCategory());
+        assertEquals("정보통신", communicationOpportunity.getSubCategory());
+        assertEquals("통신기술", communicationOpportunity.getDetailCategory());
+
+        MvcResult sameMajor = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG NCS integration")
+                        .param("type", "VOCATIONAL_TRAINING")
+                        .param("category", "교육･직업훈련")
+                        .param("subCategory", "정보통신"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andReturn();
+        assertEquals(Set.of(informationOpportunity.getId(), communicationOpportunity.getId()),
+                Set.copyOf(opportunityIds(sameMajor)));
+
+        MvcResult filtered = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG NCS integration")
+                        .param("type", "VOCATIONAL_TRAINING")
+                        .param("category", "교육･직업훈련")
+                        .param("subCategory", "정보통신")
+                        .param("detailCategory", "정보기술"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(informationOpportunity.getId()))
+                .andExpect(jsonPath("$.content[0].detailCategory").value("정보기술"))
+                .andReturn();
+        assertEquals(List.of(informationOpportunity.getId()), opportunityIds(filtered));
     }
 
     @Test
