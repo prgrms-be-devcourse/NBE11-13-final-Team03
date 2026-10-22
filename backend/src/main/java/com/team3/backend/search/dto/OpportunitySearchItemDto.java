@@ -19,7 +19,7 @@ public record OpportunitySearchItemDto(
         String category,
         @Schema(description = "중분류")
         String subCategory,
-        @Schema(description = "소분류. 직업훈련은 NCS 2차분류명이고 청년정책은 null이다", nullable = true)
+        @Schema(description = "세 번째 분류 (직업훈련: NCS 중분류)", nullable = true)
         String detailCategory,
         @Schema(description = "공고 최초 등록 시각")
         LocalDateTime createdAt,
