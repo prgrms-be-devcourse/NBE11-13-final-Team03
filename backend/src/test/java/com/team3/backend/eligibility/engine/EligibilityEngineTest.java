@@ -102,6 +102,22 @@ class EligibilityEngineTest {
                 .isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
     }
 
+    @Test
+    void 공식_출처로_확인_못_한_제외조건은_해당해도_안_해도_확정하지_않는다() {
+        EligibilityConditionInput excludedIfUnemployed = condition(ConditionType.EMPLOYMENT, RequirementType.EXCLUSION,
+                Map.of("status", "SPECIFIC", "match", "ANY_OF", "values", List.of("UNEMPLOYED")), ValidationStatus.UNVERIFIED);
+        EligibilityConditionInput excludedIfEmployed = condition(ConditionType.EMPLOYMENT, RequirementType.EXCLUSION,
+                Map.of("status", "SPECIFIC", "match", "ANY_OF", "values", List.of("EMPLOYED")), ValidationStatus.UNVERIFIED);
+
+        EligibilityEvaluation matched = evaluate(profile(), List.of(age(19, 34), excludedIfUnemployed), List.of());
+        EligibilityEvaluation notMatched = evaluate(profile(), List.of(age(19, 34), excludedIfEmployed), List.of());
+
+        assertThat(matched.conditions().get(1).result()).isEqualTo(CHECK_REQUIRED);
+        assertThat(matched.status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
+        assertThat(notMatched.conditions().get(1).result()).isEqualTo(DATA_UNCLEAR);
+        assertThat(notMatched.status()).isEqualTo(EligibilityStatus.UNKNOWN);
+    }
+
     // ── 집계 우선순위 ──
 
     @Test
