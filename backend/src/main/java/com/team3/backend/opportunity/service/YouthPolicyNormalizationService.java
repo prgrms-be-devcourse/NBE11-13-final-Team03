@@ -47,7 +47,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class YouthPolicyNormalizationService {
 
-    public static final String NORMALIZATION_VERSION = "0.2.0";
+    public static final String NORMALIZATION_VERSION = "0.3.0";
 
     /** 코드 필드 → (조건 분류, 조건 필드명) */
     private static final List<CodeField> CODE_FIELDS = List.of(

@@ -15,7 +15,10 @@ import java.util.Map;
  *   이후 ptcpPrpTrgtCn·addAplyQlfcCndCn·공식 공고 확인(텍스트·AI 단계)에서 보완한다.
  * - 0/0/N도 Y/N의 공식 의미가 확인되기 전에는 NO_LIMIT으로 확정하지 않는다 (NEEDS_REVIEW).
  *   NO_LIMIT은 원문에 "연령 제한 없음"이 명시된 경우에만 보완 단계에서 만든다.
- * - 필드끼리 모순되면 값을 고르지 않고 UNKNOWN으로 둔다.
+ * - 연령 값이 있으면 Y/N과 관계없이 그 값을 쓴다. 실데이터(청년정책 3,416건, 2026-10-21)에서 Y/N은 연령 값과
+ *   일관되지 않았다: 연령 값이 있는 정책 중 N이 1,799건, Y가 685건. Y/N을 어느 쪽 의미로 읽어도 수백 건 이상이 모순이라
+ *   Y/N은 입력 기관마다 다르게 쓰인 것으로 보고, 연령 값을 신뢰한다 (19~39세 등 상식적인 범위).
+ * - 최소가 최대보다 크거나 숫자가 아니면 값을 고르지 않고 UNKNOWN으로 둔다.
  */
 @Component
 public class AgeNormalizer {
@@ -42,26 +45,25 @@ public class AgeNormalizer {
         boolean hasMin = min.value() != null;
         boolean hasMax = max.value() != null;
 
-        if ("N".equals(limitYn)) {
-            if (hasMin || hasMax) {
-                return unknown(ValidationStatus.DATA_CONFLICT, true, "연령 제한 없음(N)인데 연령 값이 있음", rawValues);
-            }
-            // Y/N의 공식 의미를 코드 정의서로 확인하기 전에는 제한 없음으로 확정하지 않는다
-            return unknown(ValidationStatus.NEEDS_REVIEW, false,
-                    "연령 제한 여부 N, 연령 값 없음 — 공식 정의·명시적 근거 확인 전 자동 확정 보류", rawValues);
-        }
-
+        // 연령 값이 있으면 Y/N과 관계없이 값을 쓴다 (클래스 주석 참고)
+        String ynNote = "N".equals(limitYn) ? " (연령 제한 여부는 N이지만 연령 값을 우선)" : "";
         if (hasMin && hasMax) {
             return new AgeNormalization(AgeStatus.RANGE, min.value(), max.value(), ValidationStatus.VALID, false,
-                    "최소·최대 연령 모두 존재", rawValues);
+                    "최소·최대 연령 모두 존재" + ynNote, rawValues);
         }
         if (hasMin) {
             return new AgeNormalization(AgeStatus.MIN_ONLY, min.value(), null, ValidationStatus.VALID, false,
-                    "최소 연령만 존재", rawValues);
+                    "최소 연령만 존재" + ynNote, rawValues);
         }
         if (hasMax) {
             return new AgeNormalization(AgeStatus.MAX_ONLY, null, max.value(), ValidationStatus.VALID, false,
-                    "최대 연령만 존재", rawValues);
+                    "최대 연령만 존재" + ynNote, rawValues);
+        }
+
+        if ("N".equals(limitYn)) {
+            // Y/N의 공식 의미를 코드 정의서로 확인하기 전에는 제한 없음으로 확정하지 않는다
+            return unknown(ValidationStatus.NEEDS_REVIEW, false,
+                    "연령 제한 여부 N, 연령 값 없음 — 공식 정의·명시적 근거 확인 전 자동 확정 보류", rawValues);
         }
         if ("Y".equals(limitYn)) {
             return unknown(ValidationStatus.DATA_CONFLICT, true,
