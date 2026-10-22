@@ -58,6 +58,9 @@ tasks.named('processTestResources') {
     from('../database/scripts') {
         into 'db-boundary'
     }
+    from('../contracts') {
+        into 'contracts'
+    }
 }
 
 tasks.named('bootJar') {

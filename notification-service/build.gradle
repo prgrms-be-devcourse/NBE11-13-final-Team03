@@ -39,10 +39,13 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
-// The projects share only operator SQL as test fixtures, not application code.
+// Share operator SQL and wire-contract examples only as test fixtures, not runtime code.
 tasks.named('processTestResources') {
     from('../database/scripts') {
         into 'db-boundary'
+    }
+    from('../contracts') {
+        into 'contracts'
     }
 }
 

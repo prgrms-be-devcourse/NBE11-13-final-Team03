@@ -6,6 +6,7 @@ on:
     paths:
       - 'backend/**'
       - 'database/**'
+      - 'contracts/**'
       - '.github/workflows/collection-postgres-tests.yml'
       - '.github/workflows/backend-image.yml'
   workflow_dispatch:
