@@ -3,7 +3,9 @@ package com.team3.backend.eligibility.api;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.dto.EligibilityResultFreshness;
+import com.team3.backend.eligibility.dto.OpportunityEligibility;
 import com.team3.backend.eligibility.service.EligibilityResultService;
+import com.team3.backend.eligibility.support.EligibilityResultFixtures;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
@@ -29,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * EligibilitySpecifications(SQL)가 판정 서비스의 최신 여부 판단(EligibilityResultFreshness.isFresh)과 같은 기회를 고르는지
- * 실제 PostgreSQL로 확인한다. 기회 버전·프로필 버전·규칙 버전·validUntil·상태를 모두 조합한다. 일회용 DB를 YON_TEST_DB_URL로 지정할 것.
+ * 실제 PostgreSQL로 확인한다. 조건 묶음·프로필 버전·규칙 버전·validUntil·상태를 모두 조합한다. 일회용 DB를 YON_TEST_DB_URL로 지정할 것.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -59,7 +61,8 @@ class EligibilitySpecificationsTest {
 
     /** 기회 ID → 사용자 USER의 저장된 결과 (없으면 null) */
     private final Map<Long, EligibilityResult> resultByOpportunity = new LinkedHashMap<>();
-    private final Map<Long, Long> currentVersionByOpportunity = new HashMap<>();
+    /** 기회 ID → 현재 버전의 조건 묶음 ID (없으면 null) */
+    private final Map<Long, Long> currentSetByOpportunity = new HashMap<>();
     private Long withoutVersionId;
 
     @BeforeEach
@@ -77,15 +80,15 @@ class EligibilitySpecificationsTest {
                     .build());
         }
 
-        for (boolean sameVersion : List.of(true, false)) {
+        for (boolean sameSet : List.of(true, false)) {
             for (long profileVersion : List.of(PROFILE_VERSION, PROFILE_VERSION - 1)) {
                 for (String ruleVersion : List.of(RULE, RULE + "-old")) {
                     for (LocalDate validUntil : VALID_UNTILS) {
                         for (EligibilityStatus status : EligibilityStatus.values()) {
-                            Opportunity o = opportunityWithVersion();
-                            Long versionId = currentVersionByOpportunity.get(o.getId());
-                            resultByOpportunity.put(o.getId(), persistResult(USER, o.getId(),
-                                    sameVersion ? versionId : versionId + 1_000_000L,
+                            Opportunity o = opportunityWithVersion(EligibilityResultFixtures.newConditionSet(em));
+                            Long setId = sameSet ? currentSetByOpportunity.get(o.getId())
+                                    : EligibilityResultFixtures.newConditionSet(em);
+                            resultByOpportunity.put(o.getId(), persistResult(USER, setId,
                                     profileVersion, ruleVersion, validUntil, status));
                         }
                     }
@@ -93,19 +96,29 @@ class EligibilitySpecificationsTest {
             }
         }
 
-        Opportunity noResult = opportunityWithVersion();
+        Opportunity noResult = opportunityWithVersion(EligibilityResultFixtures.newConditionSet(em));
         resultByOpportunity.put(noResult.getId(), null);
 
-        Opportunity otherUsersOnly = opportunityWithVersion();
-        persistResult(OTHER_USER, otherUsersOnly.getId(), currentVersionByOpportunity.get(otherUsersOnly.getId()),
+        Opportunity otherUsersOnly = opportunityWithVersion(EligibilityResultFixtures.newConditionSet(em));
+        persistResult(OTHER_USER, currentSetByOpportunity.get(otherUsersOnly.getId()),
                 PROFILE_VERSION, RULE, null, ELIGIBLE);
         resultByOpportunity.put(otherUsersOnly.getId(), null);
+
+        // 조건 묶음이 없는 버전(정규화 전·백필 전)은 결과가 있어도 고르지 않는다
+        Opportunity withoutSet = opportunityWithVersion(null);
+        persistResult(USER, EligibilityResultFixtures.newConditionSet(em), PROFILE_VERSION, RULE, null, ELIGIBLE);
+        resultByOpportunity.put(withoutSet.getId(), null);
+
+        // 조건 묶음이 같은 기회 두 개는 결과 하나를 함께 쓴다
+        Long sharedSet = EligibilityResultFixtures.newConditionSet(em);
+        EligibilityResult shared = persistResult(USER, sharedSet, PROFILE_VERSION, RULE, null, ELIGIBLE);
+        resultByOpportunity.put(opportunityWithVersion(sharedSet).getId(), shared);
+        resultByOpportunity.put(opportunityWithVersion(sharedSet).getId(), shared);
 
         Opportunity withoutVersion = Opportunity.builder()
                 .opportunityType(OpportunityType.YOUTH_POLICY).title("현재 버전 없음").build();
         em.persist(withoutVersion);
         withoutVersionId = withoutVersion.getId();
-        persistResult(USER, withoutVersionId, 999_999L, PROFILE_VERSION, RULE, null, ELIGIBLE);
 
         em.flush();
         em.clear();
@@ -168,10 +181,12 @@ class EligibilitySpecificationsTest {
     void 상세_조회도_같은_최신_기준으로_결과를_돌려준다() {
         Set<Long> expected = expected(Set.of(EligibilityStatus.values()));
         for (Long id : resultByOpportunity.keySet()) {
-            Optional<EligibilityResult> fresh = resultRepository.findFresh(USER, id, RULE, TODAY);
+            Optional<OpportunityEligibility> fresh = resultRepository.findFresh(USER, id, RULE, TODAY);
             assertThat(fresh.isPresent()).as("기회 %d", id).isEqualTo(expected.contains(id));
-            fresh.ifPresent(r -> assertThat(r.getEligibilityStatus())
-                    .isEqualTo(resultByOpportunity.get(id).getEligibilityStatus()));
+            fresh.ifPresent(e -> {
+                assertThat(e.opportunityId()).isEqualTo(id);
+                assertThat(e.result().getId()).isEqualTo(resultByOpportunity.get(id).getId());
+            });
         }
         assertThat(resultRepository.findFresh(USER, withoutVersionId, RULE, TODAY)).isEmpty();
         Long freshId = expected.iterator().next();
@@ -186,9 +201,9 @@ class EligibilitySpecificationsTest {
             if (r == null) {
                 return;
             }
-            boolean fresh = new EligibilityResultFreshness(r.getOpportunityId(), r.getOpportunityVersionId(),
-                    r.getProfileVersion(), r.getRuleVersion(), r.getValidUntil())
-                    .isFresh(currentVersionByOpportunity.get(opportunityId), PROFILE_VERSION, RULE, TODAY);
+            boolean fresh = r.getConditionSetId().equals(currentSetByOpportunity.get(opportunityId))
+                    && new EligibilityResultFreshness(r.getConditionSetId(), r.getProfileVersion(),
+                    r.getRuleVersion(), r.getValidUntil()).isFresh(PROFILE_VERSION, RULE, TODAY);
             if (fresh && statuses.contains(r.getEligibilityStatus())) {
                 ids.add(opportunityId);
             }
@@ -212,7 +227,7 @@ class EligibilitySpecificationsTest {
         return em.createQuery(q).getSingleResult();
     }
 
-    private Opportunity opportunityWithVersion() {
+    private Opportunity opportunityWithVersion(Long conditionSetId) {
         Opportunity opportunity = Opportunity.builder()
                 .opportunityType(OpportunityType.YOUTH_POLICY)
                 .title("기회 " + (resultByOpportunity.size() + 1))
@@ -224,19 +239,19 @@ class EligibilitySpecificationsTest {
                 .normalizedSnapshot(Map.of())
                 .personalizationStatus(PersonalizationStatus.UNKNOWN)
                 .normalizationVersion("test")
+                .conditionSetId(conditionSetId)
                 .build();
         em.persist(version);
         opportunity.changeCurrentVersion(version);
-        currentVersionByOpportunity.put(opportunity.getId(), version.getId());
+        currentSetByOpportunity.put(opportunity.getId(), conditionSetId);
         return opportunity;
     }
 
-    private EligibilityResult persistResult(Long userId, Long opportunityId, Long versionId, Long profileVersion,
+    private EligibilityResult persistResult(Long userId, Long conditionSetId, Long profileVersion,
                                             String ruleVersion, LocalDate validUntil, EligibilityStatus status) {
         EligibilityResult result = EligibilityResult.builder()
                 .userId(userId)
-                .opportunityId(opportunityId)
-                .opportunityVersionId(versionId)
+                .conditionSetId(conditionSetId)
                 .profileVersion(profileVersion)
                 .ruleVersion(ruleVersion)
                 .eligibilityStatus(status)

@@ -83,14 +83,16 @@ public record NormalizationResultResponse(
             long needsReview,
             long dataConflict,
             long invalid,
-            long unknown
+            long unknown,
+            long unverified
     ) {
         public static ReviewSummary of(List<ValidationStatus> statuses) {
             return new ReviewSummary(
                     count(statuses, ValidationStatus.NEEDS_REVIEW),
                     count(statuses, ValidationStatus.DATA_CONFLICT),
                     count(statuses, ValidationStatus.INVALID),
-                    count(statuses, ValidationStatus.UNKNOWN));
+                    count(statuses, ValidationStatus.UNKNOWN),
+                    count(statuses, ValidationStatus.UNVERIFIED));
         }
 
         private static long count(List<ValidationStatus> statuses, ValidationStatus target) {

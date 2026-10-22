@@ -74,6 +74,50 @@ class EligibilityEngineTest {
         assertThat(r.status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
     }
 
+    @Test
+    void 공식_출처로_확인_못_한_연령은_범위_안이면_확인_필요_밖이면_불확실() {
+        EligibilityEvaluation inside = evaluate(profile(), List.of(unverifiedAge(19, 34)), List.of());
+        EligibilityEvaluation outside = evaluate(profile(), List.of(unverifiedAge(19, 24)), List.of());
+
+        assertThat(inside.conditions().get(0).result()).isEqualTo(CHECK_REQUIRED);
+        assertThat(inside.status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
+        assertThat(outside.conditions().get(0).result()).isEqualTo(DATA_UNCLEAR);
+        assertThat(outside.status()).isEqualTo(EligibilityStatus.UNKNOWN);
+    }
+
+    @Test
+    void 공식_출처로_확인_못_한_조건만으로는_ELIGIBLE이나_NOT_ELIGIBLE이_되지_않는다() {
+        EligibilityConditionInput region = condition(ConditionType.REGION, RequirementType.REQUIRED,
+                Map.of("status", "SPECIFIC", "role", "RESIDENCE"), ValidationStatus.UNVERIFIED);
+
+        assertThat(evaluate(profile(), List.of(unverifiedAge(19, 34), region), List.of("1100000000")).status())
+                .isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
+        assertThat(evaluate(profile(), List.of(unverifiedAge(19, 24), region), List.of("1144000000")).status())
+                .isEqualTo(EligibilityStatus.UNKNOWN);
+    }
+
+    @Test
+    void 공식_출처로_확인_못_한_연령이_있어도_확인된_다른_조건이_불충족이면_NOT_ELIGIBLE() {
+        assertThat(evaluate(profile(), List.of(unverifiedAge(19, 34), region("SPECIFIC")), List.of("1144000000")).status())
+                .isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
+    }
+
+    @Test
+    void 공식_출처로_확인_못_한_제외조건은_해당해도_안_해도_확정하지_않는다() {
+        EligibilityConditionInput excludedIfUnemployed = condition(ConditionType.EMPLOYMENT, RequirementType.EXCLUSION,
+                Map.of("status", "SPECIFIC", "match", "ANY_OF", "values", List.of("UNEMPLOYED")), ValidationStatus.UNVERIFIED);
+        EligibilityConditionInput excludedIfEmployed = condition(ConditionType.EMPLOYMENT, RequirementType.EXCLUSION,
+                Map.of("status", "SPECIFIC", "match", "ANY_OF", "values", List.of("EMPLOYED")), ValidationStatus.UNVERIFIED);
+
+        EligibilityEvaluation matched = evaluate(profile(), List.of(age(19, 34), excludedIfUnemployed), List.of());
+        EligibilityEvaluation notMatched = evaluate(profile(), List.of(age(19, 34), excludedIfEmployed), List.of());
+
+        assertThat(matched.conditions().get(1).result()).isEqualTo(CHECK_REQUIRED);
+        assertThat(matched.status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
+        assertThat(notMatched.conditions().get(1).result()).isEqualTo(DATA_UNCLEAR);
+        assertThat(notMatched.status()).isEqualTo(EligibilityStatus.UNKNOWN);
+    }
+
     // ── 집계 우선순위 ──
 
     @Test
@@ -299,6 +343,11 @@ class EligibilityEngineTest {
     private static EligibilityConditionInput age(int min, int max) {
         return condition(ConditionType.AGE, RequirementType.REQUIRED,
                 Map.of("status", "RANGE", "min", min, "max", max), ValidationStatus.VALID);
+    }
+
+    private static EligibilityConditionInput unverifiedAge(int min, int max) {
+        return condition(ConditionType.AGE, RequirementType.REQUIRED,
+                Map.of("status", "RANGE", "min", min, "max", max), ValidationStatus.UNVERIFIED);
     }
 
     private static EligibilityConditionInput region(String status) {

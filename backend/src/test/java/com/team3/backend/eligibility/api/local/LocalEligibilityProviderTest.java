@@ -113,6 +113,21 @@ class LocalEligibilityProviderTest {
     }
 
     @Test
+    void 조건이_같은_기회는_판정_결과_하나를_함께_쓰고_기회별로_돌려준다() {
+        Long first = normalizePolicy("R2026-1", "11680");
+        Long second = normalizePolicy("R2026-3", "11680");
+        persistProfile();
+
+        List<EligibilitySnapshot> snapshots = provider.getEligibilities(USER, List.of(first, second));
+
+        assertThat(snapshots).extracting(EligibilitySnapshot::opportunityId).containsExactly(first, second);
+        assertThat(snapshots).extracting(EligibilitySnapshot::status).containsOnly(EligibilityStatus.ELIGIBLE);
+        assertThat(snapshots.get(0).opportunityVersionId()).isNotEqualTo(snapshots.get(1).opportunityVersionId());
+        assertThat(em.createQuery("select count(r) from EligibilityResult r", Long.class).getSingleResult())
+                .isEqualTo(1L);
+    }
+
+    @Test
     void 판정_결과에_추천용_기회_요약을_함께_담는다() {
         Long policy = normalizePolicy("R2026-1", "11680");
         persistProfile();
