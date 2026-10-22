@@ -32,7 +32,8 @@ import java.util.Map;
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_opportunity_versions_opportunity_version_no",
                 columnNames = {"opportunity_id", "version_no"}
-        )
+        ),
+        indexes = @Index(name = "idx_opportunity_versions_condition_set", columnList = "condition_set_id")
 )
 @Getter
 @Builder
@@ -65,6 +66,16 @@ public class OpportunityVersion {
 
     @Column(name = "normalization_version", nullable = false, length = 50)
     private String normalizationVersion;
+
+    /**
+     * 조건 묶음 ID (ConditionSet). 판정 입력(자격 조건 + 거주지역)이 같은 버전은 같은 값.
+     * 정규화가 버전을 만들 때 넣는다. 이 컬럼이 생기기 전에 만든 버전은 NULL이며 ConditionSetBackfill이 채운다.
+     * 연관관계(@ManyToOne)가 아니라 ID로 둔다: 버전을 읽을 때 조건 묶음을 함께 로딩할 일이 없고(판정·조회는 ID로 조인),
+     * 백필이 네이티브 UPDATE로 이 값만 채우기 때문이다. 조건 묶음 행은 지우지 않으므로 FK 없이도 고아 ID가 생기지 않는다.
+     * 인덱스: 백필의 "묶음이 빈 버전" 조회(IS NULL)와 묶음 단위 판정 조회용
+     */
+    @Column(name = "condition_set_id")
+    private Long conditionSetId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

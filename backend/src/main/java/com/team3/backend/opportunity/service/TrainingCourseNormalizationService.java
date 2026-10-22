@@ -1,5 +1,6 @@
 package com.team3.backend.opportunity.service;
 
+import com.team3.backend.opportunity.conditionset.ConditionSetKey;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.*;
 import com.team3.backend.opportunity.dto.TrainingCourseRaw;
@@ -69,6 +70,7 @@ public class TrainingCourseNormalizationService {
     private final OpportunityRegionRepository opportunityRegionRepository;
     private final TrainingCourseDetailRepository trainingDetailRepository;
     private final RegionRepository regionRepository;
+    private final ConditionSetRepository conditionSetRepository;
 
     @Transactional
     public TrainingNormalizationResult normalizePage(TrainingNormalizationCommand command) {
@@ -132,12 +134,17 @@ public class TrainingCourseNormalizationService {
             return Outcome.UNCHANGED;
         }
 
+        // 훈련 지역은 시행 지역(IMPLEMENTATION)이라 판정 입력이 아님 → 조건 묶음 키에 거주지역 없음.
+        // 조건 엔티티는 불변이라 버전 없는 조건으로 키를 먼저 계산하고, 버전 저장 뒤 다시 만들어 저장한다 (중복 아님)
+        Long conditionSetId = conditionSetRepository.resolveId(
+                ConditionSetKey.hash(trainingConditions(null, raw), List.of()));
         OpportunityVersion version = versionRepository.save(OpportunityVersion.builder()
                 .opportunity(opportunity)
                 .versionNo(current == null ? 1 : current.getVersionNo() + 1)
                 .normalizedSnapshot(snapshot)
                 .personalizationStatus(PersonalizationStatus.UNKNOWN)
                 .normalizationVersion(NORMALIZATION_VERSION)
+                .conditionSetId(conditionSetId)
                 .build());
         trainingDetailRepository.save(detail(version, raw, parsed));
         conditionRepository.saveAll(trainingConditions(version, raw));
