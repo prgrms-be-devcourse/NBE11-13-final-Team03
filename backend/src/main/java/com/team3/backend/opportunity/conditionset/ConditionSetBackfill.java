@@ -13,6 +13,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -21,10 +22,22 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 조건 묶음이 비어 있는 기회 버전에 조건 묶음을 채운다 (condition_set_id 컬럼이 생기기 전에 만든 버전).
- * 앱이 시작되면 한 번 돌고, 채울 버전이 없으면 쿼리 한 번으로 끝난다. 새로 정규화하는 버전은 정규화가 직접 채운다.
+ * 조건 묶음이 비어 있는 기회 버전에 조건 묶음을 채운다 (condition_set_id 컬럼이 생기기 전에 만든 버전,
+ * 정규화를 거치지 않고 만든 버전, 키 규칙을 바꾸며 NULL로 돌린 버전).
+ * 새로 정규화하는 버전은 정규화가 직접 채운다.
  * 키는 저장된 조건 행과 거주지역(RESIDENCE) 행으로 만들어, 정규화 때와 같은 값이 나온다 (ConditionSetKey).
- * 1,000건 묶음마다 커밋한다. yon.normalization.condition-set-backfill.enabled=false면 끈다.
+ *
+ * 실행 시점
+ * - 앱이 시작되면 비동기로 한 번 돈다 (시작·readiness를 막지 않음). 채울 버전이 없으면 쿼리 한 번으로 끝난다.
+ *   @Async는 앱 전체 @EnableAsync(EligibilityAsyncConfig)와 Spring Boot 기본 실행기를 쓴다.
+ *   처음 채울 때는 버전 수에 비례해 시간이 걸린다 (해시마다 UPDATE 1번, 1,000건 묶음마다 커밋).
+ * - run()은 언제 다시 불러도 안전하다 (빈 값만 채움). 판정 배치가 판정 전에 다시 부를 수 있다.
+ *
+ * 실패 격리: 1,000건 묶음마다 커밋하고, 한 묶음이 실패하면 로그를 남기고 다음 묶음으로 넘어간다.
+ * 실패한 묶음의 버전은 NULL로 남아 다음 실행이 다시 처리한다.
+ * 여러 인스턴스가 동시에 돌아도 같은 해시는 ConditionSetRepository.resolveId가 한 행으로 맞춘다.
+ *
+ * yon.normalization.condition-set-backfill.enabled=false면 끈다.
  */
 @Slf4j
 @Component
@@ -33,7 +46,8 @@ import java.util.stream.Collectors;
         matchIfMissing = true)
 public class ConditionSetBackfill {
 
-    private static final int CHUNK = 1_000;
+    /** 묶음 크기 (테스트에서 바꿀 수 있게 필드로 둔다) */
+    private int chunkSize = 1_000;
 
     private final OpportunityVersionRepository versionRepository;
     private final OpportunityConditionRepository conditionRepository;
@@ -41,6 +55,7 @@ public class ConditionSetBackfill {
     private final ConditionSetRepository conditionSetRepository;
     private final PlatformTransactionManager transactionManager;
 
+    @Async
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
         try {
@@ -55,23 +70,30 @@ public class ConditionSetBackfill {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         long started = System.nanoTime();
         int assigned = 0;
+        int failedChunks = 0;
         long afterId = 0L;
         while (true) {
             long cursor = afterId;
             List<Long> versionIds = tx.execute(status ->
-                    versionRepository.findIdsWithoutConditionSet(cursor, PageRequest.of(0, CHUNK)));
+                    versionRepository.findIdsWithoutConditionSet(cursor, PageRequest.of(0, chunkSize)));
             if (versionIds == null || versionIds.isEmpty()) {
                 break;
             }
-            Integer count = tx.execute(status -> assign(versionIds));
-            assigned += count == null ? 0 : count;
+            try {
+                Integer count = tx.execute(status -> assign(versionIds));
+                assigned += count == null ? 0 : count;
+            } catch (RuntimeException e) {
+                failedChunks++;
+                log.warn("Condition set backfill chunk failed, skipping (다음 실행이 다시 처리): versionIds={}..{}",
+                        versionIds.getFirst(), versionIds.getLast(), e);
+            }
             afterId = versionIds.getLast();
-            if (versionIds.size() < CHUNK) {
+            if (versionIds.size() < chunkSize) {
                 break;
             }
         }
-        if (assigned > 0) {
-            log.info("Condition sets backfilled: versions={}, elapsedMs={}", assigned,
+        if (assigned > 0 || failedChunks > 0) {
+            log.info("Condition sets backfilled: versions={}, failedChunks={}, elapsedMs={}", assigned, failedChunks,
                     (System.nanoTime() - started) / 1_000_000);
         }
         return assigned;
