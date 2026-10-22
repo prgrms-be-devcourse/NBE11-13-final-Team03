@@ -16,7 +16,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -61,45 +60,68 @@ public class UserInterestService {
             UserInterestsUpdateRequest request
     ) {
         User user = userRepository.findByIdForUpdate(userId)
-                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+                .orElseThrow(() ->
+                        new BusinessException(UserErrorCode.USER_NOT_FOUND)
+                );
 
-        Set<InterestKey> requestedKeys = normalizeAndValidate(request);
+        Set<InterestKey> requestedKeys =
+                normalizeAndValidate(request);
 
         List<UserInterest> existingInterests =
-                userInterestRepository.findAllByUserIdOrderByInterestTypeAscInterestCodeAsc(userId);
+                userInterestRepository
+                        .findAllByUserIdOrderByInterestTypeAscInterestCodeAsc(
+                                userId
+                        );
 
-        Map<InterestKey, UserInterest> existingByKey = existingInterests.stream()
-                .collect(Collectors.toMap(
-                        interest -> new InterestKey(
-                                interest.getInterestType(),
-                                interest.getInterestCode()
-                        ),
-                        Function.identity()
-                ));
+        Map<InterestKey, UserInterest> existingByKey =
+                existingInterests.stream()
+                        .collect(Collectors.toMap(
+                                interest -> new InterestKey(
+                                        interest.getInterestType(),
+                                        interest.getInterestCode()
+                                ),
+                                Function.identity()
+                        ));
 
-        List<UserInterest> interestsToDelete = existingByKey.entrySet().stream()
-                .filter(entry -> !requestedKeys.contains(entry.getKey()))
-                .map(Map.Entry::getValue)
-                .toList();
+        List<UserInterest> interestsToDelete =
+                existingByKey.entrySet()
+                        .stream()
+                        .filter(entry ->
+                                !requestedKeys.contains(entry.getKey())
+                        )
+                        .map(Map.Entry::getValue)
+                        .toList();
 
-        List<UserInterest> interestsToAdd = requestedKeys.stream()
-                .filter(key -> !existingByKey.containsKey(key))
-                .map(key -> UserInterest.create(
-                        user,
-                        key.type(),
-                        key.code()
-                ))
-                .toList();
+        List<UserInterest> interestsToAdd =
+                requestedKeys.stream()
+                        .filter(key ->
+                                !existingByKey.containsKey(key)
+                        )
+                        .map(key -> UserInterest.create(
+                                user,
+                                key.type(),
+                                key.code()
+                        ))
+                        .toList();
 
         userInterestRepository.deleteAll(interestsToDelete);
         userInterestRepository.saveAll(interestsToAdd);
 
-        List<UserInterestResponse> response = requestedKeys.stream()
-                .sorted(Comparator
-                        .comparing((InterestKey key) -> key.type().name())
-                        .thenComparing(InterestKey::code))
-                .map(key -> new UserInterestResponse(key.type(), key.code()))
-                .toList();
+        /*
+         * PUT 응답과 GET 응답이 같은 DB 정렬 기준을 사용하도록
+         * 저장된 최종 상태를 Repository에서 다시 조회한다.
+         *
+         * 현재 트랜잭션의 flush mode가 AUTO이므로 조회 쿼리 실행 전에
+         * 삭제 및 추가 변경사항이 DB에 반영된다.
+         */
+        List<UserInterestResponse> response =
+                userInterestRepository
+                        .findAllByUserIdOrderByInterestTypeAscInterestCodeAsc(
+                                userId
+                        )
+                        .stream()
+                        .map(UserInterestResponse::from)
+                        .toList();
 
         return new UserInterestsResponse(response);
     }

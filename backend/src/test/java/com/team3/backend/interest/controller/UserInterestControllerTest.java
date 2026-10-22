@@ -282,4 +282,28 @@ class UserInterestControllerTest {
                 "interest-test-session"
         );
     }
+
+    @Test
+    void 존재하지_않는_관심분야_유형은_400을_반환한다()
+            throws Exception {
+        Long userId = createUser(407L);
+
+        mockMvc.perform(put(INTEREST_URL)
+                        .with(user(principal(userId)))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                              "interests": [
+                                {
+                                  "type": "UNKNOWN",
+                                  "code": "일자리"
+                                }
+                              ]
+                            }
+                            """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code")
+                        .value("COMMON_001"));
+    }
 }

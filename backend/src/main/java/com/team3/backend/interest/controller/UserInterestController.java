@@ -44,9 +44,10 @@ public class UserInterestController {
                     인증된 사용자의 관심 분야를 조회합니다.
 
                     관심 분야는 다음 코드 체계를 사용합니다.
-                    - CATEGORY: 온통청년 정책 대분류
-                    - SUB_CATEGORY: 온통청년 정책 중분류
-                    - NCS: 고용24 직업훈련 NCS 코드
+                    - CATEGORY: 청년정책 대분류 또는 직업훈련 최상위 분류
+                    - SUB_CATEGORY: 청년정책 중분류 또는 직업훈련 NCS 1차 분류명
+                    - DETAIL_CATEGORY: 직업훈련 NCS 2차 분류명
+                    - NCS: 고용24 원본 NCS 코드
 
                     등록된 관심 분야가 없으면 빈 interests 배열을 반환합니다.
                     """
@@ -82,16 +83,20 @@ public class UserInterestController {
     @Operation(
             summary = "내 관심 분야 전체 교체",
             description = """
-                    인증된 사용자의 관심 분야를 요청 목록으로 전체 교체합니다.
+                인증된 사용자의 관심 분야를 요청 목록으로 전체 교체합니다.
 
-                    요청에 포함되지 않은 기존 관심 분야는 삭제되고,
-                    새로 포함된 관심 분야는 추가됩니다.
+                요청에 포함되지 않은 기존 관심 분야는 삭제되고,
+                새로 포함된 관심 분야는 추가됩니다.
 
-                    빈 interests 배열을 전달하면 모든 관심 분야를 해제합니다.
-                    관심 분야는 최대 30개까지 설정할 수 있습니다.
+                빈 interests 배열을 전달하면 모든 관심 분야를 해제합니다.
+                관심 분야는 최대 30개까지 설정할 수 있습니다.
 
-                    상태 변경 요청이므로 CSRF Token이 필요합니다.
-                    """
+                직업훈련의 세부 관심 분야를 설정할 때는
+                SUB_CATEGORY(NCS 1차 분류명)와
+                DETAIL_CATEGORY(NCS 2차 분류명)를 함께 전달할 수 있습니다.
+
+                상태 변경 요청이므로 CSRF Token이 필요합니다.
+                """
     )
     @ApiResponses({
             @ApiResponse(

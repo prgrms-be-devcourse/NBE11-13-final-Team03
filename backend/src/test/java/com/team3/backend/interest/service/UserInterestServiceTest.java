@@ -68,49 +68,78 @@ class UserInterestServiceTest {
                 InterestType.NCS,
                 "20010101"
         );
+        UserInterest added = UserInterest.create(
+                user,
+                InterestType.SUB_CATEGORY,
+                "취업지원"
+        );
 
         when(userRepository.findByIdForUpdate(USER_ID))
                 .thenReturn(Optional.of(user));
+
+        /*
+         * 첫 번째 호출은 변경 전 상태,
+         * 두 번째 호출은 저장 후 최종 상태를 반환한다.
+         */
         when(userInterestRepository
                 .findAllByUserIdOrderByInterestTypeAscInterestCodeAsc(USER_ID))
-                .thenReturn(List.of(maintained, removed));
+                .thenReturn(
+                        List.of(maintained, removed),
+                        List.of(maintained, added)
+                );
 
-        UserInterestsUpdateRequest request = new UserInterestsUpdateRequest(
-                List.of(
-                        new UserInterestItemRequest(
-                                InterestType.CATEGORY,
-                                "  일자리  "
-                        ),
-                        new UserInterestItemRequest(
-                                InterestType.SUB_CATEGORY,
-                                "취업지원"
+        UserInterestsUpdateRequest request =
+                new UserInterestsUpdateRequest(
+                        List.of(
+                                new UserInterestItemRequest(
+                                        InterestType.CATEGORY,
+                                        "  일자리  "
+                                ),
+                                new UserInterestItemRequest(
+                                        InterestType.SUB_CATEGORY,
+                                        "취업지원"
+                                )
                         )
-                )
-        );
+                );
 
         UserInterestsResponse response =
-                userInterestService.replaceInterests(USER_ID, request);
+                userInterestService.replaceInterests(
+                        USER_ID,
+                        request
+                );
 
-        verify(userInterestRepository).deleteAll(argThat(interests -> {
-            List<? extends UserInterest> deleted = StreamSupport
-                    .stream(interests.spliterator(), false)
-                    .toList();
+        verify(userInterestRepository).deleteAll(
+                argThat(interests -> {
+                    List<? extends UserInterest> deleted =
+                            StreamSupport
+                                    .stream(
+                                            interests.spliterator(),
+                                            false
+                                    )
+                                    .toList();
 
-            return deleted.size() == 1
-                    && deleted.getFirst() == removed;
-        }));
+                    return deleted.size() == 1
+                            && deleted.getFirst() == removed;
+                })
+        );
 
-        verify(userInterestRepository).saveAll(argThat(interests -> {
-            List<? extends UserInterest> saved = StreamSupport
-                    .stream(interests.spliterator(), false)
-                    .toList();
+        verify(userInterestRepository).saveAll(
+                argThat(interests -> {
+                    List<? extends UserInterest> saved =
+                            StreamSupport
+                                    .stream(
+                                            interests.spliterator(),
+                                            false
+                                    )
+                                    .toList();
 
-            return saved.size() == 1
-                    && saved.getFirst().getInterestType()
-                    == InterestType.SUB_CATEGORY
-                    && saved.getFirst().getInterestCode()
-                    .equals("취업지원");
-        }));
+                    return saved.size() == 1
+                            && saved.getFirst().getInterestType()
+                            == InterestType.SUB_CATEGORY
+                            && saved.getFirst().getInterestCode()
+                            .equals("취업지원");
+                })
+        );
 
         assertEquals(2, response.interests().size());
         assertEquals(
@@ -124,6 +153,10 @@ class UserInterestServiceTest {
         assertEquals(
                 InterestType.SUB_CATEGORY,
                 response.interests().get(1).type()
+        );
+        assertEquals(
+                "취업지원",
+                response.interests().get(1).code()
         );
     }
 
@@ -142,9 +175,17 @@ class UserInterestServiceTest {
 
         when(userRepository.findByIdForUpdate(USER_ID))
                 .thenReturn(Optional.of(user));
+
+        /*
+         * 첫 번째 호출은 변경 전 상태,
+         * 두 번째 호출은 전체 삭제 후 빈 상태를 반환한다.
+         */
         when(userInterestRepository
                 .findAllByUserIdOrderByInterestTypeAscInterestCodeAsc(USER_ID))
-                .thenReturn(List.of(category, ncs));
+                .thenReturn(
+                        List.of(category, ncs),
+                        List.of()
+                );
 
         UserInterestsResponse response =
                 userInterestService.replaceInterests(
@@ -152,16 +193,22 @@ class UserInterestServiceTest {
                         new UserInterestsUpdateRequest(List.of())
                 );
 
-        verify(userInterestRepository).deleteAll(argThat(interests ->
-                StreamSupport.stream(
-                        interests.spliterator(),
-                        false
-                ).count() == 2
-        ));
+        verify(userInterestRepository).deleteAll(
+                argThat(interests ->
+                        StreamSupport
+                                .stream(
+                                        interests.spliterator(),
+                                        false
+                                )
+                                .count() == 2
+                )
+        );
 
-        verify(userInterestRepository).saveAll(argThat(interests ->
-                !interests.iterator().hasNext()
-        ));
+        verify(userInterestRepository).saveAll(
+                argThat(interests ->
+                        !interests.iterator().hasNext()
+                )
+        );
 
         assertTrue(response.interests().isEmpty());
     }
