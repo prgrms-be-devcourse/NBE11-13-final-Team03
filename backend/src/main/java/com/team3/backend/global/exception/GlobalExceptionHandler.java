@@ -9,6 +9,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -20,7 +21,24 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GlobalExceptionHandler {
 
-    // 1. 비즈니스 예외 처리
+    // 요청 본문 역직렬화 실패 처리
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException(
+            HttpMessageNotReadableException exception
+    ) {
+        log.warn(
+                "Request body is not readable: {}",
+                exception.getMessage()
+        );
+
+        ErrorCode errorCode = GlobalErrorCode.INVALID_INPUT_VALUE;
+
+        return ResponseEntity
+                .status(errorCode.getStatus())
+                .body(ErrorResponse.from(errorCode));
+    }
+
+    // 비즈니스 예외 처리
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ErrorResponse> handleBusinessException(BusinessException exception) {
         ErrorCode errorCode = exception.getErrorCode();
@@ -36,7 +54,7 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.from(errorCode));
     }
 
-    // 2. @Valid 검증 예외 처리
+    // @Valid 검증 예외 처리
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidException(MethodArgumentNotValidException exception) {
         Map<String, String> fieldErrors = exception
@@ -66,7 +84,7 @@ public class GlobalExceptionHandler {
                 .body(response);
     }
 
-    // 3. 파라미터 타입 불일치 예외 처리
+    // 파라미터 타입 불일치 예외 처리
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ErrorResponse> handleMethodArgumentTypeMismatchException(MethodArgumentTypeMismatchException exception) {
         log.warn(
@@ -87,7 +105,7 @@ public class GlobalExceptionHandler {
                 .body(response);
     }
 
-    // 4. 예상치 못한 500 서버 내부 에러 처리
+    // 예상치 못한 500 서버 내부 에러 처리
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleException(Exception exception) {
         log.error("Unhandled Exception occurred: ", exception);
