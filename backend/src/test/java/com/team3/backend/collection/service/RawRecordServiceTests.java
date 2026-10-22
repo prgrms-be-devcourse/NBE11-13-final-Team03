@@ -14,6 +14,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -51,6 +52,42 @@ class RawRecordServiceTests {
     private RawRecordSaveRequest request(String content, int minutes) {
         return new RawRecordSaveRequest(10L, "policy-1", "hash-" + content,
                 JsonNodeFactory.instance.objectNode().put("title", content), startedAt.plusMinutes(minutes));
+    }
+
+    @Test
+    void batchLocksOnceAndPreservesRepeatedIdsAndProgress() {
+        var batch = List.of(request("A", 1), request("A", 2), request("B", 3)).stream()
+                .map(request -> new RawRecordSaveRequest(request.syncId(), request.externalId(),
+                        new RawRecordFingerprint().hash(request.payload()), request.payload(), request.collectedAt()))
+                .toList();
+        service.saveBatchForSync(batch);
+        verify(syncHistories).findByIdForUpdate(10L);
+        verify(sources).findByIdForUpdate(1L);
+        assertEquals(2, snapshots.size());
+        assertEquals(1, sync.getNewCount());
+        assertEquals(1, sync.getUpdatedCount());
+        assertEquals(1, sync.getUnchangedCount());
+    }
+
+    @Test
+    void batchRejectsMixedExecutions() {
+        var other = new RawRecordSaveRequest(11L, "policy-2", "hash",
+                request("B", 2).payload(), startedAt.plusMinutes(2));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.saveBatchForSync(List.of(request("A", 1), other)));
+        verifyNoInteractions(syncHistories, sources, records);
+    }
+
+    @Test
+    void interruptedBatchStopsBeforeSaving() {
+        try {
+            Thread.currentThread().interrupt();
+            assertThrows(CancellationException.class,
+                    () -> service.saveBatchForSync(List.of(request("A", 1))));
+            verifyNoInteractions(records);
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test

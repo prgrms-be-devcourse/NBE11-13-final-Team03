@@ -7,11 +7,16 @@ import java.util.Optional;
 import java.util.List;
 import java.time.OffsetDateTime;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface SyncHistoryRepository extends JpaRepository<SyncHistory, Long> {
+    @EntityGraph(attributePaths = "source")
+    List<SyncHistory> findByStartedAtGreaterThanEqualAndStartedAtLessThanOrderByStartedAtDescIdDesc(
+            OffsetDateTime from, OffsetDateTime until);
+
     List<SyncHistory> findByStatusInAndStartedAtBefore(List<SyncJobStatus> statuses, OffsetDateTime startedBefore);
 
     boolean existsBySourceSourceCodeAndStatusAndStartedAtGreaterThanEqualAndStartedAtLessThan(
