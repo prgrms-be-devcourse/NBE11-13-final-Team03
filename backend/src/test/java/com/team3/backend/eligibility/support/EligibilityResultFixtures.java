@@ -2,7 +2,6 @@ package com.team3.backend.eligibility.support;
 
 import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
-import com.team3.backend.opportunity.domain.entity.ConditionSet;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
 import jakarta.persistence.EntityManager;
@@ -40,12 +39,18 @@ public final class EligibilityResultFixtures {
         return setId;
     }
 
-    /** 어느 버전에도 붙지 않은 새 조건 묶음 (다른 묶음에 대한 결과 = 현재 버전 기준으로는 오래된 결과) */
+    /**
+     * 어느 버전에도 붙지 않은 새 조건 묶음 (다른 묶음에 대한 결과 = 현재 버전 기준으로는 오래된 결과).
+     * 조건 묶음 엔티티는 생성자를 열지 않으므로(ConditionSetRepository.resolveId 전용) 네이티브 SQL로 넣는다
+     */
     public static Long newConditionSet(EntityManager em) {
         String hash = (UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", "");
-        ConditionSet set = ConditionSet.builder().conditionHash(hash).build();
-        em.persist(set);
-        return set.getId();
+        em.createNativeQuery("INSERT INTO condition_sets (condition_hash, created_at) VALUES (:hash, CURRENT_TIMESTAMP)")
+                .setParameter("hash", hash)
+                .executeUpdate();
+        return ((Number) em.createNativeQuery("SELECT id FROM condition_sets WHERE condition_hash = :hash")
+                .setParameter("hash", hash)
+                .getSingleResult()).longValue();
     }
 
     /** 기회의 현재 버전 조건 묶음에 대한 결과 */
