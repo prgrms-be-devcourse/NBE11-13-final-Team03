@@ -46,11 +46,23 @@ class AgeNormalizerTest {
     }
 
     @Test
-    void 제한없음_N인데_연령이_있으면_모순() {
-        AgeNormalization result = normalize("19", "34", "N");
+    void 제한없음_N이어도_연령_값이_있으면_값을_쓴다() {
+        AgeNormalization range = normalize("19", "34", "N");
+        assertThat(range.status()).isEqualTo(AgeStatus.RANGE);
+        assertThat(range.min()).isEqualTo(19);
+        assertThat(range.max()).isEqualTo(34);
+        assertThat(range.validationStatus()).isEqualTo(ValidationStatus.VALID);
+        assertThat(range.dataConflict()).isFalse();
+        assertThat(range.reason()).contains("N");
+        assertThat(range.raw()).containsEntry("sprtTrgtAgeLmtYn", "N");
 
-        assertThat(result.status()).isEqualTo(AgeStatus.UNKNOWN);
-        assertThat(result.validationStatus()).isEqualTo(ValidationStatus.DATA_CONFLICT);
+        assertThat(normalize("18", "0", "N").status()).isEqualTo(AgeStatus.MIN_ONLY);
+        assertThat(normalize("0", "39", "N").max()).isEqualTo(39);
+    }
+
+    @Test
+    void 제한없음_N이어도_연령_값이_잘못되면_오류() {
+        assertThat(normalize("40", "34", "N").validationStatus()).isEqualTo(ValidationStatus.INVALID);
     }
 
     @Test
