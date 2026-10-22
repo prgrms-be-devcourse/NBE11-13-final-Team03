@@ -1,0 +1,47 @@
+# EC2 배포용 compose. GitHub Actions(.github/workflows/deploy.yml)가 배포 때마다 EC2의 배포 폴더로 복사한다.
+# 로컬 개발용 DB는 backend/docker-compose.yml을 쓴다.
+#
+# 배포 폴더에 필요한 파일
+#   .env        운영 환경변수 (deploy/.env.example 참고, 직접 만든다. git에 올리지 않는다)
+#   deploy.env  BACKEND_IMAGE=<GHCR 이미지> (Actions가 배포 때 쓴다)
+#
+# 실행: docker compose -f docker-compose.prod.yml --env-file .env --env-file deploy.env up -d
+# DB: .env의 COMPOSE_PROFILES=db면 이 compose의 PostgreSQL을 함께 띄운다. RDS로 옮기면 COMPOSE_PROFILES를 비우고 DB_URL만 바꾼다.
+name: yon
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE:?deploy.env에 BACKEND_IMAGE가 필요합니다}
+    env_file: .env
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  postgres-db:
+    image: postgres:16-alpine
+    profiles: ["db"]
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:?.env에 DB_USERNAME이 필요합니다}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?.env에 DB_PASSWORD가 필요합니다}
+      POSTGRES_DB: ${DB_NAME:-yon}
+      TZ: Asia/Seoul
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
