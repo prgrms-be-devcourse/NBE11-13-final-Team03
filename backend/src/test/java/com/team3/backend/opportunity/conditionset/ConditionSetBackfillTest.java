@@ -45,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @EnabledIfEnvironmentVariable(named = "YON_TEST_DB_URL", matches = ".+")
 @TestPropertySource(properties = {
+        "app.role=api",
         "spring.datasource.url=${YON_TEST_DB_URL}",
         "spring.datasource.username=${YON_TEST_DB_USERNAME:postgres}",
         "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
