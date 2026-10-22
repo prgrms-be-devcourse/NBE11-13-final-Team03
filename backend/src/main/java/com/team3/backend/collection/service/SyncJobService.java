@@ -76,6 +76,7 @@ public class SyncJobService {
 
     @Transactional(readOnly = true)
     public List<SyncJobResponse> listByDate(LocalDate date) {
+        // ISO 날짜 파서가 허용하는 큰 연도로 DB timestamp 범위 오류가 발생하지 않도록 제한한다.
         if (date == null || date.getYear() < 1 || date.getYear() > 9999) {
             throw new IllegalArgumentException("조회 날짜는 yyyy-MM-dd 형식의 유효한 날짜여야 합니다.");
         }

@@ -6,11 +6,14 @@ import com.team3.backend.collection.dto.external.CollectionSummary;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CancellationException;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 
@@ -50,7 +53,7 @@ public class ManualSyncWorker {
         }
     }
 
-    private void processPage(Long jobId, CollectionSource source, int offset, List<JsonNode> records) {
+    void processPage(Long jobId, CollectionSource source, int offset, List<JsonNode> records) {
         checkInterrupted();
         if (records.isEmpty()) {
             return;
@@ -59,30 +62,43 @@ public class ManualSyncWorker {
         for (int start = 0; start < records.size(); start += 100) {
             var batch = records.subList(start, Math.min(start + 100, records.size()));
             checkInterrupted();
+            var requests = new LinkedHashMap<Integer, RawRecordSaveRequest>();
+            for (int index = 0; index < batch.size(); index++) {
+                checkInterrupted();
+                String externalId = null;
+                try {
+                    var payload = batch.get(index);
+                    externalId = fingerprint.externalId(source, payload);
+                    requests.put(offset + start + index,
+                            new RawRecordSaveRequest(jobId, externalId, payload, OffsetDateTime.now()));
+                } catch (IllegalArgumentException exception) {
+                    jobs.recordFailure(jobId, offset + start + index, externalId, "INVALID_RECORD");
+                }
+            }
+            if (requests.isEmpty()) {
+                continue;
+            }
             try {
-                var requests = batch.stream().map(payload -> new RawRecordSaveRequest(jobId,
-                        fingerprint.externalId(source, payload), payload, OffsetDateTime.now())).toList();
-                rawRecords.saveBatchForSync(requests);
-            } catch (IllegalArgumentException | org.springframework.dao.DataAccessException exception) {
+                rawRecords.saveBatchForSync(List.copyOf(requests.values()));
+            } catch (IllegalArgumentException | DataAccessException exception) {
+                log.warn("jobId={} source={} offset={} exceptionType={} retry=individual",
+                        jobId, source, offset + start, exception.getClass().getSimpleName());
                 // The proxied batch transaction has rolled back before retrying individual records.
-                processIndividually(jobId, source, offset + start, batch);
+                processIndividually(jobId, requests);
             }
         }
     }
 
-    private void processIndividually(Long jobId, CollectionSource source, int offset, List<JsonNode> records) {
-        for (int index = 0; index < records.size(); index++) {
+    private void processIndividually(Long jobId, Map<Integer, RawRecordSaveRequest> requests) {
+        for (var entry : requests.entrySet()) {
             checkInterrupted();
-            String externalId = null;
+            var request = entry.getValue();
             try {
-                var payload = records.get(index);
-                externalId = fingerprint.externalId(source, payload);
-                rawRecords.saveForSync(new RawRecordSaveRequest(jobId, externalId,
-                        payload, OffsetDateTime.now()));
+                rawRecords.saveForSync(request);
             } catch (IllegalArgumentException exception) {
-                jobs.recordFailure(jobId, offset + index, externalId, "INVALID_RECORD");
-            } catch (org.springframework.dao.DataAccessException exception) {
-                jobs.recordFailure(jobId, offset + index, externalId, "STORAGE_FAILED");
+                jobs.recordFailure(jobId, entry.getKey(), request.externalId(), "INVALID_RECORD");
+            } catch (DataAccessException exception) {
+                jobs.recordFailure(jobId, entry.getKey(), request.externalId(), "STORAGE_FAILED");
             }
         }
     }

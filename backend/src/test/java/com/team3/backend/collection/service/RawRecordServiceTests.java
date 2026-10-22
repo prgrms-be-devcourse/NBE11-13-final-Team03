@@ -14,6 +14,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -74,6 +75,19 @@ class RawRecordServiceTests {
                 request("B", 2).payload(), startedAt.plusMinutes(2));
         assertThrows(IllegalArgumentException.class,
                 () -> service.saveBatchForSync(List.of(request("A", 1), other)));
+        verifyNoInteractions(syncHistories, sources, records);
+    }
+
+    @Test
+    void interruptedBatchStopsBeforeSaving() {
+        try {
+            Thread.currentThread().interrupt();
+            assertThrows(CancellationException.class,
+                    () -> service.saveBatchForSync(List.of(request("A", 1))));
+            verifyNoInteractions(records);
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test

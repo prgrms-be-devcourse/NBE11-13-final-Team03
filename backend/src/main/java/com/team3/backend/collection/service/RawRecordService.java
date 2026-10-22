@@ -14,6 +14,7 @@ import java.time.OffsetDateTime;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.Objects;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import com.team3.backend.collection.domain.entity.SyncHistory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -43,15 +44,18 @@ public class RawRecordService {
         if (requests.isEmpty()) {
             return;
         }
+        for (var request : requests) {
+            if (!Objects.equals(request.syncId(), requests.getFirst().syncId())) {
+                throw new IllegalArgumentException("같은 수집 실행의 원본만 함께 저장할 수 있습니다.");
+            }
+        }
         var sync = lockSync(requests.getFirst());
+        // ponytail: 출처 단위로 직렬화해 중복 스냅샷을 막는다. 병목이 확인되면 외부 식별자별 잠금으로 변경한다.
         sources.findByIdForUpdate(sync.getSource().getId())
                 .orElseThrow(() -> new EntityNotFoundException("수집 출처를 찾을 수 없습니다."));
         for (var request : requests) {
             if (Thread.currentThread().isInterrupted()) {
-                throw new java.util.concurrent.CancellationException("수집 실행이 중단되었습니다.");
-            }
-            if (!Objects.equals(request.syncId(), requests.getFirst().syncId())) {
-                throw new IllegalArgumentException("같은 수집 실행의 원본만 함께 저장할 수 있습니다.");
+                throw new CancellationException("수집 실행이 중단되었습니다.");
             }
             saveRecord(request, true, sync);
         }
@@ -59,9 +63,6 @@ public class RawRecordService {
 
     private RawRecordResponse saveInternal(RawRecordSaveRequest request, boolean recordProgress) {
         var sync = lockSync(request);
-        if (request.collectedAt().isBefore(sync.getStartedAt())) {
-            throw new IllegalArgumentException("수집 시각은 실행 시작 시각보다 빠를 수 없습니다.");
-        }
         sources.findByIdForUpdate(sync.getSource().getId())
                 .orElseThrow(() -> new EntityNotFoundException("수집 출처를 찾을 수 없습니다."));
         return saveRecord(request, recordProgress, sync);
