@@ -164,6 +164,21 @@ class EligibilitySpecificationsTest {
         assertThat(resultRepository.findFreshStatuses(NO_PROFILE_USER, all, RULE, TODAY)).isEmpty();
     }
 
+    @Test
+    void 상세_조회도_같은_최신_기준으로_결과를_돌려준다() {
+        Set<Long> expected = expected(Set.of(EligibilityStatus.values()));
+        for (Long id : resultByOpportunity.keySet()) {
+            Optional<EligibilityResult> fresh = resultRepository.findFresh(USER, id, RULE, TODAY);
+            assertThat(fresh.isPresent()).as("기회 %d", id).isEqualTo(expected.contains(id));
+            fresh.ifPresent(r -> assertThat(r.getEligibilityStatus())
+                    .isEqualTo(resultByOpportunity.get(id).getEligibilityStatus()));
+        }
+        assertThat(resultRepository.findFresh(USER, withoutVersionId, RULE, TODAY)).isEmpty();
+        Long freshId = expected.iterator().next();
+        assertThat(resultRepository.findFresh(NO_PROFILE_USER, freshId, RULE, TODAY)).isEmpty();
+        assertThat(resultRepository.findFresh(OTHER_USER, freshId, RULE, TODAY)).isEmpty();
+    }
+
     /** 판정 서비스 기준(isFresh)으로 계산한 기대값 */
     private Set<Long> expected(Set<EligibilityStatus> statuses) {
         Set<Long> ids = new HashSet<>();
