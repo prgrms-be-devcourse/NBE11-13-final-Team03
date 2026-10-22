@@ -16,7 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -38,7 +38,7 @@ class InterestOptionControllerTest {
     private InterestOptionService interestOptionService;
 
     @Test
-    void 로그인_사용자는_관심분야_계층목록을_조회한다()
+    void 비로그인_사용자도_관심분야_계층목록을_조회한다()
             throws Exception {
         when(interestOptionService.getOptions())
                 .thenReturn(new InterestOptionsResponse(List.of(
@@ -47,44 +47,25 @@ class InterestOptionControllerTest {
                                 List.of(
                                         new InterestSubCategoryOptionResponse(
                                                 "정보통신",
-                                                List.of("정보기술", "통신기술")
-                                        )
-                                )
-                        ),
-                        new InterestCategoryOptionResponse(
-                                "일자리",
-                                List.of(
-                                        new InterestSubCategoryOptionResponse(
-                                                "취업지원",
-                                                List.of()
+                                                List.of("정보기술")
                                         )
                                 )
                         )
                 )));
 
-        mockMvc.perform(get(OPTIONS_URL)
-                        .with(user(principal())))
+        mockMvc.perform(get(OPTIONS_URL))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.categories.length()").value(2))
+                .andExpect(jsonPath("$.categories.length()").value(1))
                 .andExpect(jsonPath("$.categories[0].category")
                         .value("교육･직업훈련"))
                 .andExpect(jsonPath(
                         "$.categories[0].subCategories[0].subCategory"
                 ).value("정보통신"))
                 .andExpect(jsonPath(
-                        "$.categories[0].subCategories[0].detailCategories.length()"
-                ).value(2))
-                .andExpect(jsonPath(
                         "$.categories[0].subCategories[0].detailCategories[0]"
-                ).value("정보기술"))
-                .andExpect(jsonPath(
-                        "$.categories[0].subCategories[0].detailCategories[1]"
-                ).value("통신기술"))
-                .andExpect(jsonPath("$.categories[1].category")
-                        .value("일자리"))
-                .andExpect(jsonPath(
-                        "$.categories[1].subCategories[0].detailCategories"
-                ).isEmpty());
+                ).value("정보기술"));
+
+        verify(interestOptionService).getOptions();
     }
 
     @Test
@@ -98,15 +79,6 @@ class InterestOptionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.categories").isArray())
                 .andExpect(jsonPath("$.categories").isEmpty());
-    }
-
-    @Test
-    void 비로그인_요청은_401을_반환한다()
-            throws Exception {
-        mockMvc.perform(get(OPTIONS_URL))
-                .andExpect(status().isUnauthorized());
-
-        verifyNoInteractions(interestOptionService);
     }
 
     private CustomUserDetails principal() {

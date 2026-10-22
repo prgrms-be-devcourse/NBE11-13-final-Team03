@@ -3,10 +3,8 @@ package com.team3.backend.interest.controller;
 import com.team3.backend.interest.dto.InterestOptionsResponse;
 import com.team3.backend.interest.service.InterestOptionService;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
-import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -20,7 +18,6 @@ import org.springframework.web.bind.annotation.RestController;
         name = "User Interest",
         description = "사용자 관심 분야 설정 API"
 )
-@SecurityRequirement(name = "cookieAuth")
 @RestController
 @RequiredArgsConstructor
 public class InterestOptionController {
@@ -30,6 +27,9 @@ public class InterestOptionController {
     @Operation(
             summary = "관심 분야 선택 목록 조회",
             description = """
+                    로그인하지 않은 사용자도 조회할 수 있는 공개 API입니다.
+                    통합 검색 필터와 관심 분야 설정 화면에서 사용할 수 있습니다.
+
                     정규화가 완료된 공고에 실제로 존재하는 관심 분야 목록을
                     대분류 → 중분류 → 세분류 계층으로 조회합니다.
 
@@ -61,11 +61,6 @@ public class InterestOptionController {
             @ApiResponse(
                     responseCode = "200",
                     description = "관심 분야 선택 목록 조회 성공"
-            ),
-            @ApiResponse(
-                    responseCode = "401",
-                    description = "Access Token이 없거나 유효하지 않은 경우",
-                    content = @Content
             )
     })
     @GetMapping("/api/interests/options")
