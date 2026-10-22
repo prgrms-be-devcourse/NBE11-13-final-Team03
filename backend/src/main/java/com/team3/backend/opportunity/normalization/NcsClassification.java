@@ -15,6 +15,7 @@ import java.util.Optional;
  * - 1차분류(대분류): 코드 앞 2자리
  * - 2차분류(중분류): 코드 앞 4자리
  * 고용24 원본에는 NCS 코드(ncsCd, 8자리 또는 6자리)만 있고 이름은 없다. 표에 없는 코드는 빈 값을 돌려준다.
+ * 표는 고용24 공통코드 API(319L01)로 만든다 (backend/scripts/ncs_codes_fetch.py). 앱은 API를 부르지 않는다.
  * 스프링 빈이 아니라 정적 표로 둔다 (정규화 서비스 생성자와 테스트 구성을 바꾸지 않으려고).
  */
 public final class NcsClassification {
