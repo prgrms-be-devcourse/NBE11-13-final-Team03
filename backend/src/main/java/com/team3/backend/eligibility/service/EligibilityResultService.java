@@ -53,8 +53,9 @@ public class EligibilityResultService {
 
     /** 판정 규칙 버전. 판정 엔진 규칙이 바뀌면 올린다 → 기존 결과가 모두 오래된 것이 된다
      *  1 → 2 (2026-10-19): 국민내일배움카드(TRAINING_CARD)·K-디지털 트레이닝 1회 한정(PARTICIPATION_HISTORY) 판정 추가
-     *  2 → 3 (2026-10-21): 판정 결과를 조건 묶음 단위로 저장 (새 테이블, 조건별 결과 순서 고정) */
-    public static final String RULE_VERSION = "3";
+     *  2 → 3 (2026-10-21): 판정 결과를 조건 묶음 단위로 저장 (새 테이블, 조건별 결과 순서 고정)
+     *  3 → 4 (2026-10-22): UNVERIFIED 조건은 일치 → CHECK_REQUIRED, 불일치 → DATA_UNCLEAR */
+    public static final String RULE_VERSION = "4";
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CHUNK = 1_000;
