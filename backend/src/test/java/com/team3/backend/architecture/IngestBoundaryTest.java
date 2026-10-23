@@ -13,11 +13,14 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 수집·정규화 서비스 분리 대비 경계 검사 (claude/ingest-split-design.md).
+ * 수집·정규화 서비스 분리 대비 경계 검사 (docs/ingest-split.md, AGENTS.md Development Rules).
  *
  * 메인 서버에 남는 패키지와 공용 패키지는 수집·정규화 쪽 패키지를 import하지 않는다.
  * 두 쪽은 공유 DB(공고·조건·조건 묶음 테이블)로만 연결되고, 코드 의존은 공용 패키지(opportunity.domain 등)로만 한다.
  * 공용 opportunity.dto에는 조회용 행·참조 DTO만 두고, 정규화 입출력 DTO는 opportunity.normalization.dto에 둔다.
+ *
+ * 소스 파일을 상대 경로(src/main/java/...)로 읽으므로 backend 디렉터리를 작업 디렉터리로 실행한다
+ * (Gradle 기본값. IDE에서 저장소 루트로 실행하면 scansExistingSources가 실패한다).
  */
 class IngestBoundaryTest {
 
