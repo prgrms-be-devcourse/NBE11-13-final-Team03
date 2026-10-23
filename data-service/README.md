@@ -70,3 +70,34 @@
 yon-test data
 ```
 PostgreSQL 테스트는 `YON_TEST_DB_URL`이 있을 때만 돕니다.
+
+
+## 수집 gRPC 내부 API (전환 PR A)
+
+REST `/internal/collection/**`와 gRPC `yon.collection.v1.CollectionService`가 같은 서비스 빈을 호출한다.
+backend 전환과 배포가 끝난 뒤 별도 PR에서 REST를 제거한다.
+
+- 계약: `contracts/proto/collection/v1/collection.proto` (필드 번호 재사용 금지, 삭제 시 `reserved`)
+- RPC: `StartSync`, `ListSyncJobsByDate`, `GetSyncJob`, `SaveRawRecord`, `GetRawRecord`
+- 포트: `DATA_SERVICE_GRPC_PORT` (기본 9092), metadata `x-internal-key`: `DATA_SERVICE_INTERNAL_API_KEY`
+- 수신 상한: `spring.grpc.server.inbound.message.max-size=16MB`
+- `StartSync`의 페이지 크기/최대 페이지 수 0은 기본값 100/1000이다.
+- 날짜는 한국 시간 접수일(YYYY-MM-DD), 시각은 UTC Timestamp이다.
+- 목록은 `record_failures`를 제외하고 실패 건수를 유지한다. 단건 조회는 상세 전체를 포함한다.
+- JSON은 문자열로 전달하여 기존 원본 해시 계산을 유지한다.
+- 오류는 gRPC status와 trailer `error-code`로 전달한다. 예외 원문은 노출하지 않는다.
+- health/reflection 예외는 두지 않으며 모든 등록 RPC에 키가 필요하다.
+
+Boot 4.1.1부터 gRPC 자동 설정은 Boot에 통합되어 공식
+`org.springframework.boot:spring-boot-starter-grpc-server`를 사용한다.
+Boot BOM 기준 Spring gRPC 1.1.1 / protobuf 4.35.1 / grpc-java 1.83.1,
+protobuf Gradle 플러그인 0.9.6을 사용하고 생성기는 런타임과 같은 버전으로 고정한다.
+설정 키도 Boot 4.1의 `inbound.message.max-size`를 사용한다.
+[공식 Boot gRPC 문서](https://docs.spring.io/spring-boot/4.1/reference/io/grpc.html)
+
+backend의 gRPC 주소 환경변수 예시는 준비만 추가하며 실제 호출 전환은 후속 PR B에서 한다.
+gRPC 포트는 내부 네트워크에서만 허용하고 호스트 공개 포트에 추가하지 않는다.
+서로 다른 호스트로 분리할 때 TLS를 적용한다.
+배포 순서는 data-service(서버 추가) → backend(클라이언트 전환) → data-service(REST 제거)다.
+현재 backend-image 워크플로는 모든 main push에서 실행하므로 proto 변경도 이미 포함한다.
+data-service 및 backend PostgreSQL PR 워크플로는 `contracts/proto/**`도 검사한다.

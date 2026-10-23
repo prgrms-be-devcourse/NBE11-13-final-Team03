@@ -1,4 +1,10 @@
 spring:
+  grpc:
+    server:
+      port: ${DATA_SERVICE_GRPC_PORT:9092}
+      inbound:
+        message:
+          max-size: 16MB
   application:
     name: data-service
   config:

@@ -1,4 +1,7 @@
 spring:
+  grpc:
+    server:
+      port: 0
   datasource:
     url: jdbc:h2:mem:yon-data;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver

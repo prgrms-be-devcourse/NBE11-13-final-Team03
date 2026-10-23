@@ -1,0 +1,44 @@
+// Never reuse field numbers. Reserve removed fields and enum values.
+syntax = "proto3";
+package yon.collection.v1;
+option java_multiple_files = true;
+option java_package = "com.team3.contracts.collection.v1";
+
+import "google/protobuf/timestamp.proto";
+
+service CollectionService {
+  rpc StartSync(StartSyncRequest) returns (SyncStartResponse);
+  rpc ListSyncJobsByDate(ListSyncJobsByDateRequest) returns (ListSyncJobsResponse);
+  rpc GetSyncJob(GetSyncJobRequest) returns (SyncJob);
+  rpc SaveRawRecord(SaveRawRecordRequest) returns (RawRecord);
+  rpc GetRawRecord(GetRawRecordRequest) returns (RawRecord);
+}
+
+enum CollectionSource { COLLECTION_SOURCE_UNSPECIFIED = 0; YOUTH_POLICY = 1; EMPLOYMENT24 = 2; }
+enum SyncJobStatus { SYNC_JOB_STATUS_UNSPECIFIED = 0; PENDING = 1; RUNNING = 2; SUCCESS = 3;
+                     PARTIAL_SUCCESS = 4; FAILED = 5; INTERRUPTED = 6; }
+
+message StartSyncRequest { CollectionSource source = 1; int32 page_size = 2; int32 max_pages = 3; }
+message SyncStartResponse { int64 job_id = 1; CollectionSource source = 2; SyncJobStatus status = 3; string message = 4; }
+message ListSyncJobsByDateRequest { string date = 1; }
+message ListSyncJobsResponse { repeated SyncJob jobs = 1; }
+message GetSyncJobRequest { int64 job_id = 1; }
+
+message SyncJob {
+  int64 job_id = 1; CollectionSource source = 2; SyncJobStatus status = 3;
+  google.protobuf.Timestamp started_at = 4; optional google.protobuf.Timestamp completed_at = 5;
+  int32 fetched_count = 6; int32 success_count = 7; int32 failed_record_count = 8; int32 pending_count = 9;
+  int32 failed_page_count = 10; int32 new_count = 11; int32 updated_count = 12; int32 unchanged_count = 13;
+  repeated PageFailure page_failures = 14; repeated Employment24PageFailure employment24_page_failures = 15;
+  repeated string incomplete_ncs_codes = 16; repeated RecordFailure record_failures = 17; optional string failure_reason = 18;
+}
+message PageFailure { int32 page_number = 1; string error_code = 2; string error_message = 3; bool retryable = 4; }
+message Employment24PageFailure { string request_json = 1; string error_code = 2; string error_message = 3; bool retryable = 4; }
+message RecordFailure { int64 record_result_id = 1; string external_id = 2; optional int32 page_number = 3; optional int32 item_index = 4;
+                        optional int64 raw_record_id = 5; string status = 6; string result_type = 7;
+                        string error_code = 8; string error_message = 9; google.protobuf.Timestamp processed_at = 10; }
+
+message SaveRawRecordRequest { int64 sync_id = 1; string external_id = 2; string payload_json = 3; google.protobuf.Timestamp collected_at = 4; }
+message GetRawRecordRequest { int64 raw_record_id = 1; }
+message RawRecord { int64 raw_record_id = 1; CollectionSource source = 2; string external_id = 3; string payload_hash = 4;
+                    google.protobuf.Timestamp collected_at = 5; google.protobuf.Timestamp last_seen_at = 6; string payload_json = 7; }
