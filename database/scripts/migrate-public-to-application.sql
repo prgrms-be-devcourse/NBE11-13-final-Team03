@@ -13,7 +13,7 @@ DECLARE
         'eligibility_set_results', 'eligibility_results', 'condition_sets', 'opportunities',
         'opportunity_versions', 'opportunity_sources', 'opportunity_conditions', 'opportunity_regions',
         'application_windows', 'training_course_details', 'youth_policy_details',
-        'opportunity_events', 'event_scan_history'
+        'opportunity_events', 'event_scan_history', 'outbox_events'
     ];
     item record;
 BEGIN

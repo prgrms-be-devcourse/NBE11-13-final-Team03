@@ -71,6 +71,17 @@ application_user는 application 스키마만 소유하므로 update가 다른 �
 update는 컬럼 타입 변경·삭제를 하지 않으므로, 그런 변경은 application_user로 명시적 DDL을 적용한다.
 Flyway 도입과 backend validate 전환은 후속 작업으로 팀이 함께 결정한다.
 
+**database/scripts에 SQL이 있는 변경은 새 버전 서버를 기동하기 전에 먼저 적용한다.**
+update가 먼저 실행되면 다음 문제가 생긴다.
+
+- SQL에만 있는 CHECK 제약·기본값이 빠진 채 테이블·컬럼이 만들어지고, 이후 SQL은 객체가 이미 있어 실패한다.
+- 이미 행이 있는 테이블에 NOT NULL 컬럼을 추가하지 못한다.
+  예: event-fanout-outbox.sql의 `opportunity_events.last_user_id`는 `NOT NULL DEFAULT 0`으로 추가해야 하는데,
+  update는 기본값 없이 NOT NULL 컬럼을 추가하려다 실패한다.
+
+적용 순서는 각 SQL 파일 머리말과 기능 문서(date-tracking.md, event-fanout-outbox.md)를 따른다.
+Application 테이블이 없는 새 로컬 DB는 첫 기동의 update가 테이블을 만들므로 SQL을 실행하지 않는다.
+
 ### data-service (backend와 DB 공유 1단계)
 
 data-service는 수집·정규화를 backend에서 떼어 낸 서버다. 1단계에서는 backend와 같은 application_user·application 스키마를 쓰고,
@@ -156,8 +167,12 @@ notify_raw_normalization_request() 함수도 이동한다.
 스키마 간 FK는 임의 처리하지 않고 전체 이전 트랜잭션을 롤백한다.
 추가 객체/확장 모듈이 있다면 별도 검토해 명시적 이전안을 준비한다.
 테이블 추가 시 allowlist도 검토한다. 3단계 날짜 추적의 opportunity_events와
-event_scan_history도 포함한다. 구 추적 테이블에 없는 event_id/correlation_id의
+event_scan_history, 4단계 outbox_events도 포함한다. 구 추적 테이블에 없는 event_id/correlation_id의
 추가·백필은 이 스키마 이동 SQL이 수행하지 않는다. 구 구조 DB는 별도 이전안이 필요하다.
+
+3단계 설치 DB의 이벤트 lease/cursor 추가와 Outbox 최초 설치는 별도
+event-fanout-outbox.sql을 사용한다. 상세 순서와 검증 범위는
+[이벤트 Outbox 문서](event-fanout-outbox.md)를 따른다.
 
 실패 시 두 스키마 데이터를 수동 합치거나 public을 삭제하지 않는다.
 프로비저닝과 이전은 별도 트랜잭션이므로 이전 실패 시에도 프로비저닝 권한 변경은 남는다.

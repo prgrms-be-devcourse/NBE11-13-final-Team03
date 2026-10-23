@@ -18,6 +18,10 @@ import java.util.List;
 
 public interface OpportunityRepository extends JpaRepository<Opportunity, Long> {
 
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select o from Opportunity o join fetch o.currentVersion where o.id = :id")
+    java.util.Optional<Opportunity> lockForNotification(@Param("id") Long id);
+
     /** Keyset page; keep the current version stable while a tracking page is persisted. */
     @Lock(LockModeType.PESSIMISTIC_READ)
     @Query("""
