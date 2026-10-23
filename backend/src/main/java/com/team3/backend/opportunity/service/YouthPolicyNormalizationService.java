@@ -8,7 +8,7 @@ import com.team3.backend.opportunity.dto.NormalizationResult;
 import com.team3.backend.opportunity.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.AgeNormalization;
 import com.team3.backend.opportunity.normalization.AgeNormalizer;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 import com.team3.backend.opportunity.normalization.ApplicationPeriodNormalizer;
 import com.team3.backend.opportunity.normalization.CodeConditionNormalizer;
 import com.team3.backend.opportunity.normalization.CodeNormalization;

@@ -9,8 +9,8 @@ import com.team3.backend.opportunity.domain.repository.TrainingCourseDetailRepos
 import com.team3.backend.opportunity.dto.ApplicationWindowRow;
 import com.team3.backend.opportunity.dto.OpportunityInfoRow;
 import com.team3.backend.opportunity.dto.TrainingScheduleRow;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 

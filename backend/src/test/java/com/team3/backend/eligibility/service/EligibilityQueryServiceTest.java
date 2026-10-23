@@ -1,5 +1,7 @@
 package com.team3.backend.eligibility.service;
 
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.dto.EligibilityListResponse;
 import com.team3.backend.eligibility.dto.EligibilityResponse;

@@ -1,12 +1,13 @@
 package com.team3.backend.eligibility.api.local;
 
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.eligibility.api.EligibilityProvider;
 import com.team3.backend.eligibility.api.dto.ConditionResult;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshot;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshotPage;
 import com.team3.backend.eligibility.api.dto.OpportunityInfo;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.eligibility.exception.EligibilityErrorCode;

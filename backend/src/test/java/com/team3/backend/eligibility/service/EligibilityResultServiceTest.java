@@ -1,5 +1,6 @@
 package com.team3.backend.eligibility.service;
 
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultUpsertRepository;

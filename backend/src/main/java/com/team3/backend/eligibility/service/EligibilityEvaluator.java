@@ -12,9 +12,9 @@ import com.team3.backend.opportunity.domain.repository.OpportunityRegionReposito
 import com.team3.backend.opportunity.dto.ApplicationWindowRow;
 import com.team3.backend.opportunity.dto.ConditionRow;
 import com.team3.backend.opportunity.dto.RegionCodeRow;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.region.directory.RegionDirectory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
