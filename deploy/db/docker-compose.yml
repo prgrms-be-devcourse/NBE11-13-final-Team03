@@ -12,8 +12,9 @@ services:
       POSTGRES_DB: ${DB_NAME:-yon}
       TZ: Asia/Seoul
     # 메인·데이터 서버가 사설 IP로 접속한다. 보안 그룹에서 5432는 두 서버의 보안 그룹에만 연다 (0.0.0.0/0 금지)
+    # DB_BIND_IP에 이 서버의 사설 IP를 넣으면 공개 IP로는 열리지 않는다 (보안 그룹 실수 대비)
     ports:
-      - "5432:5432"
+      - "${DB_BIND_IP:-0.0.0.0}:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # 빈 볼륨에서만 실행된다: application_user·notification_user 계정과 스키마 생성 (비밀번호는 README 절차로 따로 설정)

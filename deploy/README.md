@@ -24,6 +24,16 @@
 | `yon-data` | 8082 ← `yon-main` 보안 그룹만 / 22 |
 
 **5432·8082는 0.0.0.0/0으로 열지 않는다.** data-service는 Spring Security가 없다.
+한 겹 더: DB 서버 `.env`의 `DB_BIND_IP`, 데이터 서버 `.env`의 `DATA_SERVICE_BIND_IP`에 각 서버의 사설 IP를 넣으면 포트가 사설 IP에만 바인딩된다 (보안 그룹 실수 대비).
+
+### 운영 진입점 (TLS): 미정
+
+지금 메인 서버는 TLS 없이 8080(HTTP)을 바로 연다. 이 상태로는 실제 사용자 접속을 받지 않는다.
+- `AUTH_COOKIE_SECURE=true`(Secure 쿠키)는 HTTP 응답에서 브라우저가 저장·전송하지 않아 로그인·토큰 갱신이 안 된다 → TLS 전에는 `false`
+- 프론트가 S3+CloudFront(HTTPS)면 `http://<IP>:8080` API 호출은 mixed content로 차단된다
+- 카카오 redirect-uri가 `{baseUrl}` 기반이라, TLS를 붙이면 카카오 콘솔 등록 주소도 바꿔야 한다
+
+EC2 재구축 전에 TLS 종단(nginx+certbot 또는 ALB/CloudFront)을 정하고, 그에 맞춰 `deploy/main/.env.example`(`AUTH_COOKIE_SECURE=true`)과 보안 그룹(443)을 바꾼다.
 
 ## 워크플로
 
@@ -136,6 +146,7 @@ cd ~/yon-db
 ### 백업
 
 DB는 DB 서버의 도커 볼륨(`yon-db_postgres_data`)에 있다. 인스턴스를 지우면 함께 사라진다.
+아래는 수동 백업이다. 인스턴스 유실에 대비한 주기 백업(cron + S3 업로드)은 후속으로 추가한다.
 
 ```bash
 cd ~/yon-db
@@ -152,6 +163,8 @@ nano .env && chmod 600 .env
 `.env`는 `deploy/data/.env.example`을 붙여 넣고 채운다. 그다음 Actions → Deploy → `data-service`로 배포한다 (또는 data-service 변경이 main에 병합되면 자동).
 
 **지역 사전**: `regions`가 비어 있으면 첫 기동 때만 `.env`의 `REGION_CODE_SYNC_ON_STARTUP=true`로 띄우고, 끝나면 `false`로 돌린 뒤 재시작한다.
+
+배포 워크플로의 기동 확인은 `DATA_SERVICE_BIND_IP`가 있으면 그 주소로, 없으면 `localhost:8082`로 한다.
 
 ## 메인 서버
 
@@ -173,6 +186,8 @@ cat deploy.env deploy.env.prev
 docker stats --no-stream
 ```
 (`restart`는 `.env`를 바꾼 뒤. 평소 배포·롤백은 Actions 수동 실행으로 한다)
+
+배포가 3분 안에 응답하지 않으면 이전 이미지로 되돌린다. 첫 배포라 이전 이미지가 없으면 재시작 반복을 막기 위해 그 서비스를 멈추고(`compose stop`) 실패한다. 로그를 보고 `.env`를 고친 뒤 Actions에서 다시 배포한다.
 
 ## 주의
 - **메모리**: 서버마다 2GB. 힙은 비율로 잡는다. 메인 서버 backend는 알림 서버와 나눠 쓰도록 `-XX:MaxRAMPercentage=50.0`, 데이터 서버는 `70.0`(`.env`의 `BACKEND_JAVA_OPTS`·`DATA_SERVICE_JAVA_OPTS`로 조정). 스왑은 필수. 배포 후 `docker stats`로 확인한다.

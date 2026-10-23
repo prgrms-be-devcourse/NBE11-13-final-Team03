@@ -164,10 +164,15 @@ jobs:
           compose up -d "$SERVICE"
 
           if [ "$SERVICE" = backend ]; then
-            port=$(grep -E '^BACKEND_PORT=' .env | tail -n 1 | cut -d= -f2)
+            port=$(grep -E '^BACKEND_PORT=' .env | tail -n 1 | cut -d= -f2 || true)
             url="http://localhost:${port:-8080}/"
           else
-            url="http://localhost:8082/"
+            # 사설 IP로 바인딩했으면 그 주소로 확인한다 (deploy/data/.env.example DATA_SERVICE_BIND_IP)
+            bind=$(grep -E '^DATA_SERVICE_BIND_IP=' .env | tail -n 1 | cut -d= -f2 || true)
+            if [ -z "$bind" ] || [ "$bind" = "0.0.0.0" ]; then
+              bind=localhost
+            fi
+            url="http://$bind:8082/"
           fi
           code=000
           for _ in $(seq 1 36); do
@@ -183,6 +188,10 @@ jobs:
               echo "이전 이미지로 되돌립니다: $(grep "^$IMAGE_VAR=" deploy.env.prev)"
               cp deploy.env.prev deploy.env
               compose up -d "$SERVICE"
+            else
+              # 첫 배포라 되돌릴 이미지가 없다. restart 정책으로 재시작을 반복하지 않게 멈춘다
+              echo "되돌릴 이전 이미지가 없어 $SERVICE 를 멈춥니다"
+              compose stop "$SERVICE"
             fi
             exit 1
           fi
