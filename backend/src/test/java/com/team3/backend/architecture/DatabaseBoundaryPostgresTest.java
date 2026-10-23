@@ -168,6 +168,35 @@ class DatabaseBoundaryPostgresTest {
         assertDenied(connection, "CREATE SCHEMA unauthorized", "42501");
     }
 
+    @Test
+    void trackingDdlIsOwnedByApplicationAndDoesNotResetExistingData() throws Exception {
+        String url = newDatabase();
+        try (var admin = admin(url)) {
+            script(admin, "database-boundaries.sql");
+            setTestPasswords(admin);
+        }
+        try (var application = login(url, "application_user")) {
+            execute(application, "CREATE TABLE opportunities(id bigint PRIMARY KEY)");
+            execute(application, "CREATE TABLE opportunity_versions(id bigint PRIMARY KEY)");
+            script(application, "date-tracking.sql");
+            execute(application, "INSERT INTO event_scan_history "
+                    + "(scan_date,status,execution_id,started_at,retry_count,created_at,updated_at) "
+                    + "VALUES ('2026-10-20','RUNNING','execution',now(),0,now(),now())");
+            assertThatThrownBy(() -> script(application, "date-tracking.sql")).isInstanceOf(SQLException.class);
+            execute(application, "ROLLBACK");
+            assertThat(scalar(application, "SELECT count(*) FROM event_scan_history")).isEqualTo("1");
+            assertThat(scalar(application, "SELECT pg_get_userbyid(relowner) FROM pg_class "
+                    + "WHERE oid='application.opportunity_events'::regclass")).isEqualTo("application_user");
+            assertThat(scalar(application, "SELECT count(*) FROM information_schema.columns "
+                    + "WHERE table_schema='application' AND table_name='opportunity_events' "
+                    + "AND column_name IN ('event_id','correlation_id','next_retry_at') AND is_nullable='NO'"))
+                    .isEqualTo("3");
+        }
+        try (var notification = login(url, "notification_user")) {
+            assertDenied(notification, "SELECT * FROM application.opportunity_events", "42501");
+        }
+    }
+
     private void assertStartupGuard(String url) {
         var runner = new ApplicationContextRunner()
                 .withInitializer(context -> context.getEnvironment().setActiveProfiles("database-boundary"))
