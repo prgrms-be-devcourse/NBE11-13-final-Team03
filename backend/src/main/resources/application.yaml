@@ -1,6 +1,9 @@
 spring:
   application:
     name: backend
+  config:
+    import:
+      - optional:classpath:youth-policy-codes.yaml
 
   jpa:
     hibernate:

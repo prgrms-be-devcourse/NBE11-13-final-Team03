@@ -30,7 +30,7 @@
 - 불필요한 추상화와 새 의존성을 추가하지 않는다.
 - 보안, 예외 처리, 데이터 정합성을 생략하지 않는다.
 - 알림 기능은 `notification-service/` 프로젝트에만 둔다. `backend`에 `com.team3.backend.notification` 패키지를 만들지 않는다 (`ApplicationPersistenceCompletenessTest`가 검사한다).
-- 수집·정규화는 `data-service/` 프로젝트에만 둔다 (`docs/ingest-split.md`). `backend`에는 판정·검색용 읽기 어댑터(opportunity.domain·dto, region.directory·domain)와 수집 관리자 API 전달(collection.controller·exception)만 두고, 정규화·수집 코드(opportunity.ingest·normalization·service·conditionset, region.client·service)를 다시 만들지 않는다 (`IngestBoundaryTest`가 검사한다). backend 테스트의 공고 데이터는 `OpportunityFixtures`로 만든다.
+- 수집·정규화는 `data-service/`로 옮기는 중이다 (`docs/ingest-split.md`). `backend`의 메인·공용 패키지(auth, eligibility, search, interest, preference, user, config, global, opportunity.domain, opportunity.dto, region.directory, region.domain)는 수집·정규화 패키지(collection, opportunity.ingest·normalization·service·conditionset, region.client·service)를 import하지 않는다. 필요한 것은 공용 패키지로 옮긴다 (`IngestBoundaryTest`가 검사한다).
 
 ## Workflow
 

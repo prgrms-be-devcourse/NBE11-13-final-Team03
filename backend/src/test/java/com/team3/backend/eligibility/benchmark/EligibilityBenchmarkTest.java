@@ -28,7 +28,13 @@ import com.team3.backend.opportunity.dto.ApplicationWindowRow;
 import com.team3.backend.opportunity.dto.ConditionRow;
 import com.team3.backend.opportunity.dto.OpportunityVersionRef;
 import com.team3.backend.opportunity.dto.RegionCodeRow;
-import com.team3.backend.opportunity.support.OpportunityFixtures;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.*;
+import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
+import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;
+import com.team3.backend.opportunity.normalization.official.PeriodEvidenceExtractor;
+import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.directory.RegionIndex;
 import com.team3.backend.region.domain.entity.Region;
@@ -110,7 +116,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 @Import({EligibilityResultService.class, LocalEligibilityProvider.class, OpportunityInfoAssembler.class,
         EligibilityQueryService.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
-        RegionDirectory.class})
+        YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
+        RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
+        YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
 class EligibilityBenchmarkTest {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -137,6 +145,7 @@ class EligibilityBenchmarkTest {
     @Autowired private OpportunityRepository opportunityRepository;
     @Autowired private EligibilityEngine engine;
     @Autowired private ApplicationStatusCalculator applicationStatusCalculator;
+    @Autowired private YouthPolicyNormalizationService normalizationService;
     @Autowired private RegionDirectory regionDirectory;
     @Autowired private RegionRepository regionRepository;
     @Autowired private EligibilityProfileRepository profileRepository;
@@ -502,11 +511,43 @@ class EligibilityBenchmarkTest {
                 .build()));
     }
 
-    /** 템플릿 6건 (BenchmarkData.templatePolicies: data-service 정규화 결과와 같은 조건 행) */
+    /** 템플릿 6건을 실제 정규화 서비스로 정규화한다 */
     private Map<String, Template> normalizeTemplates() {
+        Map<String, YouthPolicyRaw> raws = new LinkedHashMap<>();
+        // 단순: 나이 범위, 단일 지역, 단일 기간, 코드 전부 제한없음
+        raws.put("S1", base("S1", "청년 월세 지원", "19", "34", "Y", "0057001", "20261001 ~ 20261031", "11680")
+                .mrgSttsCd("0055003").jobCd("0013010").schoolCd("0049010").plcyMajorCd("0011009")
+                .sBizCd("0014010").earnCndSeCd("0043001").build());
+        raws.put("S2", base("S2", "청년 취업 상담", "19", "39", "Y", "0057002", null, "41111")
+                .mrgSttsCd("0055003").jobCd("0013010").schoolCd("0049010").plcyMajorCd("0011009")
+                .sBizCd("0014010").earnCndSeCd("0043001").build());
+        // 복합: 여러 지역, 여러 기간, 구체 코드, 소득 기준, 추가 자격·참여 제한
+        raws.put("C1", base("C1", "청년 주거 정착 지원", "19", "39", "Y", "0057001",
+                "20260901 ~ 20260930, 20261101 ~ 20261130", "11680,11440,26350,27200")
+                .mrgSttsCd("0055002").jobCd("0013003,0013006").schoolCd("0049005,0049006,0049007")
+                .plcyMajorCd("0011005").sBizCd("0014002").earnCndSeCd("0043003")
+                .earnEtcCn("가구 기준중위소득 150% 이하")
+                .addAplyQlfcCndCn("공고일 기준 해당 지역에 6개월 이상 거주한 자")
+                .ptcpPrpTrgtCn("타 기관 동일 사업 참여자 및 휴학생 제외").build());
+        raws.put("C2", base("C2", "청년 학자금 이자 지원", "19", "39", "Y", "0057001",
+                "20261010 ~ 20261020", "41111,41113,11110,26230")
+                .mrgSttsCd("0055003").jobCd("0013001,0013003").schoolCd("0049007,0049008")
+                .plcyMajorCd("0011001,0011002,0011003").sBizCd("0014001").earnCndSeCd("0043003")
+                .earnEtcCn("학자금 지원구간 8구간 이하")
+                .addAplyQlfcCndCn("대학 졸업 후 2년 이내인 자")
+                .ptcpPrpTrgtCn("동일 목적의 정부 지원을 받는 자 제외").build());
+        // 불명확: 나이 충돌, 사전에 없는 지역, 기타·미등록 코드, 단위 불명 소득 금액, 기간 불명
+        raws.put("U1", base("U1", "청년 활동 지원", "0", "0", "Y", "0057001", null, "99999")
+                .jobCd("0013009").schoolCd("0049009").plcyMajorCd("0011010").sBizCd("0014009")
+                .earnCndSeCd("0043002").earnMaxAmt("3000").build());
+        raws.put("U2", base("U2", "청년 역량 강화", "19", "34", "N", null, null, null)
+                .mrgSttsCd("0055003,0055002")
+                .addAplyQlfcCndCn("세부 자격은 공고문 참조").build());
+
         Map<String, Template> templates = new LinkedHashMap<>();
-        for (Map.Entry<String, OpportunityFixtures.YouthPolicy> e : BenchmarkData.templatePolicies().entrySet()) {
-            writeTx.executeWithoutResult(s -> e.getValue().save(em));
+        for (Map.Entry<String, YouthPolicyRaw> e : raws.entrySet()) {
+            normalizationService.normalize(new NormalizationCommand(1L, e.getValue(), List.of(),
+                    "https://example.invalid/" + e.getKey(), LocalDateTime.of(2026, 10, 14, 9, 0)));
             Map<String, Object> row = jdbc.queryForMap(
                     "SELECT o.id, o.current_version_id FROM opportunities o "
                             + "JOIN opportunity_sources s ON s.opportunity_id = o.id WHERE s.external_id = ?", e.getKey());
@@ -519,6 +560,13 @@ class EligibilityBenchmarkTest {
                     ((Number) row.get("id")).longValue(), ((Number) row.get("current_version_id")).longValue()));
         }
         return templates;
+    }
+
+    private static YouthPolicyRaw.YouthPolicyRawBuilder base(String no, String name, String min, String max, String limit,
+                                                             String periodCode, String period, String zip) {
+        return YouthPolicyRaw.builder().plcyNo(no).plcyNm(name)
+                .sprtTrgtMinAge(min).sprtTrgtMaxAge(max).sprtTrgtAgeLmtYn(limit)
+                .aplyPrdSeCd(periodCode).aplyYmd(period).zipCd(zip).lclsfNm("일자리");
     }
 
     /** 템플릿이 의도한 복잡도 특성을 실제로 갖는지 정규화 결과로 확인 */

@@ -41,7 +41,7 @@ public final class EligibilityResultFixtures {
 
     /**
      * 어느 버전에도 붙지 않은 새 조건 묶음 (다른 묶음에 대한 결과 = 현재 버전 기준으로는 오래된 결과).
-     * 조건 묶음 엔티티는 생성자를 열지 않으므로(묶음은 data-service만 만든다) 네이티브 SQL로 넣는다
+     * 조건 묶음 엔티티는 생성자를 열지 않으므로(ConditionSetRepository.resolveId 전용) 네이티브 SQL로 넣는다
      */
     public static Long newConditionSet(EntityManager em) {
         String hash = (UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", "");
