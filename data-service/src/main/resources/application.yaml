@@ -11,7 +11,8 @@ spring:
       ddl-auto: update
     open-in-view: false
 
-  # 메인 서비스(backend)와 같은 DB를 쓴다 (DB 공유 1단계)
+  # 메인 서비스(backend)와 같은 DB를 쓴다 (DB 공유 1단계).
+  # main() 실행 시에는 database-boundary 프로필이 계정을 application_user로 고정한다 (application-database-boundary.yaml)
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/yon}
     driver-class-name: org.postgresql.Driver
@@ -41,7 +42,7 @@ yon:
   normalization:
     ingest:
       # 수집 원본 → 정규화 연동 (LISTEN/NOTIFY + 주기 폴링·대조). false면 LISTEN·스케줄 모두 끈다
-      # 메인 서비스에서 정규화를 걷어내기 전까지는 두 서비스 중 한쪽에서만 true로 둔다
+      # 메인 서비스에서 정규화를 걷어내기 전까지는 두 서비스 중 한쪽에서만 true로 둔다 (README 실행 플래그 표)
       enabled: ${YON_NORMALIZATION_INGEST_ENABLED:true}
       channel: raw_normalization_requested
       batch-size: 100
@@ -49,3 +50,6 @@ yon:
       transaction-size: 100
       poll-interval-ms: 60000
       reconcile-interval-ms: 3600000
+    # 기동 시 조건 묶음 백필. 메인 서비스와 동시에 켜면 묶음 생성이 경합하므로 한쪽에서만 true (README 실행 플래그 표)
+    condition-set-backfill:
+      enabled: ${YON_NORMALIZATION_CONDITION_SET_BACKFILL_ENABLED:true}
