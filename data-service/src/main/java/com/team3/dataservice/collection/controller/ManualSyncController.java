@@ -18,8 +18,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@RestController
 /** 수동 수집 내부 API. 메인 서비스 관리자 API가 내부 키로 호출한다 (InternalApiKeyFilter) */
+@RestController
 @RequestMapping("/internal/collection/syncs")
 @RequiredArgsConstructor
 public class ManualSyncController {

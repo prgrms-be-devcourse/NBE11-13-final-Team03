@@ -11,8 +11,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@RestController
 /** 원본 레코드 내부 API. 메인 서비스 관리자 API가 내부 키로 호출한다 (InternalApiKeyFilter) */
+@RestController
 @RequestMapping("/internal/collection/raw-records")
 @RequiredArgsConstructor
 public class RawRecordController {
