@@ -25,7 +25,6 @@ public interface SyncHistoryRepository extends JpaRepository<SyncHistory, Long> 
     boolean existsBySourceSourceCodeAndSyncTypeAndStartedAtGreaterThanEqualAndStartedAtLessThan(
             String sourceCode, String syncType, OffsetDateTime from, OffsetDateTime until);
     boolean existsBySourceIdAndStatusIn(Long sourceId, List<SyncJobStatus> statuses);
-    boolean existsBySourceSourceCodeAndStatusIn(String sourceCode, List<SyncJobStatus> statuses);
 
     List<SyncHistory> findBySyncTypeAndStatusIn(String syncType, List<SyncJobStatus> statuses);
 

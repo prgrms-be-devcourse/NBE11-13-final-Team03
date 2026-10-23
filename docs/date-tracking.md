@@ -35,6 +35,11 @@ Application(backend)에서 날짜 이벤트를 생성·저장한다. Notificatio
 
 FAILED 정규화는 종료 상태이므로 기다리지 않는다(재시도되면 새 PENDING 요청으로 다시 대기한다).
 부분 수집은 성공으로 간주하지 않는다.
+
+수집·정규화 테이블(sync_history, raw_normalization_request, raw_external_record, external_source)은
+data-service 소유다. backend는 수집 엔티티·Repository를 쓰지 않고 `DateTrackingReadiness`에서
+공유 DB를 SQL로 읽기만 한다. 조회가 실패하면(예: data-service가 아직 테이블을 만들지 않음) 준비되지 않은 것으로 보고
+마지노선을 기다린다. 서비스별로 DB를 분리하면 이 조회를 data-service API나 완료 이벤트로 바꾼다.
 마지노선이 되면 완료 여부와 무관하게 현재 DB의 정규화 데이터로 수행한다.
 폴링 방식이므로 수집 완료부터 실행까지 기본적으로 최대 한 폴링 간격 지연이 있다.
 과거 날짜의 복구는 당일 수집 완료를 기다리지 않는다.
