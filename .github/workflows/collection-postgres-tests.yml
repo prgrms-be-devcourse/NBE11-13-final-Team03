@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'contracts/proto/**'
       - 'backend/**'
       - 'database/**'
       - '.github/workflows/collection-postgres-tests.yml'

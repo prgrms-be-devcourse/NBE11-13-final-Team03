@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'contracts/proto/**'
       - 'data-service/**'
       - 'database/**'
       - '.github/workflows/data-service.yml'
