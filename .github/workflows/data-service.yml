@@ -1,0 +1,60 @@
+name: Data service
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'data-service/**'
+      - 'database/**'
+      - '.github/workflows/data-service.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+          cache-dependency-path: |
+            data-service/*.gradle
+            data-service/gradle/wrapper/gradle-wrapper.properties
+      # 정규화 요청 NOTIFY 트리거 테스트(Testcontainers PostgreSQL)가 Docker를 쓴다
+      - name: Require Docker
+        run: docker info
+      - name: Test and build data-service independently
+        working-directory: data-service
+        run: bash ./gradlew --no-daemon clean test bootJar
+      - name: Require executed PostgreSQL notification tests
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          results = pathlib.Path('data-service/build/test-results/test')
+          report = results / 'TEST-com.team3.dataservice.collection.service.NormalizationNotificationTriggerTests.xml'
+          suite = ET.parse(report).getroot()
+          assert int(suite.attrib['tests']) > 0, 'Notification tests did not run'
+          for key in ('skipped', 'failures', 'errors'):
+              assert int(suite.attrib[key]) == 0, f'Notification tests: {key}={suite.attrib[key]}'
+          print(f"PostgreSQL notification tests passed: {suite.attrib['tests']}")
+          suites = [ET.parse(path).getroot() for path in results.glob('TEST-*.xml')]
+          counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
+          print(f"data-service test totals: {counts}")
+          PY
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-service-test-reports
+          path: |
+            data-service/build/reports/tests/test
+            data-service/build/test-results/test

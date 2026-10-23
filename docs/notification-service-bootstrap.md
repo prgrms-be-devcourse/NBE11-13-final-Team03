@@ -27,13 +27,15 @@ Notification은 자체 진입점, 기본 Component Scan, Web/Validation/Security
 Scheduler 업무는 없고 Scheduling 인프라만 준비한다.
 
 JPA·DataSource·스키마·계정과 명시적 DDL/마이그레이션은 2단계에서 프로젝트별로 구성한다.
-Notification은 현재 DB 없이 기동한다. backend의 기존 DB 설정과 동작은 유지한다.
+1단계 시점에는 Notification이 DB 없이 기동했다. 2단계 이후에는 각 서버가
+자기 계정·스키마를 사용한다. 현재 실행·이전 절차는 [DB 경계 문서](database-boundaries.md)를 따른다.
 Outbox, 메시지 계약/Handler, HTTP/SQS, FCM, 업무 Entity는 해당 후속 단계에서 구현한다.
 
 ## 환경변수
 
 backend의 기존 .env 항목과 DB 연결을 사용한다. Spring Boot 4용 dotenv 개발 전용 의존성만 재사용한다.
-Notification은 현재 필수 외부 비밀값이 없다. 필요한 경우 notification-service/.env를 사용한다.
+2단계 이후 DB 비밀번호는 서버별 필수값이다. backend/.env에는 APPLICATION_DB_PASSWORD,
+notification-service/.env에는 NOTIFICATION_DB_PASSWORD를 둔다. 자세한 설정은 DB 경계 문서를 따른다.
 developmentOnly dotenv는 bootRun 개발 실행에 사용하고 기본 bootJar에서는 제외한다.
 운영 JAR에는 환경변수로 설정을 주입한다. .env와 실제 키는 커밋하거나 이미지에 복사하지 않는다.
 
