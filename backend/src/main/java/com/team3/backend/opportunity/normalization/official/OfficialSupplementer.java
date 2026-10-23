@@ -2,9 +2,9 @@ package com.team3.backend.opportunity.normalization.official;
 
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.AgeNormalization;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 

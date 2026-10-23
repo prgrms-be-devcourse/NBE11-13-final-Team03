@@ -1,4 +1,4 @@
-package com.team3.backend.opportunity.dto;
+package com.team3.backend.opportunity.normalization.dto;
 
 import com.team3.backend.opportunity.normalization.official.OfficialDocument;
 

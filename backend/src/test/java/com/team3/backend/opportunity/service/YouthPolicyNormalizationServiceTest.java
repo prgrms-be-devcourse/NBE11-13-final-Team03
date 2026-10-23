@@ -2,9 +2,9 @@ package com.team3.backend.opportunity.service;
 
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.*;
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.NormalizationResult;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.AgeNormalizer;
 import com.team3.backend.opportunity.normalization.ApplicationPeriodNormalizer;
 import com.team3.backend.opportunity.normalization.CodeConditionNormalizer;
