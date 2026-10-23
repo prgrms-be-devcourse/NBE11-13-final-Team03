@@ -11,8 +11,8 @@ import java.time.LocalDateTime;
  * 같은 묶음이면 같은 사용자에게 판정 결과가 같으므로, 판정은 묶음마다 한 번만 하면 된다.
  * 실데이터(2026-10-21): 직업훈련 137,820 버전 → 묶음 3, 청년정책 3,416 → 1,669 (지역 포함).
  *
- * 키(conditionHash)는 ConditionSetKey가 만든 SHA-256이다. 사용자와 무관하며 생성 후 바뀌지 않는다.
- * 행은 ConditionSetRepository.resolveId만 만든다 (네이티브 INSERT ... ON CONFLICT DO NOTHING). 그래서 생성자를 열지 않는다.
+ * 키(conditionHash)는 data-service의 ConditionSetKey가 만든 SHA-256이다. 사용자와 무관하며 생성 후 바뀌지 않는다.
+ * 행은 data-service(정규화·백필)만 만든다. 메인 서비스는 읽기만 하므로 생성자를 열지 않는다.
  */
 @Entity
 @Immutable
