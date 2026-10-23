@@ -7,4 +7,3 @@ public record SyncStartResponse(
         String status,
         String message
 ) {}
-

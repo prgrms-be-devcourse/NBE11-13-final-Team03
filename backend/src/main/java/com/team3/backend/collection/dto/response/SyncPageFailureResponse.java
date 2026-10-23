@@ -6,4 +6,3 @@ public record SyncPageFailureResponse(
         String errorMessage,
         boolean retryable
 ) {}
-
