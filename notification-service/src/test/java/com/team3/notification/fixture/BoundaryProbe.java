@@ -6,7 +6,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-/** Test-only persistence fixture; no Notification business model is introduced yet. */
+/** Test-only persistence fixture; never included in the runtime JAR. */
 @Entity
 @Table(name = "boundary_probe")
 public class BoundaryProbe {

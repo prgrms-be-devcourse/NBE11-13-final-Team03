@@ -24,6 +24,23 @@ class DateNotificationMessageFactoryTest {
             .normalizationVersion("test").normalizedSnapshot(Map.of()).build();
 
     @Test
+    void producerMatchesSharedVersionOneContract() throws Exception {
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var resource = new org.springframework.core.io.ClassPathResource("contracts/notification-requested-v1.json");
+        var expected = mapper.readTree(resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+        var event = deadline();
+        ReflectionTestUtils.setField(event, "eventId", UUID.fromString(expected.get("sourceEventId").asText()));
+        ReflectionTestUtils.setField(event, "correlationId", UUID.fromString(expected.get("correlationId").asText()));
+        var prepared = factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(3))), NOW)
+                .orElseThrow();
+        var outbox = factory.create(event, 7L, prepared, NOW);
+        var actual = new LinkedHashMap<>(outbox.getPayload());
+        // Only the generated transport identity differs from the example.
+        actual.put("messageId", expected.get("messageId").asText());
+        assertThat(mapper.readTree(mapper.writeValueAsString(actual))).isEqualTo(expected);
+    }
+
+    @Test
     void deadlineMessageIsCompleteAndUsesExclusiveKstMidnightExpiry() {
         var event = deadline();
         var prepared = factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(3))), NOW)
