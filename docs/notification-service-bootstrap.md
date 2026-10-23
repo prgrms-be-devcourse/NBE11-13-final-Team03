@@ -31,7 +31,8 @@ JPA·DataSource·스키마·계정과 명시적 DDL/마이그레이션은 2단�
 자기 계정·스키마를 사용한다. 현재 실행·이전 절차는 [DB 경계 문서](database-boundaries.md)를 따른다.
 Outbox, 메시지 계약/Handler, HTTP/SQS, FCM, 업무 Entity는 해당 후속 단계에서 구현한다.
 5단계의 수신 Handler·인앱 저장 및 추가 DDL은 [Notification 수신 문서](notification-inbox.md)를 따른다.
-HTTP/SQS와 발송 기능은 아직 연결하지 않는다.
+6단계의 HTTP 수신·전용 인증·Publisher 연결은 [HTTP Publisher 문서](notification-http-publisher.md)를 따른다.
+기본 비활성 상태에서는 모든 요청 거부를 유지하며 SQS·FCM은 후속 단계다.
 
 ## 환경변수
 

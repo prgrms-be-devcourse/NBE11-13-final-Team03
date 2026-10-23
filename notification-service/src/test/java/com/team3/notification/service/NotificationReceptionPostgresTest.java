@@ -6,6 +6,7 @@ import com.team3.notification.fixture.NotificationMessages;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -21,6 +22,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
+import java.net.http.*;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.*;
@@ -35,7 +38,9 @@ import static com.team3.notification.domain.entity.ReceptionStatus.*;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(classes = {NotificationApplication.class, NotificationReceptionPostgresTest.FixedClockConfig.class},
         useMainMethod = SpringBootTest.UseMainMethod.ALWAYS,
-        properties = "app.scheduling.enabled=false")
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = {"app.scheduling.enabled=false", "NOTIFICATION_RECEIVER_ENABLED=true",
+                "NOTIFICATION_INTERNAL_API_KEY=test-notification-key"})
 class NotificationReceptionPostgresTest {
     private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");
     private static final String PASSWORD = "inbox-test-password";
@@ -88,6 +93,54 @@ class NotificationReceptionPostgresTest {
     @Autowired ConsumedMessageRepository consumed;
     @Autowired JdbcTemplate jdbc;
     @Autowired TestClock clock;
+    @Value("${local.server.port}") int port;
+
+    @Test
+    void realHttpAcknowledgesCommittedReceiptAndReplayDoesNotDuplicateNotification() throws Exception {
+        try (var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(1)).build()) {
+            String json = NotificationMessages.json(Map.of());
+            var first = post(client, json);
+            assertThat(first.statusCode()).isEqualTo(200);
+            var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+            String expected = new ClassPathResource("contracts/notification-receipt-v1.json")
+                    .getContentAsString(StandardCharsets.UTF_8);
+            assertThat(mapper.readTree(first.body())).isEqualTo(mapper.readTree(expected));
+            // Separate repository transactions observe the data after HTTP returns.
+            assertThat(notifications.count()).isEqualTo(1);
+            assertThat(consumed.count()).isEqualTo(1);
+            var replay = post(client, json);
+            assertThat(replay.statusCode()).isEqualTo(200);
+            assertThat(mapper.readTree(replay.body()).path("duplicateMessage").asBoolean()).isTrue();
+            assertThat(notifications.count()).isEqualTo(1);
+            assertThat(consumed.count()).isEqualTo(1);
+            assertThat(post(client, NotificationMessages.json(Map.of("title", "다른 본문"))).statusCode()).isEqualTo(409);
+            assertThat(post(client, NotificationMessages.json(Map.of("schemaVersion", 2))).statusCode()).isEqualTo(400);
+        }
+    }
+
+    @Test
+    void realHttpStorageFailureReturns503AfterAtomicRollbackAndCanBeRetried() throws Exception {
+        try (var client = HttpClient.newHttpClient()) {
+            jdbc.execute("ALTER TABLE notification.consumed_messages ADD CONSTRAINT reject_http_consume CHECK (user_id <> 7)");
+            try {
+                assertThat(post(client, NotificationMessages.json(Map.of())).statusCode()).isEqualTo(503);
+                assertThat(notifications.count()).isZero();
+                assertThat(consumed.count()).isZero();
+            } finally {
+                jdbc.execute("ALTER TABLE notification.consumed_messages DROP CONSTRAINT reject_http_consume");
+            }
+            assertThat(post(client, NotificationMessages.json(Map.of())).statusCode()).isEqualTo(200);
+            assertThat(notifications.count()).isEqualTo(1);
+            assertThat(consumed.count()).isEqualTo(1);
+        }
+    }
+
+    private HttpResponse<String> post(HttpClient client, String json) throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/internal/notification-messages"))
+                .timeout(Duration.ofSeconds(5)).header("Content-Type", "application/json")
+                .header("X-INTERNAL-KEY", "test-notification-key")
+                .POST(HttpRequest.BodyPublishers.ofString(json)).build(), HttpResponse.BodyHandlers.ofString());
+    }
 
     @BeforeEach
     void resetDisposableContainerData() {

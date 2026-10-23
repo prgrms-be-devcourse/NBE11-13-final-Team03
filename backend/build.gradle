@@ -24,7 +24,7 @@ ext {
 
 
 dependencies {
-    // 수집 관리 API를 DataService 내부 API로 전달 (알림 서비스 연동과 같은 OpenFeign)
+    // 내부 API 호출(DataService 수집 관리, Notification 메시지 전달)에 쓰는 OpenFeign
     implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-security'

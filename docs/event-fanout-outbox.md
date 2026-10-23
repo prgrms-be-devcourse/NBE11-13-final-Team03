@@ -14,6 +14,7 @@ Notification 프로젝트·Security·기존 수집/정규화·판정 계산은 �
 HTTP/Feign/SQS Publisher·Notification Handler·FCM·탈퇴 연동은 추가하지 않는다.
 Outbox의 발행 상태·lease 필드는 목표 모델대로 준비하되 발행 상태 전이/재시도 코드는 후속 단계에서 추가한다.
 이벤트 Worker의 재시도와 향후 Publisher의 재시도를 혼동하지 않는다.
+6단계에 추가한 발행 경로와 별도 설정은 [HTTP Publisher 문서](notification-http-publisher.md)를 따른다.
 
 ## 점유·순회·트랜잭션
 
