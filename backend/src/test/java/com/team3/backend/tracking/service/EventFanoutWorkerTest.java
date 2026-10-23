@@ -23,6 +23,15 @@ class EventFanoutWorkerTest {
     }
 
     @Test
+    void recoversExhaustedFanoutsBeforeSelectingCandidates() {
+        when(coordinator.candidates()).thenReturn(List.of());
+        worker.runOnce();
+        var order = inOrder(coordinator);
+        order.verify(coordinator).recoverExhausted();
+        order.verify(coordinator).candidates();
+    }
+
+    @Test
     void recordsFailureOutsideRolledBackBatchAndContinuesOtherEvents() {
         when(coordinator.candidates()).thenReturn(List.of(1L, 2L));
         var first = new EventFanoutExecution(1L, UUID.randomUUID());

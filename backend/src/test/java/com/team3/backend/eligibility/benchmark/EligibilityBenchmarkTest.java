@@ -1,5 +1,8 @@
 package com.team3.backend.eligibility.benchmark;
 
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 import com.team3.backend.eligibility.engine.EligibilityProfileInput;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.api.EligibilityProvider;
@@ -25,8 +28,8 @@ import com.team3.backend.opportunity.dto.ApplicationWindowRow;
 import com.team3.backend.opportunity.dto.ConditionRow;
 import com.team3.backend.opportunity.dto.OpportunityVersionRef;
 import com.team3.backend.opportunity.dto.RegionCodeRow;
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.*;
 import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
 import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;

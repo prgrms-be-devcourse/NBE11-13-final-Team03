@@ -1,5 +1,10 @@
 package com.team3.backend.tracking.domain.entity;
 
+/**
+ * 이벤트 Worker(EventFanoutBatch)는 DateNotificationMessageFactory.supports에 있는 유형만 사용자별 Outbox로 만든다.
+ * 그 밖의 유형은 생성되는 즉시 Worker가 UNSUPPORTED_EVENT_TYPE으로 FAILED 처리하므로,
+ * 새 유형을 생성하기 전에 supports·prepare와 Notification 계약 표본을 함께 추가한다.
+ */
 public enum OpportunityEventType {
 
     /**

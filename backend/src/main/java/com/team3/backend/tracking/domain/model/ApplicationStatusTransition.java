@@ -1,6 +1,6 @@
 package com.team3.backend.tracking.domain.model;
 
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.tracking.domain.entity.OpportunityEventType;
 
 import java.time.LocalDate;

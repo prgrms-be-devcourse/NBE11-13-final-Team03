@@ -4,7 +4,7 @@ import com.team3.backend.eligibility.api.dto.ConditionResult;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshot;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.opportunity.domain.entity.*;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;

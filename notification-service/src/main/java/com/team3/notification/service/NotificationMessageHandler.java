@@ -6,6 +6,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import java.util.Set;
 
+/**
+ * 알림 요청 메시지를 검증하고 인앱 알림과 소비 기록을 저장한다.
+ * 아직 사용자 수신 설정과 탈퇴(Tombstone) 차단이 없다. IN_APP은 기본 허용, PUSH는 CHANNEL_DISABLED로 기록만 한다.
+ * 이 Handler를 운영 수신 경로(HTTP·SQS)에 연결해 실제 발송을 열기 전에 두 기능을 먼저 추가한다
+ * (docs/notification-inbox.md).
+ */
 @Service
 public class NotificationMessageHandler {
     private static final Set<String> DUPLICATE_CONSTRAINTS =

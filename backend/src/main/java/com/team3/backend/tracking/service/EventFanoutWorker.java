@@ -13,6 +13,7 @@ public class EventFanoutWorker {
 
     /** No enclosing transaction: successful user pages remain durable across later failures. */
     public void runOnce() {
+        coordinator.recoverExhausted();
         for (Long eventId : coordinator.candidates()) {
             var execution = coordinator.claim(eventId);
             if (execution.isEmpty()) continue;

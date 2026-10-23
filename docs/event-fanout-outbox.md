@@ -55,6 +55,9 @@ FAILED 자동 재개나 운영자용 재처리 API는 추가하지 않는다.
 - sourceEventId/causationId는 이벤트 UUID, opportunityVersionId는 이벤트 생성 근거 버전이다.
   현재 정책으로 날짜 의미를 재검증하되 근거 버전을 몰래 바꾸지 않는다.
 - 링크는 확정 메시지 예제의 /opportunities/{id}, 문구는 해당 예제 기반의 초기 표현을 사용한다.
+  문구나 필드를 바꿀 때는 Notification 수신 계약 표본(#38에서 추가하는 contracts/)도 함께 갱신한다.
+- Worker는 DateNotificationMessageFactory.supports에 있는 유형(APPLICATION_OPENED·APPLICATION_CLOSED·DEADLINE_SOON)만
+  처리하고, 그 밖의 유형은 UNSUPPORTED_EVENT_TYPE으로 즉시 FAILED 처리한다.
 - Notification은 추후 이 메시지만으로 처리하며 Application Entity/DB를 조회하지 않는다.
 
 요청 채널은 시작·마감 임박 IN_APP/PUSH, 마감 IN_APP이다.
@@ -70,8 +73,12 @@ FAILED 자동 재개나 운영자용 재처리 API는 추가하지 않는다.
 원래 억제된 이벤트나 현재 조건 불일치/만료는 Outbox 없이 완료하고 fanoutSkipReason을 기록한다.
 
 - DEADLINE_SOON: 해당 마감일 다음 날 KST 00:00을 배타적 만료 시각으로 사용
-- APPLICATION_OPENED: 발생 후 3일과 해당 신청기간 마감 중 빠른 시각
-- APPLICATION_CLOSED: 발생 후 3일
+- APPLICATION_OPENED: 이벤트 생성(createdAt) 후 3일과 해당 신청기간 마감 중 빠른 시각
+- APPLICATION_CLOSED: 이벤트 생성(createdAt) 후 3일
+
+OPENED·CLOSED의 3일은 스캔 대상 날짜(occurredAt)가 아니라 생성 시각부터 센다.
+날짜 추적은 최근 recovery-days(기본 3일)까지 놓친 날짜를 복구하는데, occurredAt 기준이면
+금요일 스캔을 월요일에 복구할 때 이미 만료돼 복구한 의미가 없어지기 때문이다.
 
 동일 시작일의 복수 열린 기간은 일부 기간 종료를 정책 전체 마감으로 간주하지 않는다.
 이 경우 마지막 마감을 사용하며 종료일 미정 기간이 있으면 3일 만료를 사용한다.
@@ -110,8 +117,15 @@ database/scripts/event-fanout-outbox.sql을 application_user로 한 번 실행�
 이 SQL은 재실행 시 실패하며 트랜잭션 전체를 롤백한다.
 구조가 다른 기존 Outbox를 자동 합치거나 덮어쓰지 않는다.
 배포 전 백업·잠금·중단 및 복구 절차를 검토한다.
-자동 Worker를 꺼도 JPA는 새 컬럼/테이블을 검증하므로 서버 실행 전 DDL 적용이 필요하다.
-운영/기존 로컬 DB에서 ddl-auto=create/update로 우회하지 않는다.
+backend는 ddl-auto=update이므로([DB 경계 문서](database-boundaries.md)의 ddl-auto 정책) 이 SQL을
+**새 버전 서버를 기동하기 전에** 적용한다. 자동 Worker를 꺼 두어도 기동 시 update가 먼저 실행되기 때문이다.
+
+- 이벤트가 이미 있는 DB에서 update가 먼저 실행되면 기본값 없이 `last_user_id bigint NOT NULL` 추가를 시도해 실패한다.
+- 이벤트가 없는 DB에서는 update가 컬럼을 만들지만 `DEFAULT 0`과 `ck_event_last_user_nonnegative` CHECK가 빠지고,
+  이후 이 SQL은 컬럼이 이미 있어 실패한다.
+
+Application 테이블이 하나도 없는 새 로컬 DB는 첫 기동의 update가 테이블을 만들므로 SQL을 실행하지 않는다.
+운영/기존 로컬 DB에서 ddl-auto=create로 재초기화하지 않는다.
 실제 DB 적용과 환경변수 변경은 코드 구현 작업에서 수행하지 않는다.
 
 ## 검증
@@ -119,7 +133,7 @@ database/scripts/event-fanout-outbox.sql을 application_user로 한 번 실행�
 Docker를 켜고 backend에서 테스트한다. 실제 로컬/운영 DB가 아닌 폐기 PostgreSQL 컨테이너를 사용한다.
 
 ```bash
-./gradlew test --rerun-tasks +  --tests 'com.team3.backend.tracking.service.DateNotificationMessageFactoryTest' +  --tests 'com.team3.backend.tracking.service.EventFanout*'
+./gradlew test --rerun-tasks --tests 'com.team3.backend.tracking.service.DateNotificationMessageFactoryTest' --tests 'com.team3.backend.tracking.service.EventFanout*'
 ```
 
 검증 대상:
