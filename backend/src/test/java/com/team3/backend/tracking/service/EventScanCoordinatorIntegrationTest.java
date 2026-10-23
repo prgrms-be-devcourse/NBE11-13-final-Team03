@@ -251,7 +251,7 @@ class EventScanCoordinatorIntegrationTest {
     static class ScanConfiguration {
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
         @Bean DateTrackingProperties properties() {
-            return new DateTrackingProperties(false, LocalTime.of(13, 0), Duration.ofMinutes(30), 1, 7, null);
+            return new DateTrackingProperties(false, LocalTime.of(13, 0), Duration.ofMinutes(30), 1, 7, null, 3);
         }
     }
 
