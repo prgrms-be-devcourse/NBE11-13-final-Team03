@@ -19,8 +19,6 @@ import static com.team3.backend.tracking.config.DateTrackingConfig.KST;
 @Service
 @RequiredArgsConstructor
 public class DateTrackingService {
-    private static final int MAX_FAILURE_REASON_LENGTH = 500;
-
     private final DateTrackingReadiness readiness;
     private final EventScanHistoryRepository histories;
     private final EventScanCoordinator coordinator;
@@ -89,14 +87,8 @@ public class DateTrackingService {
             }
         } catch (RuntimeException exception) {
             log.error("Date tracking scan failed: scanDate={}, afterId={}", execution.scanDate(), afterId, exception);
-            coordinator.fail(execution, clock.instant(), failureReason(exception));
+            coordinator.fail(execution, clock.instant(), FailureReasons.of(exception));
             return exception;
         }
-    }
-
-    private static String failureReason(RuntimeException exception) {
-        String reason = exception.getMessage() == null ? exception.getClass().getSimpleName()
-                : exception.getClass().getSimpleName() + ": " + exception.getMessage();
-        return reason.length() <= MAX_FAILURE_REASON_LENGTH ? reason : reason.substring(0, MAX_FAILURE_REASON_LENGTH);
     }
 }

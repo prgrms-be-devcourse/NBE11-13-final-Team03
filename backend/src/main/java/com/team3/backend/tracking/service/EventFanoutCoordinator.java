@@ -49,7 +49,7 @@ public class EventFanoutCoordinator {
     public boolean retry(EventFanoutExecution execution, RuntimeException failure) {
         var event = events.lockForFanout(execution.eventId()).orElseThrow();
         if (!event.ownedBy(execution.leaseToken())) return false;
-        event.retryFanout(clock.instant(), properties.retryDelay(), failure.getClass().getSimpleName(),
+        event.retryFanout(clock.instant(), properties.retryDelay(), FailureReasons.of(failure),
                 properties.maxAttempts());
         return true;
     }

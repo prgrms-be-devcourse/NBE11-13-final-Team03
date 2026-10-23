@@ -73,8 +73,12 @@ FAILED 자동 재개나 운영자용 재처리 API는 추가하지 않는다.
 원래 억제된 이벤트나 현재 조건 불일치/만료는 Outbox 없이 완료하고 fanoutSkipReason을 기록한다.
 
 - DEADLINE_SOON: 해당 마감일 다음 날 KST 00:00을 배타적 만료 시각으로 사용
-- APPLICATION_OPENED: 발생 후 3일과 해당 신청기간 마감 중 빠른 시각
-- APPLICATION_CLOSED: 발생 후 3일
+- APPLICATION_OPENED: 이벤트 생성(createdAt) 후 3일과 해당 신청기간 마감 중 빠른 시각
+- APPLICATION_CLOSED: 이벤트 생성(createdAt) 후 3일
+
+OPENED·CLOSED의 3일은 스캔 대상 날짜(occurredAt)가 아니라 생성 시각부터 센다.
+날짜 추적은 최근 recovery-days(기본 3일)까지 놓친 날짜를 복구하는데, occurredAt 기준이면
+금요일 스캔을 월요일에 복구할 때 이미 만료돼 복구한 의미가 없어지기 때문이다.
 
 동일 시작일의 복수 열린 기간은 일부 기간 종료를 정책 전체 마감으로 간주하지 않는다.
 이 경우 마지막 마감을 사용하며 종료일 미정 기간이 있으면 3일 만료를 사용한다.
@@ -129,7 +133,7 @@ Application 테이블이 하나도 없는 새 로컬 DB는 첫 기동의 update�
 Docker를 켜고 backend에서 테스트한다. 실제 로컬/운영 DB가 아닌 폐기 PostgreSQL 컨테이너를 사용한다.
 
 ```bash
-./gradlew test --rerun-tasks +  --tests 'com.team3.backend.tracking.service.DateNotificationMessageFactoryTest' +  --tests 'com.team3.backend.tracking.service.EventFanout*'
+./gradlew test --rerun-tasks --tests 'com.team3.backend.tracking.service.DateNotificationMessageFactoryTest' --tests 'com.team3.backend.tracking.service.EventFanout*'
 ```
 
 검증 대상:

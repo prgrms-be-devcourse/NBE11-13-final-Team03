@@ -62,6 +62,9 @@ public class EventFanoutBatch {
             return true;
         }
         var saved = preferences.lockSavedForNotification(event.getOpportunity().getId(), userIds);
+        // One lookup per page; the UNIQUE(dedup_key) constraint remains the actual guard.
+        var existing = saved.isEmpty() ? java.util.Set.<String>of() : outboxes.findExistingDedupKeys(saved.stream()
+                .map(p -> OutboxEvent.notificationDedupKey(event.getEventId(), p.getUser().getId())).toList());
         for (int i = 0; i < saved.size(); i++) {
             var now = clock.instant();
             if (!now.isBefore(prepared.orElseThrow().expiresAt())) {
@@ -74,7 +77,7 @@ public class EventFanoutBatch {
             }
             Long userId = saved.get(i).getUser().getId();
             String key = OutboxEvent.notificationDedupKey(event.getEventId(), userId);
-            if (!outboxes.existsByDedupKey(key)) {
+            if (!existing.contains(key)) {
                 outboxes.save(messages.create(event, userId, prepared.orElseThrow(), now));
             }
         }
