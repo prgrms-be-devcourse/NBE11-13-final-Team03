@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * 메인 서버에 남는 패키지와 공용 패키지는 수집·정규화 쪽 패키지를 import하지 않는다.
  * 두 쪽은 공유 DB(공고·조건·조건 묶음 테이블)로만 연결되고, 코드 의존은 공용 패키지(opportunity.domain 등)로만 한다.
- * opportunity.dto는 아직 두 쪽 DTO가 섞여 있어 검사에서 뺀다 (분리 때 나눈다).
+ * 공용 opportunity.dto에는 조회용 행·참조 DTO만 두고, 정규화 입출력 DTO는 opportunity.normalization.dto에 둔다.
  */
 class IngestBoundaryTest {
 
@@ -31,7 +31,7 @@ class IngestBoundaryTest {
     /** 메인 서버에 남는 패키지와 공용 패키지 */
     private static final List<String> MAIN_AND_SHARED = List.of(
             "auth", "eligibility", "search", "interest", "preference", "user", "config", "global",
-            "opportunity/domain", "region/directory", "region/domain");
+            "opportunity/domain", "opportunity/dto", "region/directory", "region/domain");
 
     @Test
     void mainAndSharedPackagesDoNotImportIngestPackages() throws IOException {
