@@ -21,9 +21,7 @@ import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.opportunity.domain.repository.OpportunitySourceRepository;
-import com.team3.backend.opportunity.normalization.dto.TrainingCourseRaw;
-import com.team3.backend.opportunity.normalization.dto.TrainingNormalizationCommand;
-import com.team3.backend.opportunity.service.TrainingCourseNormalizationService;
+import com.team3.backend.opportunity.support.OpportunityFixtures;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
@@ -99,9 +97,6 @@ class OpportunitySearchPostgresTest {
 
     @Autowired
     private RegionDirectory regionDirectory;
-
-    @Autowired
-    private TrainingCourseNormalizationService trainingCourseNormalizationService;
 
     @Autowired
     private OpportunitySourceRepository opportunitySourceRepository;
@@ -231,18 +226,14 @@ class OpportunitySearchPostgresTest {
                 .andExpect(jsonPath("$.totalElements").value(1));
     }
 
+    /** NCS 분류(대분류 → 2차 분류, 중분류 → 3차 분류)로 직업훈련을 찾는다. NCS 코드 → 분류 이름 변환은 data-service 정규화가 한다 */
     @Test
-    void normalizedNcsCategoriesArePersistedAndSearchable() throws Exception {
+    void ncsCategoriesAreSearchable() throws Exception {
         Long sourceId = 990002L;
-        TrainingCourseRaw informationTechnology = TrainingCourseRaw.builder()
-                .trprId("PG-NCS-IT").trprDegr("1").title("PG NCS integration IT")
-                .ncsCd("20010202").build();
-        TrainingCourseRaw communicationTechnology = TrainingCourseRaw.builder()
-                .trprId("PG-NCS-COMM").trprDegr("1").title("PG NCS integration communication")
-                .ncsCd("20020101").build();
-
-        assertEquals(2, trainingCourseNormalizationService.normalizePage(new TrainingNormalizationCommand(
-                sourceId, List.of(informationTechnology, communicationTechnology), LocalDateTime.now())).created());
+        OpportunityFixtures.training("PG-NCS-IT", 1, "PG NCS integration IT").source(sourceId)
+                .ncs("20010202", "정보통신", "정보기술").save(entityManager);
+        OpportunityFixtures.training("PG-NCS-COMM", 1, "PG NCS integration communication").source(sourceId)
+                .ncs("20020101", "정보통신", "통신기술").save(entityManager);
         entityManager.flush();
         entityManager.clear();
 

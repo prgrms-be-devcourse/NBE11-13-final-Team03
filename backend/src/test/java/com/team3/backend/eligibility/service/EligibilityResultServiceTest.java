@@ -6,14 +6,7 @@ import com.team3.backend.eligibility.domain.repository.EligibilityResultReposito
 import com.team3.backend.eligibility.domain.repository.EligibilityResultUpsertRepository;
 import com.team3.backend.eligibility.dto.OpportunityEligibility;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
-import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
-import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
-import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
-import com.team3.backend.opportunity.normalization.*;
-import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
-import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;
-import com.team3.backend.opportunity.normalization.official.PeriodEvidenceExtractor;
-import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
+import com.team3.backend.opportunity.support.OpportunityFixtures;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
@@ -54,9 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
 @Import({EligibilityResultService.class, EligibilityBatchRefresher.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
-        YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
-        RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
-        YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+        RegionDirectory.class})
 class EligibilityResultServiceTest {
 
     private static final OffsetDateTime NOW = OffsetDateTime.parse("2026-10-15T10:00:00+09:00");
@@ -68,8 +59,6 @@ class EligibilityResultServiceTest {
     private EligibilityResultRepository resultRepository;
     @Autowired
     private EligibilityBatchRefresher batchRefresher;
-    @Autowired
-    private YouthPolicyNormalizationService normalizationService;
     @Autowired
     private RegionDirectory regionDirectory;
     @Autowired
@@ -439,18 +428,19 @@ class EligibilityResultServiceTest {
         return normalizePolicy(plcyNo, "청년 월세 지원", zipCd, maxAge);
     }
 
-    private Long normalizePolicy(String plcyNo, String title, String zipCd, String maxAge) {
-        YouthPolicyRaw raw = YouthPolicyRaw.builder()
-                .plcyNo(plcyNo).plcyNm(title)
-                .sprtTrgtMinAge("19").sprtTrgtMaxAge(maxAge).sprtTrgtAgeLmtYn("Y")
-                .aplyPrdSeCd("0057001").aplyYmd("20261001 ~ 20261031")
-                .zipCd(zipCd)
-                .build();
-        NormalizationResult result = normalizationService.normalize(new NormalizationCommand(1L, raw, List.of(),
-                "https://www.youthcenter.go.kr/policy/" + plcyNo, LocalDateTime.of(2026, 10, 14, 9, 0)));
+    /**
+     * 정규화된 정책: 19세~maxAge, 시·군·구 하나(5자리 코드) 거주, 2026-10-01 ~ 2026-10-31 신청, 그 밖의 조건 정보 없음.
+     * 같은 정책번호로 다시 저장하면 정규화처럼 내용이 바뀐 경우에만 새 버전을 만든다.
+     */
+    private Long normalizePolicy(String plcyNo, String title, String sigunguCode, String maxAge) {
+        Long id = OpportunityFixtures.youthPolicy(plcyNo, title)
+                .age(19, Integer.parseInt(maxAge))
+                .residence(sigunguCode + "00000")
+                .fixedPeriod(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31))
+                .save(em).opportunityId();
         em.flush();
         em.clear();
-        return result.opportunityId();
+        return id;
     }
 
     private void persistProfile(Region residence) {

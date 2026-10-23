@@ -50,6 +50,3 @@ app:
 yon:
   data-service:
     internal-api-key: test-data-service-internal-api-key
-  normalization:
-    ingest:
-      enabled: false
