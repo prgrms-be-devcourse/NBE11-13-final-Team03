@@ -32,6 +32,12 @@ public class OutboxPublicationWorker {
             try {
                 publisher.publish(publication);
             } catch (NotificationPublicationException failure) {
+                if (failure.isConfiguration()) {
+                    store.deferred(publication, failure.getMessage());
+                    log.error("Notification publisher configuration error; stopping this batch: messageId={}, code={}",
+                            publication.messageId(), failure.getMessage());
+                    return;
+                }
                 store.failed(publication, failure.getMessage(), failure.isRetryable());
                 log.warn("Notification publication failed: messageId={}, code={}", publication.messageId(), failure.getMessage());
                 continue;

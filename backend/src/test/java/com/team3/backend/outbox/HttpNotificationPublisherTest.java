@@ -100,12 +100,15 @@ class HttpNotificationPublisherTest {
     @Test
     void classifiesHttpFailuresWithoutFeignRetriesOrCredentialLeakage() {
         withPublisher(publisher -> {
-            for (int code : new int[]{400, 401, 403, 409, 429, 500, 503, 302}) {
+            for (int code : new int[]{400, 401, 403, 404, 409, 429, 500, 503, 302}) {
                 status.set(code);
                 int before = calls.get();
+                // Wrong key, URL or route: a configuration error, not a per-message failure.
+                boolean configuration = code == 401 || code == 403 || code == 404 || code == 302;
                 assertThatThrownBy(() -> publisher.publish(publication()))
                         .isInstanceOfSatisfying(NotificationPublicationException.class, failure -> {
-                            assertThat(failure.isRetryable()).isEqualTo(code == 429 || code >= 500);
+                            assertThat(failure.isConfiguration()).isEqualTo(configuration);
+                            assertThat(failure.isRetryable()).isEqualTo(configuration || code == 429 || code >= 500);
                             assertThat(failure.getMessage()).isEqualTo("HTTP_" + code)
                                     .doesNotContain("test-notification-key");
                             assertThat(failure.getCause()).isNull();
