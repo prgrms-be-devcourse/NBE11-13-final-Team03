@@ -1,5 +1,8 @@
 # Notification 수신·소비 기록·인앱 저장 — 개정안 5단계
 
+아래는 5단계 구현 범위다. 6단계 HTTP 연결과 활성화·오류 계약은
+[HTTP Publisher 문서](notification-http-publisher.md)를 따른다. HTTP 수신의 기본값은 여전히 비활성이다.
+
 ## 범위
 
 Notification의 독립 프로젝트 안에 `NotificationMessageHandler`를 추가한다.
