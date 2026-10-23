@@ -53,6 +53,13 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
+// Administrator SQL is test input, never an application startup resource.
+tasks.named('processTestResources') {
+    from('../database/scripts') {
+        into 'db-boundary'
+    }
+}
+
 tasks.named('bootJar') {
     archiveFileName = 'app.jar'
 }
