@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** 수집 관리자 API가 권한을 확인하고 DataService 응답을 그대로 전달하는지 확인한다 (DataService는 목) */
+/** 수집 관리자 API가 권한을 확인하고 DataService 응답을 전달하는지, 설정 오류는 503으로 바꾸는지 확인한다 (DataService는 목) */
 @ActiveProfiles("test")
 @SpringBootTest(properties = "app.scheduling.enabled=false")
 @AutoConfigureMockMvc
@@ -98,6 +98,48 @@ class CollectionAdminControllerTest {
         mvc.perform(get("/api/admin/collection/raw-records/1"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("COLLECTION_008"));
+    }
+
+    @Test
+    @WithMockUser(authorities = "ADMIN")
+    void internalKeyRejectionIsServiceUnavailableNotAuthError() throws Exception {
+        when(dataService.getSync("1")).thenReturn(response(401,
+                "{\"code\":\"AUTH_008\",\"message\":\"유효하지 않은 내부 API Key입니다.\",\"fieldErrors\":{}}",
+                Map.of("Content-Type", List.of("application/json"))));
+        when(dataService.listSyncs(null)).thenReturn(response(403, "",
+                Map.of("Content-Type", List.of("application/json"))));
+
+        mvc.perform(get("/api/admin/collection/syncs/1"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("COLLECTION_008"));
+        mvc.perform(get("/api/admin/collection/syncs"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("COLLECTION_008"));
+    }
+
+    @Test
+    @WithMockUser(authorities = "ADMIN")
+    void notFoundWithoutCollectionCodeIsServiceUnavailable() throws Exception {
+        when(dataService.getRawRecord("1")).thenReturn(response(404,
+                "{\"timestamp\":\"2026-10-23T09:00:00\",\"status\":404,\"path\":\"/internal/collection/raw-records/1\"}",
+                Map.of("Content-Type", List.of("application/json"))));
+
+        mvc.perform(get("/api/admin/collection/raw-records/1"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("COLLECTION_008"));
+    }
+
+    @Test
+    void configurationErrorRules() {
+        byte[] notFound = "{\"code\":\"COLLECTION_004\",\"message\":\"없음\"}".getBytes(StandardCharsets.UTF_8);
+        byte[] empty = new byte[0];
+        assertThat(CollectionAdminController.isConfigurationError(401, notFound)).isTrue();
+        assertThat(CollectionAdminController.isConfigurationError(403, empty)).isTrue();
+        assertThat(CollectionAdminController.isConfigurationError(404, empty)).isTrue();
+        assertThat(CollectionAdminController.isConfigurationError(404, notFound)).isFalse();
+        assertThat(CollectionAdminController.isConfigurationError(400, empty)).isFalse();
+        assertThat(CollectionAdminController.isConfigurationError(409, empty)).isFalse();
+        assertThat(CollectionAdminController.isConfigurationError(503, empty)).isFalse();
     }
 
     @Test
