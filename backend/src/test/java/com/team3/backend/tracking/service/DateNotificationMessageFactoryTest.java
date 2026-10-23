@@ -1,14 +1,15 @@
 package com.team3.backend.tracking.service;
 
 import com.team3.backend.opportunity.domain.entity.*;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.outbox.domain.entity.OutboxStatus;
 import com.team3.backend.tracking.domain.entity.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.time.*;
 import java.util.*;
+import static com.team3.backend.tracking.config.DateTrackingConfig.KST;
 import static org.assertj.core.api.Assertions.*;
 
 class DateNotificationMessageFactoryTest {
@@ -99,6 +100,20 @@ class DateNotificationMessageFactoryTest {
         assertThat(partlyUnbounded.expiresAt()).isEqualTo(NOW.plus(Duration.ofDays(3)));
         assertThatThrownBy(() -> factory.create(event, 7L, prepared, prepared.expiresAt()))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void openedRecoveredAfterAWeekendExpiresFromCreationNotFromTheScannedDate() {
+        // Friday (TODAY) was missed and recovered on Monday within recovery-days=3.
+        var monday = Instant.parse("2026-10-25T16:00:00Z");
+        ReflectionTestUtils.setField(policy, "id", 10L);
+        ReflectionTestUtils.setField(version, "id", 20L);
+        var recovered = OpportunityEvent.create(policy, version, OpportunityEventType.APPLICATION_OPENED, TODAY,
+                "APPLICATION_OPENED:10:" + TODAY, Map.of("startDate", TODAY.toString()), true, null, monday);
+        recovered.recordOrigin(UUID.randomUUID(), TODAY.atStartOfDay(KST).toInstant());
+
+        var prepared = factory.prepare(recovered, policy, List.of(period(TODAY, null)), monday).orElseThrow();
+        assertThat(prepared.expiresAt()).isEqualTo(monday.plus(Duration.ofDays(3)));
     }
 
     @Test

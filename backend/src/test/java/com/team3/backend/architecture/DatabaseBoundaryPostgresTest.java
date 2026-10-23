@@ -288,8 +288,8 @@ class DatabaseBoundaryPostgresTest {
     }
 
     private void script(Connection connection, String name) throws Exception {
-        String directory = name.equals("normalization-notifications.sql") ? "db/scripts/" : "db-boundary/";
-        execute(connection, new ClassPathResource(directory + name).getContentAsString(StandardCharsets.UTF_8));
+        // 관리자 SQL은 모두 저장소 루트 database/scripts에 있고 processTestResources가 db-boundary로 복사한다
+        execute(connection, new ClassPathResource("db-boundary/" + name).getContentAsString(StandardCharsets.UTF_8));
     }
 
     private void execute(Connection connection, String sql) throws SQLException {

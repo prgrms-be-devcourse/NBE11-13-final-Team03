@@ -8,6 +8,7 @@ backend와 notification-service는 독립 Gradle/Spring Boot 프로젝트를 유
 | 프로젝트 | 로그인 계정 | 스키마·search_path |
 | --- | --- | --- |
 | backend | application_user | application, pg_catalog |
+| data-service | application_user (backend와 공유) | application, pg_catalog |
 | notification-service | notification_user | notification, pg_catalog |
 
 서로의 테이블·시퀀스를 직접 읽거나 쓰지 않으며 스키마 간 FK를 만들지 않는다.
@@ -63,11 +64,40 @@ pg_stats처럼 스키마를 조건으로 써야 하면 current_schema()를 사�
 | --- | --- | --- |
 | backend | update | 기존 스키마 변경 PR이 update에 의존해 왔고 아직 마이그레이션 도구가 없다 |
 | notification-service | validate | 새 프로젝트라 처음부터 database/scripts의 수동 DDL로 관리한다 |
+| data-service | update | backend에서 옮겨 온 수집·정규화 테이블을 같은 방식으로 관리한다 (아래 data-service 절) |
 
 backend는 마이그레이션 도구(Flyway 등)를 도입하기 전까지 update를 유지한다.
 application_user는 application 스키마만 소유하므로 update가 다른 스키마나 public을 바꾸지 않는다.
 update는 컬럼 타입 변경·삭제를 하지 않으므로, 그런 변경은 application_user로 명시적 DDL을 적용한다.
 Flyway 도입과 backend validate 전환은 후속 작업으로 팀이 함께 결정한다.
+
+**database/scripts에 SQL이 있는 변경은 새 버전 서버를 기동하기 전에 먼저 적용한다.**
+update가 먼저 실행되면 다음 문제가 생긴다.
+
+- SQL에만 있는 CHECK 제약·기본값이 빠진 채 테이블·컬럼이 만들어지고, 이후 SQL은 객체가 이미 있어 실패한다.
+- 이미 행이 있는 테이블에 NOT NULL 컬럼을 추가하지 못한다.
+  예: event-fanout-outbox.sql의 `opportunity_events.last_user_id`는 `NOT NULL DEFAULT 0`으로 추가해야 하는데,
+  update는 기본값 없이 NOT NULL 컬럼을 추가하려다 실패한다.
+
+적용 순서는 각 SQL 파일 머리말과 기능 문서(date-tracking.md, event-fanout-outbox.md)를 따른다.
+Application 테이블이 없는 새 로컬 DB는 첫 기동의 update가 테이블을 만들므로 SQL을 실행하지 않는다.
+
+### data-service (backend와 DB 공유 1단계)
+
+data-service는 수집·정규화를 backend에서 떼어 낸 서버다. 1단계에서는 backend와 같은 application_user·application 스키마를 쓰고,
+backend와 같은 database-boundary 프로필(계정 고정, default_schema, search_path, 기동 검증)을 main()에서 붙인다.
+data-service/.env에는 DB_URL과 APPLICATION_DB_PASSWORD(backend와 같은 값)를 둔다.
+
+한 스키마를 두 서버가 update로 관리하므로 테이블마다 소유 서버를 정하고, 엔티티 변경은 소유 서버에서만 한다.
+
+| 소유 | 테이블 |
+| --- | --- |
+| data-service | 수집 원본·정규화 요청·수집 이력(external_source, raw_external_record, raw_normalization_request, raw_ingest_states, sync_history), 공고·버전·출처·조건·지역·신청기간·조건 묶음·상세(opportunities, opportunity_*, application_windows, condition_sets, training_course_details, youth_policy_details), regions |
+| backend | 회원·인증, 판정 프로필·판정 결과, 관심·선호 등 그 밖의 테이블 |
+
+- backend에 남는 공고·지역 엔티티는 판정·검색용 읽기 엔티티다. 컬럼을 추가·변경하지 않고 data-service 엔티티를 따라간다.
+- 공고 테이블을 바꾸는 배포는 data-service를 먼저 배포한다.
+- 서버별 DB 계정 분리(data-service 전용 계정·스키마)와 Flyway 도입은 DB 분리 단계에서 함께 정한다.
 
 ## 로컬 개발 DB
 
@@ -85,8 +115,8 @@ backend는 첫 bootRun에서 update로 application 스키마의 테이블을 만
 - 데이터를 유지할 때: 아래 관리자 SQL 1·2단계(프로비저닝, public 이전)를 로컬 DB에 직접 실행하고 비밀번호를 설정한다.
 - 데이터가 필요 없을 때: `docker compose down -v`로 볼륨을 지우고 다시 올린다. 로컬 데이터가 모두 삭제된다.
 
-운영 compose(#33 docker-compose.prod.yml)에도 같은 프로비저닝 단계가 필요하다.
-두 PR 중 나중에 병합되는 쪽에서 초기화 SQL 마운트와 .env.example 항목을 맞춘다.
+운영 DB 서버 compose(`deploy/db/docker-compose.yml`)도 빈 볼륨에서 같은 초기화 SQL을 실행한다.
+비밀번호 설정, 기존 볼륨 이전, NOTIFY 트리거 설치 절차는 `deploy/README.md`의 "DB 준비"를 따른다.
 
 ## 관리자 SQL: 자동 실행 금지
 

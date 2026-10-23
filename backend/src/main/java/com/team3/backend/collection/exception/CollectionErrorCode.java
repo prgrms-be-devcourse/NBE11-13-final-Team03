@@ -14,7 +14,8 @@ public enum CollectionErrorCode implements ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, "COLLECTION_004", "수집 실행·출처 또는 원본 레코드를 찾을 수 없습니다."),
     INVALID_STATE(HttpStatus.CONFLICT, "COLLECTION_005", "현재 상태에서는 수집 요청을 처리할 수 없습니다."),
     STORAGE_FAILURE(HttpStatus.INTERNAL_SERVER_ERROR, "COLLECTION_006", "원본 데이터 저장소 처리에 실패했습니다."),
-    ACCESS_DENIED(HttpStatus.FORBIDDEN, "COLLECTION_007", "관리자 권한이 필요합니다.");
+    ACCESS_DENIED(HttpStatus.FORBIDDEN, "COLLECTION_007", "관리자 권한이 필요합니다."),
+    DATA_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "COLLECTION_008", "수집 서비스(DataService)에 연결할 수 없습니다.");
 
     private final HttpStatus status;
     private final String code;

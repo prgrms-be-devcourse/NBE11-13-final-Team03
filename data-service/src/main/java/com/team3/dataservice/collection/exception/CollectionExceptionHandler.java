@@ -1,0 +1,55 @@
+package com.team3.dataservice.collection.exception;
+
+import com.team3.dataservice.collection.controller.ManualSyncController;
+import com.team3.dataservice.collection.controller.RawRecordController;
+import jakarta.persistence.EntityNotFoundException;
+import org.springframework.dao.DataAccessException;
+import org.springframework.core.task.TaskRejectedException;
+import com.team3.dataservice.global.exception.BusinessException;
+import com.team3.dataservice.global.exception.ErrorResponse;
+import com.team3.dataservice.global.exception.GlobalExceptionHandler;
+import lombok.RequiredArgsConstructor;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+
+@RestControllerAdvice(assignableTypes = {RawRecordController.class, ManualSyncController.class})
+@Order(Ordered.HIGHEST_PRECEDENCE)
+@RequiredArgsConstructor
+public class CollectionExceptionHandler {
+    private final GlobalExceptionHandler global;
+
+    @ExceptionHandler(TaskRejectedException.class)
+    public ResponseEntity<ErrorResponse> executorUnavailable() {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.EXECUTOR_UNAVAILABLE));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> invalidBody() {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.INVALID_BODY));
+    }
+
+    @ExceptionHandler({IllegalArgumentException.class, MissingServletRequestParameterException.class})
+    public ResponseEntity<ErrorResponse> invalidArgument(Exception exception) {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.INVALID_ARGUMENT));
+    }
+
+    @ExceptionHandler(EntityNotFoundException.class)
+    public ResponseEntity<ErrorResponse> notFound(EntityNotFoundException exception) {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.NOT_FOUND));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> invalidState(IllegalStateException exception) {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.INVALID_STATE));
+    }
+
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<ErrorResponse> storageFailure() {
+        return global.handleBusinessException(new BusinessException(CollectionErrorCode.STORAGE_FAILURE));
+    }
+}

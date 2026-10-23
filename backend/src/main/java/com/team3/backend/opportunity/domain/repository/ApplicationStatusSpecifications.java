@@ -4,8 +4,8 @@ import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import jakarta.persistence.criteria.*;
 import org.springframework.data.jpa.domain.Specification;
 

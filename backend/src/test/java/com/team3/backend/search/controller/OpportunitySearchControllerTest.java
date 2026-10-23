@@ -20,7 +20,7 @@ import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;

@@ -2,10 +2,10 @@ package com.team3.backend.opportunity.service;
 
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.opportunity.domain.entity.*;
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.NormalizationResult;
-import com.team3.backend.opportunity.dto.NormalizationResultResponse;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResultResponse;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.exception.OpportunityErrorCode;
 import com.team3.backend.opportunity.normalization.*;
 import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;

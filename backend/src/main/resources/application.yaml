@@ -4,12 +4,21 @@ spring:
   config:
     import:
       - optional:classpath:youth-policy-codes.yaml
-      - classpath:application-collection.yaml
 
   jpa:
     hibernate:
       ddl-auto: update
     open-in-view: false
+    properties:
+      hibernate.type.json_format_mapper: org.hibernate.type.format.jackson.Jackson3JsonFormatMapper
+
+  cloud:
+    openfeign:
+      client:
+        config:
+          data-service:
+            connect-timeout: 3000
+            read-timeout: 10000
 
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/yon}
@@ -69,23 +78,13 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [traceId=%X{traceId:-no-trace}] %logger{36} - %msg%n"
 
-region-code-api:
-  base-url: https://apis.data.go.kr/1741000/StanReginCd/getStanReginCdList
-  service-key: ${REGION_CODE_API_KEY:}
-  page-size: 1000
-  sync-on-startup: ${REGION_CODE_SYNC_ON_STARTUP:false}
-
 yon:
   eligibility:
     # 판정 결과 제공 방식. local: 같은 애플리케이션 안에서 직접 호출 (MSA 전환 시 원격 구현을 추가하고 값을 바꾼다)
     provider: ${YON_ELIGIBILITY_PROVIDER:local}
-  normalization:
-    ingest:
-      # 수집 원본 → 정규화 연동 (LISTEN/NOTIFY + 주기 폴링·대조). false면 LISTEN·스케줄 모두 끈다
-      enabled: ${YON_NORMALIZATION_INGEST_ENABLED:true}
-      channel: raw_normalization_requested
-      batch-size: 100
-      # 트랜잭션 1개로 묶는 원본 수 (커밋 대기를 줄이기 위해, 벤치마크로 결정)
-      transaction-size: 100
-      poll-interval-ms: 60000
-      reconcile-interval-ms: 3600000
+  # 수집·정규화 서비스. 수집 관리자 API(/api/admin/collection/**)를 내부 API로 전달한다
+  data-service:
+    # 기본값은 로컬 실행용. 운영은 compose가 http://data-service:8082를 넣는다 (deploy/docker-compose.prod.yml)
+    base-url: ${DATA_SERVICE_BASE_URL:http://localhost:8082}
+    # DataService 전용 내부 키. data-service의 DATA_SERVICE_INTERNAL_API_KEY와 같은 값
+    internal-api-key: ${DATA_SERVICE_INTERNAL_API_KEY}
