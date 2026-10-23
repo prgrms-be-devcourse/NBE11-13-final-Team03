@@ -33,6 +33,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -112,6 +113,47 @@ class UserBehaviorEventPostgresTest {
         assertNotNull(events.get(0).getReceivedAt());
         assertFalse(events.get(0).getReceivedAt().isBefore(started.minusSeconds(1)));
         assertFalse(events.get(0).getReceivedAt().isAfter(LocalDateTime.now().plusSeconds(1)));
+    }
+
+    @Test
+    void fiveEventTypesShareTheApplicationTable() throws Exception {
+        Long userId = createUser();
+        Long opportunityId = createOpportunity();
+        var principal = user(new CustomUserDetails(userId, Role.USER, "behavior-test"));
+
+        record(userId, opportunityId, """
+                {"eventType":"IMPRESSION","source":"RECOMMENDATION"}
+                """);
+        record(userId, opportunityId, """
+                {"eventType":"DETAIL_VIEW","source":"SEARCH"}
+                """);
+        record(userId, opportunityId, """
+                {"eventType":"EXTERNAL_LINK_CLICK","source":"SAVED","linkType":"REFERENCE"}
+                """);
+        mockMvc.perform(post("/api/opportunities/{id}/save", opportunityId)
+                        .with(principal).with(csrf()))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(post("/api/opportunities/{id}/hide", opportunityId)
+                        .param("source", "OTHER").with(principal).with(csrf()))
+                .andExpect(status().isNoContent());
+
+        var rows = jdbcTemplate.queryForList("""
+                select user_id, opportunity_id, event_type, source, link_type, received_at
+                from application.user_behavior_events
+                where user_id = ? and opportunity_id = ?
+                order by id
+                """, userId, opportunityId);
+        assertEquals(5, rows.size());
+        assertEquals(List.of("IMPRESSION", "DETAIL_VIEW", "EXTERNAL_LINK_CLICK", "SAVE", "HIDE"),
+                rows.stream().map(row -> row.get("event_type")).toList());
+        assertEquals(List.of("RECOMMENDATION", "SEARCH", "SAVED", "OTHER", "OTHER"),
+                rows.stream().map(row -> row.get("source")).toList());
+        assertEquals("REFERENCE", rows.get(2).get("link_type"));
+        assertTrue(rows.stream().filter(row -> !"EXTERNAL_LINK_CLICK".equals(row.get("event_type")))
+                .allMatch(row -> row.get("link_type") == null));
+        assertTrue(rows.stream().allMatch(row -> userId.equals(row.get("user_id"))
+                && opportunityId.equals(row.get("opportunity_id"))
+                && row.get("received_at") != null));
     }
 
     @Test
