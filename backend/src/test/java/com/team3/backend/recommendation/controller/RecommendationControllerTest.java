@@ -7,7 +7,7 @@ import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.recommendation.dto.RecommendationItemDto;
 import com.team3.backend.recommendation.dto.RecommendationReasonsDto;
 import com.team3.backend.recommendation.service.RecommendationService;

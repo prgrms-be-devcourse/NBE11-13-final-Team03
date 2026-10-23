@@ -2,7 +2,7 @@ package com.team3.backend.recommendation.dto;
 
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.search.dto.OpportunityDetailResponseDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 

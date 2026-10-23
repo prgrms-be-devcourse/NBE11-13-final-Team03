@@ -8,7 +8,7 @@ import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.PersonalizationStatus;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.recommendation.dto.RecommendationCandidate;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
