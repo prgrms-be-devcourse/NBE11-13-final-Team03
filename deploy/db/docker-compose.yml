@@ -1,0 +1,34 @@
+# DB 서버(EC2)용 compose. 자동 배포하지 않는다. 처음 한 번 README "DB 서버" 절차로 띄운다.
+# 실행 (DB 서버의 ~/yon-db): docker compose up -d
+name: yon-db
+
+services:
+  postgres-db:
+    image: postgres:16-alpine
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:?.env에 DB_USERNAME이 필요합니다}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?.env에 DB_PASSWORD가 필요합니다}
+      POSTGRES_DB: ${DB_NAME:-yon}
+      TZ: Asia/Seoul
+    # 메인·데이터 서버가 사설 IP로 접속한다. 보안 그룹에서 5432는 두 서버의 보안 그룹에만 연다 (0.0.0.0/0 금지)
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # 빈 볼륨에서만 실행된다: application_user·notification_user 계정과 스키마 생성 (비밀번호는 README 절차로 따로 설정)
+      - ./db-init/01-database-boundaries.sql:/docker-entrypoint-initdb.d/01-database-boundaries.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  postgres_data:
