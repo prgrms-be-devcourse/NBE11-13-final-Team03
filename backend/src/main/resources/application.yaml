@@ -85,3 +85,5 @@ yon:
   # 수집·정규화 서비스. 수집 관리자 API(/api/admin/collection/**)를 내부 API로 전달한다
   data-service:
     base-url: ${DATA_SERVICE_BASE_URL:http://localhost:8082}
+    # DataService 전용 내부 키. data-service의 DATA_SERVICE_INTERNAL_API_KEY와 같은 값
+    internal-api-key: ${DATA_SERVICE_INTERNAL_API_KEY}
