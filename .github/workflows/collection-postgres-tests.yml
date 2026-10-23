@@ -2,7 +2,7 @@ name: Collection PostgreSQL tests
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, codex/collection-grpc-server]
     paths:
       - 'contracts/proto/**'
       - 'backend/**'

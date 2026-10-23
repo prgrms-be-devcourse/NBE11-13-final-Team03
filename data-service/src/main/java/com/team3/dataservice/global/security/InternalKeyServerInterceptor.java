@@ -31,10 +31,9 @@ public class InternalKeyServerInterceptor implements ServerInterceptor {
             Metadata headers, ServerCallHandler<ReqT, RespT> next) {
         var key = headers.get(INTERNAL_KEY);
         if (key == null || !MessageDigest.isEqual(expectedKey, key.getBytes(StandardCharsets.UTF_8))) {
-            var error = InternalApiErrorCode.INVALID_INTERNAL_API_KEY;
             var trailers = new Metadata();
-            trailers.put(CollectionExceptionInterceptor.ERROR_CODE, error.getCode());
-            call.close(Status.UNAUTHENTICATED.withDescription(error.getMessage()), trailers);
+            trailers.put(CollectionExceptionInterceptor.ERROR_CODE, "AUTH_008");
+            call.close(Status.UNAUTHENTICATED.withDescription("유효하지 않은 내부 API Key입니다."), trailers);
             return new ServerCall.Listener<>() {};
         }
         return next.startCall(call, headers);
