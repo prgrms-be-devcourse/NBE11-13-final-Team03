@@ -65,6 +65,9 @@ Y:ON은 대학생, 취업준비생, 사회초년생 등 청년을 위한 **맞�
 
 ## 로컬 실행
 
+- 필요 도구: Java 25, Docker. 테스트(`./gradlew test`)는 Testcontainers로 PostgreSQL을 띄우므로 Docker가 실행 중이어야 한다.
+- `backend/.env.example`, `notification-service/.env.example`을 복사해 각 `.env`를 만든다.
+- `cd backend && docker compose up -d`로 로컬 DB를 띄운다. 계정·스키마 준비는 [DB 경계 문서](docs/database-boundaries.md)를 따른다.
 - `./gradlew bootRun`으로 실행하면 각 프로젝트의 `.env`를 자동으로 읽는다.
 - 빌드한 JAR(`java -jar`)는 `.env`를 읽지 않는다. 필요한 값은 환경변수로 직접 주입한다.
 

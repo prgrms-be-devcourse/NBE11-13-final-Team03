@@ -8,7 +8,11 @@ import org.springframework.context.annotation.Profile;
 import javax.sql.DataSource;
 import java.sql.SQLException;
 
-/** Checks the real PostgreSQL session before Hibernate can access or change tables. */
+/**
+ * Checks the real PostgreSQL session before Hibernate can access or change tables.
+ * Keep in sync with notification-service NotificationDatabaseBoundaryConfig: only account/schema names differ,
+ * and the checks array order must match the SELECT column order.
+ */
 @Configuration(proxyBeanMethods = false)
 @Profile("database-boundary")
 public class ApplicationDatabaseBoundaryConfig {
@@ -27,14 +31,16 @@ public class ApplicationDatabaseBoundaryConfig {
     }
 
     private static void validate(DataSource dataSource) {
-        String[] checks = {"login", "current schema", "search path", "other schema access",
-                "public schema access", "elevated privileges", "unmigrated public tables",
+        String[] checks = {"login", "current schema", "search path", "notification schema exists",
+                "other schema access", "public schema access", "elevated privileges", "unmigrated public tables",
                 "cross-schema foreign keys"};
         try (var connection = dataSource.getConnection(); var statement = connection.prepareStatement("""
                 SELECT current_user = 'application_user',
                        current_schema() = 'application',
                        current_schemas(false) = ARRAY['application'::name, 'pg_catalog'::name],
-                       NOT has_schema_privilege(current_user, 'notification', 'USAGE,CREATE'),
+                       to_regnamespace('notification') IS NOT NULL,
+                       CASE WHEN to_regnamespace('notification') IS NULL THEN true
+                            ELSE NOT has_schema_privilege(current_user, 'notification', 'USAGE,CREATE') END,
                        NOT has_schema_privilege(current_user, 'public', 'USAGE,CREATE'),
                        NOT EXISTS (
                            SELECT 1 FROM pg_roles WHERE rolname = current_user
@@ -51,8 +57,8 @@ public class ApplicationDatabaseBoundaryConfig {
                            JOIN pg_class src ON src.oid = fk.conrelid
                            JOIN pg_class dst ON dst.oid = fk.confrelid
                            WHERE fk.contype = 'f' AND src.relnamespace <> dst.relnamespace
-                           AND (src.relnamespace = 'application'::regnamespace
-                                OR dst.relnamespace = 'application'::regnamespace))
+                           AND (src.relnamespace = to_regnamespace('application')
+                                OR dst.relnamespace = to_regnamespace('application')))
                 """); var result = statement.executeQuery()) {
             result.next();
             for (int column = 1; column <= checks.length; column++) {

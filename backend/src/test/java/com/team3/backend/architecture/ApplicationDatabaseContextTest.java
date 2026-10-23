@@ -55,8 +55,7 @@ class ApplicationDatabaseContextTest {
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
         registry.add("spring.datasource.username", () -> "application_user");
         registry.add("spring.datasource.password", () -> "boundary-test-password");
-        // Only the disposable container may initialize/drop the Entity schema.
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+        // Keep the runtime ddl-auto: provisioning -> first boot must create every table in application.
     }
 
     @Autowired
@@ -73,45 +72,44 @@ class ApplicationDatabaseContextTest {
         runner.withBean(DataSource.class, () -> new DriverManagerDataSource(
                         POSTGRES.getJdbcUrl(), "application_user", "boundary-test-password"))
                 .run(context -> assertThat(context).hasNotFailed());
-        for (String user : new String[]{"notification_user", POSTGRES.getUsername()}) {
-            String password = user.equals(POSTGRES.getUsername()) ? POSTGRES.getPassword() : "boundary-test-password";
-            runner.withBean(DataSource.class, () -> new DriverManagerDataSource(
-                            POSTGRES.getJdbcUrl(), user, password))
-                    .run(context -> {
-                        assertThat(context).hasFailed();
-                        assertThat(context.getStartupFailure()).hasStackTraceContaining("Database boundary violation");
-                    });
-        }
+        assertRejected(runner, POSTGRES.getJdbcUrl(), "notification_user", "boundary-test-password", "login");
+        assertRejected(runner, POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), "login");
         String jdbcUrl = POSTGRES.getJdbcUrl();
         String wrongSchemaUrl = jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "currentSchema=public";
-        runner.withBean(DataSource.class, () -> new DriverManagerDataSource(
-                        wrongSchemaUrl, "application_user", "boundary-test-password"))
-                .run(context -> assertThat(context).hasFailed());
+        assertRejected(runner, wrongSchemaUrl, "application_user", "boundary-test-password", "current schema");
         try (var admin = DriverManager.getConnection(POSTGRES.getJdbcUrl(),
                 POSTGRES.getUsername(), POSTGRES.getPassword()); var statement = admin.createStatement()) {
-            statement.execute("GRANT USAGE ON SCHEMA notification TO application_user");
-            try {
-                runner.withBean(DataSource.class, () -> new DriverManagerDataSource(
-                                POSTGRES.getJdbcUrl(), "application_user", "boundary-test-password"))
-                        .run(context -> {
-                            assertThat(context).hasFailed();
-                            assertThat(context.getStartupFailure()).hasStackTraceContaining("other schema access");
-                        });
-            } finally {
-                statement.execute("REVOKE USAGE ON SCHEMA notification FROM application_user");
-            }
-            statement.execute("CREATE TABLE public.unmigrated(id bigint)");
-            try {
-                runner.withBean(DataSource.class, () -> new DriverManagerDataSource(
-                                POSTGRES.getJdbcUrl(), "application_user", "boundary-test-password"))
-                        .run(context -> {
-                            assertThat(context).hasFailed();
-                            assertThat(context.getStartupFailure()).hasStackTraceContaining("unmigrated public tables");
-                        });
-            } finally {
-                statement.execute("DROP TABLE public.unmigrated");
-            }
+            rejectsWhile(runner, statement, "ALTER SCHEMA notification RENAME TO notification_missing",
+                    "ALTER SCHEMA notification_missing RENAME TO notification", "notification schema exists");
+            rejectsWhile(runner, statement, "GRANT USAGE ON SCHEMA notification TO application_user",
+                    "REVOKE USAGE ON SCHEMA notification FROM application_user", "other schema access");
+            rejectsWhile(runner, statement, "GRANT USAGE ON SCHEMA public TO application_user",
+                    "REVOKE USAGE ON SCHEMA public FROM application_user", "public schema access");
+            rejectsWhile(runner, statement, "ALTER ROLE application_user CREATEDB",
+                    "ALTER ROLE application_user NOCREATEDB", "elevated privileges");
+            rejectsWhile(runner, statement, "CREATE TABLE public.unmigrated(id bigint)",
+                    "DROP TABLE public.unmigrated", "unmigrated public tables");
         }
+    }
+
+    private void rejectsWhile(ApplicationContextRunner runner, java.sql.Statement admin,
+                              String breakSql, String restoreSql, String check) throws SQLException {
+        admin.execute(breakSql);
+        try {
+            assertRejected(runner, POSTGRES.getJdbcUrl(), "application_user", "boundary-test-password", check);
+        } finally {
+            admin.execute(restoreSql);
+        }
+    }
+
+    private void assertRejected(ApplicationContextRunner runner, String url, String user, String password,
+                                String check) {
+        runner.withBean(DataSource.class, () -> new DriverManagerDataSource(url, user, password))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasStackTraceContaining("Database boundary violation (application): " + check + ".");
+                });
     }
 
     @Test
