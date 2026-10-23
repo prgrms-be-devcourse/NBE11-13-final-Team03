@@ -1,11 +1,11 @@
 package com.team3.backend.opportunity.conditionset;
 
 import com.team3.backend.opportunity.domain.repository.OpportunityVersionRepository;
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.NormalizationResult;
-import com.team3.backend.opportunity.dto.TrainingCourseRaw;
-import com.team3.backend.opportunity.dto.TrainingNormalizationCommand;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
+import com.team3.backend.opportunity.normalization.dto.TrainingCourseRaw;
+import com.team3.backend.opportunity.normalization.dto.TrainingNormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.AgeNormalizer;
 import com.team3.backend.opportunity.normalization.ApplicationPeriodNormalizer;
 import com.team3.backend.opportunity.normalization.CodeConditionNormalizer;

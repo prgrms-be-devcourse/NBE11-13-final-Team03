@@ -1,10 +1,10 @@
 package com.team3.backend.opportunity.ingest;
 
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.TrainingCourseRaw;
-import com.team3.backend.opportunity.dto.TrainingNormalizationCommand;
-import com.team3.backend.opportunity.dto.TrainingNormalizationResult;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.TrainingCourseRaw;
+import com.team3.backend.opportunity.normalization.dto.TrainingNormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.TrainingNormalizationResult;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.service.TrainingCourseNormalizationService;
 import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
 import lombok.RequiredArgsConstructor;

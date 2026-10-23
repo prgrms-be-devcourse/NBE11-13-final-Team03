@@ -5,7 +5,7 @@ import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;

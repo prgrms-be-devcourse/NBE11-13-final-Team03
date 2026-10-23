@@ -4,7 +4,7 @@ import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import org.springframework.stereotype.Component;
 
 import java.time.DateTimeException;
