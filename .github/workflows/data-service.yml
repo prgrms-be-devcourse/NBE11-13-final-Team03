@@ -2,7 +2,7 @@ name: Data service
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, codex/collection-grpc-server]
     paths:
       - 'contracts/proto/**'
       - 'data-service/**'
@@ -55,6 +55,14 @@ jobs:
           for key in ('skipped', 'failures', 'errors'):
               assert int(suite.attrib[key]) == 0, f'Notification tests: {key}={suite.attrib[key]}'
           print(f"PostgreSQL notification tests passed: {suite.attrib['tests']}")
+          grpc = ET.parse(results / 'TEST-com.team3.dataservice.collection.grpc.CollectionGrpcPostgresTest.xml').getroot()
+          assert int(grpc.attrib['tests']) > 0, 'gRPC PostgreSQL tests did not run'
+          for key in ('skipped', 'failures', 'errors'):
+              assert int(grpc.attrib[key]) == 0, f'gRPC PostgreSQL tests: {key}={grpc.attrib[key]}'
+          worker = ET.parse(results / 'TEST-com.team3.dataservice.collection.grpc.ManualSyncGrpcIntegrationTests.xml').getroot()
+          assert int(worker.attrib['tests']) > 0, 'gRPC worker tests did not run'
+          for key in ('skipped', 'failures', 'errors'):
+              assert int(worker.attrib[key]) == 0, f'gRPC worker tests: {key}={worker.attrib[key]}'
           suites = [ET.parse(path).getroot() for path in results.glob('TEST-*.xml')]
           counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
           print(f"data-service test totals: {counts}")

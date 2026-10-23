@@ -1,4 +1,4 @@
-package com.team3.dataservice.collection.controller;
+package com.team3.dataservice.collection.grpc;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -37,7 +37,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -46,30 +45,22 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
-import com.team3.dataservice.global.security.InternalApiKeyFilter;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
-import org.springframework.test.web.servlet.MvcResult;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** 외부 API는 로컬 HTTP 서버, DB는 테스트 전용 PostgreSQL 컨테이너를 사용한다. */
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ActiveProfiles("test")
 @SpringBootTest(properties = {
+        "spring.grpc.server.port=0",
         "app.scheduling.enabled=false",
         "collection.schedule.enabled=false",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.jpa.open-in-view=false"
 })
-class ManualSyncControllerIntegrationTests {
+class ManualSyncGrpcIntegrationTests {
     @Container
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
 
@@ -81,7 +72,6 @@ class ManualSyncControllerIntegrationTests {
         registry.add("spring.datasource.driver-class-name", postgres::getDriverClassName);
     }
 
-    private static final String PATH = "/internal/collection/syncs";
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
     private static final java.util.concurrent.ExecutorService HTTP_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
     private static final HttpServer UPSTREAM = server();
@@ -99,10 +89,6 @@ class ManualSyncControllerIntegrationTests {
     private static final AtomicInteger YOUTH_CALLS = new AtomicInteger();
 
     private static final String INTERNAL_KEY = "test-internal-api-key";
-    private MockMvc mvc;
-    private MockMvc mvcWithoutKey;
-    @Autowired private WebApplicationContext context;
-    @Autowired private InternalApiKeyFilter internalApiKeyFilter;
     @Autowired private SyncJobService jobs;
     @Autowired private SyncHistoryRepository histories;
     @Autowired private RawNormalizationRequestRepository normalizationRequests;
@@ -121,11 +107,17 @@ class ManualSyncControllerIntegrationTests {
         registry.add("collection.employment24.api-key", () -> UUID.randomUUID().toString());
     }
 
+    @Autowired org.springframework.grpc.server.lifecycle.GrpcServerLifecycle lifecycle;
+    private io.grpc.ManagedChannel channel;
+    private com.team3.contracts.collection.v1.CollectionServiceGrpc.CollectionServiceBlockingStub stub;
+
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(context).addFilters(internalApiKeyFilter)
-                .defaultRequest(MockMvcRequestBuilders.get("/").header(InternalApiKeyFilter.HEADER, INTERNAL_KEY)).build();
-        mvcWithoutKey = MockMvcBuilders.webAppContextSetup(context).addFilters(internalApiKeyFilter).build();
+        channel = io.grpc.Grpc.newChannelBuilderForAddress("localhost", lifecycle.getPort(), io.grpc.InsecureChannelCredentials.create()).build();
+        var headers = new io.grpc.Metadata();
+        headers.put(com.team3.dataservice.global.security.InternalKeyServerInterceptor.INTERNAL_KEY, INTERNAL_KEY);
+        stub = com.team3.contracts.collection.v1.CollectionServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(io.grpc.stub.MetadataUtils.newAttachHeadersInterceptor(headers));
         normalizationRequests.deleteAllInBatch();
         records.deleteAllInBatch();
         histories.deleteAllInBatch();
@@ -151,6 +143,7 @@ class ManualSyncControllerIntegrationTests {
                 List.of(SyncJobStatus.PENDING, SyncJobStatus.RUNNING))) {
             awaitDone(history.getId());
         }
+        channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
     }
 
     @AfterAll
@@ -163,14 +156,13 @@ class ManualSyncControllerIntegrationTests {
         return start(source, 100);
     }
 
-    private long start(String source, int pageSize) throws Exception {
-        var result = mvc.perform(post(PATH + "/" + source)
-                        .param("pageSize", String.valueOf(pageSize)).param("maxPages", "2"))
-                .andExpect(status().isAccepted()).andExpect(jsonPath("$.status").value("PENDING"))
-                .andReturn();
-        long id = body(result).path("jobId").asLong();
-        assertEquals(PATH + "/" + id, result.getResponse().getHeader("Location"));
-        return id;
+    private long start(String source, int pageSize) {
+        var response = stub.withDeadlineAfter(5, TimeUnit.SECONDS).startSync(
+                com.team3.contracts.collection.v1.StartSyncRequest.newBuilder()
+                        .setSource(com.team3.contracts.collection.v1.CollectionSource.valueOf(source))
+                        .setPageSize(pageSize).setMaxPages(2).build());
+        assertEquals(com.team3.contracts.collection.v1.SyncJobStatus.PENDING, response.getStatus());
+        return response.getJobId();
     }
 
     private SyncJobResponse awaitDone(long id) throws Exception {
@@ -186,43 +178,9 @@ class ManualSyncControllerIntegrationTests {
         return null;
     }
 
-    private JsonNode body(MvcResult result) {
-        return MAPPER.readTree(result.getResponse().getContentAsByteArray());
-    }
 
-    @Test
-    void listsEveryStatusByKoreanDateWithStableNewestFirstOrder() throws Exception {
-        var from = OffsetDateTime.parse("2026-10-20T15:00:00Z");
-        var until = from.plusDays(1);
-        var youth = sources.save(new ExternalSource("YOUTH_POLICY", "온통청년", "https://example.test", true, from));
-        var employment = sources.save(new ExternalSource("EMPLOYMENT24", "고용24", "https://example.test", true, from));
-        history(youth, SyncJobStatus.FAILED, from.minusNanos(1000));
-        var success = history(youth, SyncJobStatus.SUCCESS, from);
-        var pending = history(youth, SyncJobStatus.PENDING, from.plusHours(1));
-        var running = history(youth, SyncJobStatus.RUNNING, from.plusHours(2));
-        var partial = history(youth, SyncJobStatus.PARTIAL_SUCCESS, from.plusHours(3));
-        var failed = history(employment, SyncJobStatus.FAILED, until.minusNanos(1000));
-        var interrupted = history(youth, SyncJobStatus.INTERRUPTED, until.minusNanos(1000));
-        history(youth, SyncJobStatus.SUCCESS, until);
 
-        var result = mvc.perform(get(PATH).param("date", "2026-10-21"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(6))
-                .andExpect(jsonPath("$[0].status").value("INTERRUPTED"))
-                .andExpect(jsonPath("$[1].status").value("FAILED"))
-                .andExpect(jsonPath("$[1].source").value("EMPLOYMENT24"))
-                .andExpect(jsonPath("$[1].failureReason").value("테스트 수집 실패"))
-                .andExpect(jsonPath("$[2].status").value("PARTIAL_SUCCESS"))
-                .andExpect(jsonPath("$[2].failedPageCount").value(1))
-                .andExpect(jsonPath("$[2].pageFailures[0].errorCode").value("HTTP_500"))
-                .andExpect(jsonPath("$[3].status").value("RUNNING"))
-                .andExpect(jsonPath("$[3].completedAt").doesNotExist())
-                .andExpect(jsonPath("$[4].status").value("PENDING"))
-                .andExpect(jsonPath("$[5].status").value("SUCCESS"))
-                .andReturn();
-        assertEquals(List.of(interrupted.getId(), failed.getId(), partial.getId(), running.getId(), pending.getId(), success.getId()),
-                body(result).findValues("jobId").stream().map(JsonNode::asLong).toList());
-    }
+
 
     private SyncHistory history(ExternalSource source, SyncJobStatus status, OffsetDateTime startedAt) {
         var history = SyncHistory.pending(source, status == SyncJobStatus.SUCCESS ? "MANUAL" : "SCHEDULED", startedAt);
@@ -242,42 +200,11 @@ class ManualSyncControllerIntegrationTests {
         return histories.save(history);
     }
 
-    @Test
-    void returnsEmptyHistoryForDateWithoutJobs() throws Exception {
-        mvc.perform(get(PATH).param("date", "2026-10-21"))
-                .andExpect(status().isOk()).andExpect(content().json("[]"));
-    }
 
-    @Test
-    void rejectsMissingOrInvalidHistoryDates() throws Exception {
-        mvc.perform(get(PATH)).andExpect(status().isBadRequest());
-        for (var date : List.of("", "invalid", "2026-02-30", "0000-01-01", "+1000000-01-01", "+999999999-12-31")) {
-            mvc.perform(get(PATH).param("date", date)).andExpect(status().isBadRequest());
-        }
-        assertEquals(0, histories.count());
-    }
 
-    @Test
-    void acceptsBeforeCollectionFinishesAndRejectsDuplicateSource() throws Exception {
-        youthRelease = new CountDownLatch(1);
-        youthEntered = new CountDownLatch(1);
-        long id = start("YOUTH_POLICY");
-        assertTrue(youthEntered.await(5, TimeUnit.SECONDS));
-        mvc.perform(get(PATH + "/" + id)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("RUNNING"));
-        mvc.perform(post(PATH + "/YOUTH_POLICY")).andExpect(status().isConflict());
-        assertEquals(SyncJobStatus.SUCCESS, awaitDone(start("EMPLOYMENT24")).status());
-        youthRelease.countDown();
-        var result = awaitDone(id);
-        assertEquals(SyncJobStatus.SUCCESS, result.status());
-        assertEquals(1, result.newCount());
-        assertEquals(1, result.successCount());
-        assertEquals(0, result.pendingCount());
-        assertEquals(1, records.count());
-        mvc.perform(get(PATH + "/" + id)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.source").value("YOUTH_POLICY"))
-                .andExpect(jsonPath("$.newCount").value(1));
-    }
+
+
+
 
     @Test
     void canonicalRecollectionAndTwoChangesPreserveThreeSnapshots() throws Exception {
@@ -331,21 +258,7 @@ class ManualSyncControllerIntegrationTests {
         assertTrue(records.findAll().getFirst().getPayload().path("unknown").path("a").isNull());
     }
 
-    @Test
-    void malformedRecordIsRecordedWithoutStoppingValidRecords() throws Exception {
-        youthRecords = "[{\"title\":\"missing-id\"},{\"plcyNo\":\"p1\",\"title\":\"valid\"}]";
-        long id = start("YOUTH_POLICY");
-        var result = awaitDone(id);
-        assertEquals(SyncJobStatus.PARTIAL_SUCCESS, result.status());
-        assertEquals(2, result.fetchedCount());
-        assertEquals(1, result.successCount());
-        assertEquals(1, result.failedRecordCount());
-        assertEquals(0, result.recordFailures().getFirst().itemIndex());
-        assertEquals("INVALID_RECORD", result.recordFailures().getFirst().errorCode());
-        assertEquals(1, records.count());
-        mvc.perform(get(PATH + "/" + id)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.recordFailures[0].errorCode").value("INVALID_RECORD"));
-    }
+
 
     @Test
     void pageFailureIsNotReportedAsSuccessAndIsPersistedWithRequestConditions() throws Exception {
@@ -370,13 +283,7 @@ class ManualSyncControllerIntegrationTests {
         assertEquals(0, records.count());
     }
 
-    @Test
-    void pageLimitWithSavedRecordsIsPartialSuccess() throws Exception {
-        youthTotalOverride = 1000;
-        var result = mvc.perform(post(PATH + "/YOUTH_POLICY").param("maxPages", "1"))
-                .andExpect(status().isAccepted()).andReturn();
-        assertEquals(SyncJobStatus.PARTIAL_SUCCESS, awaitDone(body(result).path("jobId").asLong()).status());
-    }
+
 
     @Test
     void firstPageOutageStopsAfterThreeCallsAndPersistsFailedHistory() throws Exception {
@@ -527,33 +434,41 @@ class ManualSyncControllerIntegrationTests {
         }
     }
 
+
+
+
+
     @Test
-    void invalidSourceAndLimitsDoNotCreateHistory() throws Exception {
-        mvc.perform(post(PATH + "/UNKNOWN")).andExpect(status().isBadRequest());
-        mvc.perform(post(PATH + "/YOUTH_POLICY").param("pageSize", "101"))
-                .andExpect(status().isBadRequest());
-        mvc.perform(get(PATH + "/0")).andExpect(status().isBadRequest());
-        mvc.perform(get(PATH + "/" + Long.MAX_VALUE)).andExpect(status().isNotFound());
-        assertEquals(0, histories.count());
+    void malformedRecordIsRecordedWithoutStoppingValidRecords() throws Exception {
+        youthRecords = "[{\"title\":\"missing-id\"},{\"plcyNo\":\"p1\",\"title\":\"valid\"}]";
+        long id = start("YOUTH_POLICY");
+        var result = awaitDone(id);
+        assertEquals(SyncJobStatus.PARTIAL_SUCCESS, result.status());
+        assertEquals(2, result.fetchedCount());
+        assertEquals(1, result.successCount());
+        assertEquals(1, result.failedRecordCount());
+        assertEquals(0, result.recordFailures().getFirst().itemIndex());
+        assertEquals(1, records.count());
+        var detail = stub.withDeadlineAfter(5, TimeUnit.SECONDS).getSyncJob(
+                com.team3.contracts.collection.v1.GetSyncJobRequest.newBuilder().setJobId(id).build());
+        assertEquals("INVALID_RECORD", detail.getRecordFailures(0).getErrorCode());
     }
 
     @Test
-    void requiresInternalApiKey() throws Exception {
-        mvcWithoutKey.perform(post(PATH + "/YOUTH_POLICY").accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("AUTH_008"));
-        mvcWithoutKey.perform(get(PATH).param("date", "2026-10-21").header(InternalApiKeyFilter.HEADER, "wrong-key"))
-                .andExpect(status().isUnauthorized());
-        mvcWithoutKey.perform(get(PATH + "/1")).andExpect(status().isUnauthorized());
-        assertEquals(0, histories.count());
+    void pageLimitWithSavedRecordsIsPartialSuccess() throws Exception {
+        youthTotalOverride = 1000;
+        var response = stub.withDeadlineAfter(5, TimeUnit.SECONDS).startSync(
+                com.team3.contracts.collection.v1.StartSyncRequest.newBuilder()
+                        .setSource(com.team3.contracts.collection.v1.CollectionSource.YOUTH_POLICY).setMaxPages(1).build());
+        assertEquals(SyncJobStatus.PARTIAL_SUCCESS, awaitDone(response.getJobId()).status());
     }
 
     private static HttpServer server() {
         try {
             var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.setExecutor(HTTP_EXECUTOR);
-            server.createContext("/youth", ManualSyncControllerIntegrationTests::youth);
-            server.createContext("/employment", ManualSyncControllerIntegrationTests::employment);
+            server.createContext("/youth", ManualSyncGrpcIntegrationTests::youth);
+            server.createContext("/employment", ManualSyncGrpcIntegrationTests::employment);
             server.start();
             return server;
         } catch (IOException exception) {
