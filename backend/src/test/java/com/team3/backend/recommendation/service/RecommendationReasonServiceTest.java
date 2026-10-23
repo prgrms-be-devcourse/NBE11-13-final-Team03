@@ -54,6 +54,19 @@ class RecommendationReasonServiceTest {
     }
 
     @Test
+    void validAlwaysWindowSuppressesDeadlineButKeepsNewReason() {
+        var mixed = service.create(item(OpportunityType.YOUTH_POLICY, EligibilityStatus.ELIGIBLE,
+                InterestMatchLevel.HIGH, 3, 7, 0, true), TODAY);
+        var fixed = service.create(item(OpportunityType.YOUTH_POLICY, EligibilityStatus.ELIGIBLE,
+                InterestMatchLevel.HIGH, 3, 7, 0), TODAY);
+
+        assertEquals(java.util.List.of("신청 조건 충족", "관심 분야 일치", "신규 공고"), mixed.badges());
+        assertFalse(mixed.description().contains("신청 마감"));
+        assertEquals(java.util.List.of("신청 조건 충족", "관심 분야 일치", "마감 D-3"), fixed.badges());
+        assertTrue(fixed.description().contains("신청 마감까지 3일"));
+    }
+
+    @Test
     void trainingUsesStartDateNotApplicationDeadlineAtD7AndD21() {
         for (int days : java.util.List.of(7, 21)) {
             var reasons = service.create(item(OpportunityType.VOCATIONAL_TRAINING, EligibilityStatus.ELIGIBLE,
@@ -70,10 +83,16 @@ class RecommendationReasonServiceTest {
     private static RecommendationEligibleCandidate item(OpportunityType type, EligibilityStatus status,
                                                         InterestMatchLevel match, int deadlineDays,
                                                         int ageDays, int startDays) {
+        return item(type, status, match, deadlineDays, ageDays, startDays, false);
+    }
+
+    private static RecommendationEligibleCandidate item(OpportunityType type, EligibilityStatus status,
+                                                        InterestMatchLevel match, int deadlineDays,
+                                                        int ageDays, int startDays, boolean hasValidAlwaysOpenWindow) {
         RecommendationCandidate candidate = new RecommendationCandidate(1L, type, "공고", "분류", "중분류",
                 null, null, deadlineDays < 0 ? null : TODAY.plusDays(deadlineDays),
                 type == OpportunityType.VOCATIONAL_TRAINING ? TODAY.plusDays(startDays) : null,
-                LocalDateTime.of(TODAY.minusDays(ageDays), LocalTime.NOON));
+                LocalDateTime.of(TODAY.minusDays(ageDays), LocalTime.NOON), hasValidAlwaysOpenWindow);
         return new RecommendationEligibleCandidate(candidate, match, status);
     }
 }

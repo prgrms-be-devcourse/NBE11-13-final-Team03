@@ -62,6 +62,36 @@ class RecommendationCandidateServicePostgresTest {
     private RecommendationCandidateService candidateService;
 
     @Test
+    void validAlwaysWindowIsRetainedAlongsideOpenFixedWindowWithoutChangingDeadline() {
+        LocalDate today = LocalDate.of(2026, 10, 20);
+        Opportunity mixed = opportunity("Mixed policy", OpportunityType.YOUTH_POLICY,
+                PersonalizationStatus.PERSONALIZABLE);
+        window(mixed, PeriodType.FIXED, today.minusDays(1), today.plusDays(3), ValidationStatus.VALID);
+        window(mixed, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
+        Opportunity fixed = opportunity("Fixed policy", OpportunityType.YOUTH_POLICY,
+                PersonalizationStatus.PERSONALIZABLE);
+        window(fixed, PeriodType.FIXED, today.minusDays(1), today.plusDays(3), ValidationStatus.VALID);
+        Opportunity unverifiedAlways = opportunity("Unverified always policy", OpportunityType.YOUTH_POLICY,
+                PersonalizationStatus.PERSONALIZABLE);
+        window(unverifiedAlways, PeriodType.FIXED, today.minusDays(1), today.plusDays(3), ValidationStatus.VALID);
+        window(unverifiedAlways, PeriodType.ALWAYS, null, null, ValidationStatus.NEEDS_REVIEW);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<RecommendationCandidate> candidates = candidateService.getCandidatesAfter(0, 10, today);
+
+        assertEquals(List.of(mixed.getId(), fixed.getId(), unverifiedAlways.getId()),
+                candidates.stream().map(RecommendationCandidate::opportunityId).toList());
+        assertTrue(candidates.getFirst().hasValidAlwaysOpenWindow());
+        assertFalse(candidates.get(1).hasValidAlwaysOpenWindow());
+        assertFalse(candidates.get(2).hasValidAlwaysOpenWindow());
+        for (RecommendationCandidate candidate : candidates) {
+            assertEquals(ApplicationStatus.OPEN, candidate.applicationStatus());
+            assertEquals(today.plusDays(3), candidate.applicationEndDate());
+        }
+    }
+
+    @Test
     void candidatesUseCurrentVersionStatusAndTrainingStartBoundaryWithoutCursorGaps() {
         LocalDate today = LocalDate.of(2026, 10, 20);
         Opportunity unnormalized = opportunity("Unnormalized", OpportunityType.YOUTH_POLICY, null);

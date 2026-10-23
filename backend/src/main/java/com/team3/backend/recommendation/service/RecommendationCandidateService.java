@@ -65,7 +65,9 @@ public class RecommendationCandidateService {
             if (row.type() == OpportunityType.YOUTH_POLICY) {
                 return new RecommendationCandidate(row.opportunityId(), row.type(), row.title(),
                         row.category(), row.subCategory(), row.detailCategory(), status,
-                        nearestOpenDeadline(periods, today), null, row.createdAt());
+                        nearestOpenDeadline(periods, today), null, row.createdAt(),
+                        periods.stream().anyMatch(window -> window.periodType() == PeriodType.ALWAYS
+                                && window.validationStatus() == ValidationStatus.VALID));
             }
             TrainingScheduleRow schedule = training.get(row.versionId());
             return new RecommendationCandidate(row.opportunityId(), row.type(), row.title(),

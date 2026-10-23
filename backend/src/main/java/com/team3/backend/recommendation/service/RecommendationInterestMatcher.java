@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/** 사용자의 관심 분야를 한 번 조회하여 추천 후보 배치에서 재사용할 매칭 기준을 만든다. */
+/** 사용자의 관심 분야를 한 번 조회하여 추천 후보 배치에서 재사용할 매칭 기준을 만든다. 관심 코드와 공고의 정규화 분류명은 표기가 같아야 한다. */
 @Service
 @RequiredArgsConstructor
 public class RecommendationInterestMatcher {
@@ -46,7 +46,7 @@ public class RecommendationInterestMatcher {
             this.codesByType = Map.copyOf(copy);
         }
 
-        /** 현재 하위 분류명이 상위 분류 간 유일하다는 전제로 청년정책 중분류와 NCS 2차분류를 우선한다. */
+        /** 현재 하위 분류명이 상위 분류 간 유일하다는 전제로 상위 분류를 재검증하지 않고 정확히 일치하는 하위 분류를 우선한다. */
         public Optional<InterestMatchLevel> match(RecommendationCandidate candidate) {
             if (unrestricted) {
                 return Optional.of(InterestMatchLevel.UNRESTRICTED);

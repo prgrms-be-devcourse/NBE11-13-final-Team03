@@ -17,6 +17,13 @@ public record RecommendationCandidate(
         ApplicationStatus applicationStatus,
         LocalDate applicationEndDate,
         LocalDate trainingStartDate,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        boolean hasValidAlwaysOpenWindow
 ) {
+    public RecommendationCandidate(Long opportunityId, OpportunityType type, String title, String category,
+                                   String subCategory, String detailCategory, ApplicationStatus applicationStatus,
+                                   LocalDate applicationEndDate, LocalDate trainingStartDate, LocalDateTime createdAt) {
+        this(opportunityId, type, title, category, subCategory, detailCategory, applicationStatus,
+                applicationEndDate, trainingStartDate, createdAt, false);
+    }
 }

@@ -61,7 +61,9 @@ public class RecommendationReasonService {
     private static String periodReason(RecommendationCandidate candidate, LocalDate today) {
         if (candidate.type() == OpportunityType.YOUTH_POLICY) {
             LocalDate deadline = candidate.applicationEndDate();
-            if (deadline != null && !deadline.isBefore(today) && !deadline.isAfter(today.plusDays(14))) {
+            // 상시 모집이 함께 있으면 일반 기간의 종료일을 공고 전체의 마감일처럼 안내하지 않는다.
+            if (!candidate.hasValidAlwaysOpenWindow() && deadline != null
+                    && !deadline.isBefore(today) && !deadline.isAfter(today.plusDays(14))) {
                 return "마감 D-" + ChronoUnit.DAYS.between(today, deadline);
             }
         } else if (candidate.type() == OpportunityType.VOCATIONAL_TRAINING) {
