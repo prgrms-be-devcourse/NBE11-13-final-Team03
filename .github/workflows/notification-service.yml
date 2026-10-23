@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'notification-service/**'
+      - 'database/**'
       - '.github/workflows/notification-service.yml'
   push:
     branches: [main]
@@ -30,6 +31,8 @@ jobs:
           cache-dependency-path: |
             notification-service/*.gradle
             notification-service/gradle/wrapper/gradle-wrapper.properties
+      - name: Require Docker for PostgreSQL boundary tests
+        run: docker info
       - name: Test and build Notification independently
         working-directory: notification-service
         run: bash ./gradlew --no-daemon clean test bootJar
