@@ -39,7 +39,7 @@ backend의 `/api/admin/collection/**` 공개 HTTP API·ADMIN 권한은 유지된
 
 **PR C 배포 전 필수 조건**
 
-1. PR A(#50)의 서버와 PR B(#51)의 backend를 먼저 배포한다.
+1. PR A(#53)의 서버와 PR B(#54)의 backend를 먼저 배포한다.
 2. 실제 관리자 요청으로 접수·작업 조회·원본 저장/조회 및 DB 반영을 확인한다.
 3. #49의 배포 구성과 합칠 때 HTTP 8082 기동 확인·포트 매핑을 제거하고 gRPC 포트 기준으로 변경한다.
    TCP 연결 확인만으로 내부 키·업무 동작을 보장할 수 없으므로 인증된 RPC smoke test도 수행한다.

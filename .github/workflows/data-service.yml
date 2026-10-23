@@ -2,7 +2,7 @@ name: Data service
 
 on:
   pull_request:
-    branches: [main, codex/collection-grpc-server]
+    branches: [main, feat/collection-grpc-server]
     paths:
       - 'contracts/proto/**'
       - 'data-service/**'
