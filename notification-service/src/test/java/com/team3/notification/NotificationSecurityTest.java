@@ -21,7 +21,7 @@ class NotificationSecurityTest {
     private MockMvc mockMvc;
 
     @Test
-    void rejectsAnonymousRequests() throws Exception {
+    void rejectsAnonymousRequestsWhileNoEndpointIsOpenYet() throws Exception {
         mockMvc.perform(get("/")).andExpect(status().isForbidden());
         mockMvc.perform(post("/api/internal/notifications")).andExpect(status().isForbidden());
     }

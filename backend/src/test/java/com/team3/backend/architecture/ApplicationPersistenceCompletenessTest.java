@@ -24,11 +24,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ActiveProfiles("test")
-@SpringBootTest(properties = {
-        "app.scheduling.enabled=false",
-        "yon.normalization.ingest.enabled=false",
-        "yon.normalization.condition-set-backfill.enabled=false"
-})
+@SpringBootTest
 class ApplicationPersistenceCompletenessTest {
 
     private static final String ROOT = "com.team3.backend";
