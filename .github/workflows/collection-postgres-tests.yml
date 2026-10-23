@@ -48,20 +48,16 @@ jobs:
           YON_TEST_DB_URL: jdbc:postgresql://localhost:5432/yon_test
           YON_TEST_DB_USERNAME: postgres
           YON_TEST_DB_PASSWORD: test
-      - name: Require executed PostgreSQL notification tests
+      # NOTIFY 트리거 테스트는 수집·정규화와 함께 data-service로 옮겨 data-service.yml에서 확인한다
+      - name: Summarize backend test results
         if: always()
         run: |
           python3 - <<'PY'
           import pathlib
           import xml.etree.ElementTree as ET
 
-          report = pathlib.Path('backend/build/test-results/test/TEST-com.team3.backend.collection.service.NormalizationNotificationTriggerTests.xml')
-          suite = ET.parse(report).getroot()
-          assert int(suite.attrib['tests']) > 0, 'Notification tests did not run'
-          for key in ('skipped', 'failures', 'errors'):
-              assert int(suite.attrib[key]) == 0, f'Notification tests: {key}={suite.attrib[key]}'
-          print(f"PostgreSQL notification tests passed: {suite.attrib['tests']}")
           suites = [ET.parse(path).getroot() for path in pathlib.Path('backend/build/test-results/test').glob('TEST-*.xml')]
+          assert suites, 'No backend test results'
           counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
           print(f"Backend test totals: {counts}")
           PY

@@ -40,6 +40,7 @@ jwt:
 internal:
   api-key: test-internal-api-key
 
+
 app:
   admin-kakao-ids: ""
   auth-cookie:
@@ -47,6 +48,8 @@ app:
     same-site: Lax
     path: /
 yon:
+  data-service:
+    internal-api-key: test-data-service-internal-api-key
   normalization:
     ingest:
       enabled: false
