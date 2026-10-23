@@ -8,6 +8,7 @@ backend와 notification-service는 독립 Gradle/Spring Boot 프로젝트를 유
 | 프로젝트 | 로그인 계정 | 스키마·search_path |
 | --- | --- | --- |
 | backend | application_user | application, pg_catalog |
+| data-service | application_user (backend와 공유) | application, pg_catalog |
 | notification-service | notification_user | notification, pg_catalog |
 
 서로의 테이블·시퀀스를 직접 읽거나 쓰지 않으며 스키마 간 FK를 만들지 않는다.
@@ -63,11 +64,29 @@ pg_stats처럼 스키마를 조건으로 써야 하면 current_schema()를 사�
 | --- | --- | --- |
 | backend | update | 기존 스키마 변경 PR이 update에 의존해 왔고 아직 마이그레이션 도구가 없다 |
 | notification-service | validate | 새 프로젝트라 처음부터 database/scripts의 수동 DDL로 관리한다 |
+| data-service | update | backend에서 옮겨 온 수집·정규화 테이블을 같은 방식으로 관리한다 (아래 data-service 절) |
 
 backend는 마이그레이션 도구(Flyway 등)를 도입하기 전까지 update를 유지한다.
 application_user는 application 스키마만 소유하므로 update가 다른 스키마나 public을 바꾸지 않는다.
 update는 컬럼 타입 변경·삭제를 하지 않으므로, 그런 변경은 application_user로 명시적 DDL을 적용한다.
 Flyway 도입과 backend validate 전환은 후속 작업으로 팀이 함께 결정한다.
+
+### data-service (backend와 DB 공유 1단계)
+
+data-service는 수집·정규화를 backend에서 떼어 낸 서버다. 1단계에서는 backend와 같은 application_user·application 스키마를 쓰고,
+backend와 같은 database-boundary 프로필(계정 고정, default_schema, search_path, 기동 검증)을 main()에서 붙인다.
+data-service/.env에는 DB_URL과 APPLICATION_DB_PASSWORD(backend와 같은 값)를 둔다.
+
+한 스키마를 두 서버가 update로 관리하므로 테이블마다 소유 서버를 정하고, 엔티티 변경은 소유 서버에서만 한다.
+
+| 소유 | 테이블 |
+| --- | --- |
+| data-service | 수집 원본·정규화 요청·수집 이력(external_source, raw_external_record, raw_normalization_request, raw_ingest_states, sync_history), 공고·버전·출처·조건·지역·신청기간·조건 묶음·상세(opportunities, opportunity_*, application_windows, condition_sets, training_course_details, youth_policy_details), regions |
+| backend | 회원·인증, 판정 프로필·판정 결과, 관심·선호 등 그 밖의 테이블 |
+
+- backend에 남는 공고·지역 엔티티는 판정·검색용 읽기 엔티티다. 컬럼을 추가·변경하지 않고 data-service 엔티티를 따라간다.
+- 공고 테이블을 바꾸는 배포는 data-service를 먼저 배포한다.
+- 서버별 DB 계정 분리(data-service 전용 계정·스키마)와 Flyway 도입은 DB 분리 단계에서 함께 정한다.
 
 ## 로컬 개발 DB
 
