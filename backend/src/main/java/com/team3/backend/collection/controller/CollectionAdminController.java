@@ -21,13 +21,22 @@ import org.springframework.web.bind.annotation.RestController;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * 수집 관리자 API. 관리자 권한은 여기서 확인하고, 실제 처리는 DataService 내부 API(/internal/collection/**)에 맡긴다.
  * 경로·요청·응답·에러 형식은 서비스 분리 전과 같다: DataService 응답의 상태 코드·본문을 그대로 돌려주고,
- * Location 헤더만 관리자 API 경로로 바꾼다. DataService에 연결하지 못하면 503 (COLLECTION_008).
+ * Location 헤더만 관리자 API 경로로 바꾼다.
+ *
+ * 다음은 관리자 요청의 문제가 아니라 서버 설정 문제이므로 그대로 전달하지 않고 503 (COLLECTION_008)으로 바꾸고 error 로그를 남긴다.
+ * 그대로 전달하면 관리자의 인증 오류(401)나 "데이터 없음"(404)처럼 보이기 때문이다.
+ * - DataService에 연결하지 못함
+ * - DataService가 401·403을 줌 (내부 키 불일치 등)
+ * - DataService가 수집 오류 코드(COLLECTION_xxx) 없이 404를 줌 (내부 경로 불일치)
+ * 수집 업무 오류(COLLECTION_001~006)와 요청 값 오류(400)는 그대로 전달한다.
  */
 @Slf4j
 @RestController
@@ -38,6 +47,8 @@ public class CollectionAdminController {
 
     static final String INTERNAL_PREFIX = "/internal/collection";
     static final String ADMIN_PREFIX = "/api/admin/collection";
+    /** DataService 수집 업무 오류 응답의 code 값 */
+    private static final Pattern COLLECTION_ERROR = Pattern.compile("\"code\"\\s*:\\s*\"COLLECTION_\\d{3}\"");
 
     private final DataServiceClient dataService;
 
@@ -70,15 +81,35 @@ public class CollectionAdminController {
     }
 
     private ResponseEntity<byte[]> relay(Supplier<Response> call) {
-        try (Response response = call.get()) {
-            HttpHeaders headers = new HttpHeaders();
-            first(response, HttpHeaders.CONTENT_TYPE).ifPresent(value -> headers.set(HttpHeaders.CONTENT_TYPE, value));
-            first(response, HttpHeaders.LOCATION).ifPresent(value -> headers.setLocation(adminLocation(value)));
-            return new ResponseEntity<>(body(response), headers, response.status());
+        Response response;
+        byte[] body;
+        try {
+            response = call.get();
+            try (response) {
+                body = body(response);
+            }
         } catch (FeignException | IOException e) {
             log.warn("DataService call failed: {}", e.toString());
             throw new BusinessException(CollectionErrorCode.DATA_SERVICE_UNAVAILABLE);
         }
+        int status = response.status();
+        if (isConfigurationError(status, body)) {
+            log.error("DataService rejected internal call (check DATA_SERVICE_INTERNAL_API_KEY / DATA_SERVICE_BASE_URL): "
+                    + "status={}, url={}", status, response.request().url());
+            throw new BusinessException(CollectionErrorCode.DATA_SERVICE_UNAVAILABLE);
+        }
+        HttpHeaders headers = new HttpHeaders();
+        first(response, HttpHeaders.CONTENT_TYPE).ifPresent(value -> headers.set(HttpHeaders.CONTENT_TYPE, value));
+        first(response, HttpHeaders.LOCATION).ifPresent(value -> headers.setLocation(adminLocation(value)));
+        return new ResponseEntity<>(body, headers, status);
+    }
+
+    /** 401·403은 항상, 404는 수집 오류 코드가 없을 때 (내부 경로 불일치) 설정 문제로 본다 */
+    static boolean isConfigurationError(int status, byte[] body) {
+        if (status == 401 || status == 403) {
+            return true;
+        }
+        return status == 404 && !COLLECTION_ERROR.matcher(new String(body, StandardCharsets.UTF_8)).find();
     }
 
     private static byte[] body(Response response) throws IOException {
