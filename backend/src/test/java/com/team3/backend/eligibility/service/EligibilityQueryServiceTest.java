@@ -8,14 +8,7 @@ import com.team3.backend.eligibility.dto.EligibilityResponse;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.eligibility.exception.EligibilityErrorCode;
 import com.team3.backend.global.exception.BusinessException;
-import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
-import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
-import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
-import com.team3.backend.opportunity.normalization.*;
-import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
-import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;
-import com.team3.backend.opportunity.normalization.official.PeriodEvidenceExtractor;
-import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
+import com.team3.backend.opportunity.support.OpportunityFixtures;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
@@ -38,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 정규화 → 판정까지 실제 PostgreSQL로 검증한다. 일회용 DB를 YON_TEST_DB_URL로 지정할 것 (ddl-auto=create-drop).
+ * 정규화된 공고(테스트 데이터) → 판정까지 실제 PostgreSQL로 검증한다. 일회용 DB를 YON_TEST_DB_URL로 지정할 것 (ddl-auto=create-drop).
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -50,17 +43,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
 @Import({EligibilityQueryService.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
-        YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
-        RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
-        YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+        RegionDirectory.class})
 class EligibilityQueryServiceTest {
 
     private static final OffsetDateTime NOW = OffsetDateTime.parse("2026-10-15T10:00:00+09:00");
 
     @Autowired
     private EligibilityQueryService service;
-    @Autowired
-    private YouthPolicyNormalizationService normalizationService;
     @Autowired
     private RegionDirectory regionDirectory;
     @PersistenceContext
@@ -150,18 +139,16 @@ class EligibilityQueryServiceTest {
         return normalizePolicy("R2026-1", "11680");
     }
 
-    private Long normalizePolicy(String plcyNo, String zipCd) {
-        YouthPolicyRaw raw = YouthPolicyRaw.builder()
-                .plcyNo(plcyNo).plcyNm("청년 월세 지원")
-                .sprtTrgtMinAge("19").sprtTrgtMaxAge("34").sprtTrgtAgeLmtYn("Y")
-                .aplyPrdSeCd("0057001").aplyYmd("20261001 ~ 20261031")
-                .zipCd(zipCd)
-                .build();
-        NormalizationResult result = normalizationService.normalize(new NormalizationCommand(1L, raw, List.of(),
-                "https://www.youthcenter.go.kr/policy/" + plcyNo, LocalDateTime.of(2026, 10, 14, 9, 0)));
+    /** 정규화된 정책: 19~34세, 시·군·구 하나(5자리 코드) 거주, 2026-10-01 ~ 2026-10-31 신청, 그 밖의 조건 정보 없음 */
+    private Long normalizePolicy(String plcyNo, String sigunguCode) {
+        Long id = OpportunityFixtures.youthPolicy(plcyNo, "청년 월세 지원")
+                .age(19, 34)
+                .residence(sigunguCode + "00000")
+                .fixedPeriod(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31))
+                .save(em).opportunityId();
         em.flush();
         em.clear();
-        return result.opportunityId();
+        return id;
     }
 
     private void persistProfile(Long userId, Region residence) {

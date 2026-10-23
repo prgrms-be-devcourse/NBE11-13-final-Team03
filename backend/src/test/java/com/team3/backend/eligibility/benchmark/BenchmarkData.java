@@ -2,12 +2,15 @@ package com.team3.backend.eligibility.benchmark;
 
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
-import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
-import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
-import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
+import com.team3.backend.opportunity.domain.entity.ConditionType;
+import com.team3.backend.opportunity.domain.entity.PeriodType;
+import com.team3.backend.opportunity.domain.entity.ValidationStatus;
+import com.team3.backend.opportunity.support.OpportunityFixtures;
+import com.team3.backend.opportunity.support.OpportunityFixtures.YouthPolicy;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
 import com.team3.backend.region.domain.repository.RegionRepository;
+import jakarta.persistence.EntityManager;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -63,17 +66,16 @@ class BenchmarkData {
     private final RegionRepository regionRepository;
     private final RegionDirectory regionDirectory;
     private final EligibilityProfileRepository profileRepository;
-    private final YouthPolicyNormalizationService normalizationService;
+    private final EntityManager em;
 
     BenchmarkData(JdbcTemplate jdbc, TransactionTemplate writeTx, RegionRepository regionRepository,
-                  RegionDirectory regionDirectory, EligibilityProfileRepository profileRepository,
-                  YouthPolicyNormalizationService normalizationService) {
+                  RegionDirectory regionDirectory, EligibilityProfileRepository profileRepository, EntityManager em) {
         this.jdbc = jdbc;
         this.writeTx = writeTx;
         this.regionRepository = regionRepository;
         this.regionDirectory = regionDirectory;
         this.profileRepository = profileRepository;
-        this.normalizationService = normalizationService;
+        this.em = em;
     }
 
     void seedRegions() {
@@ -150,39 +152,70 @@ class BenchmarkData {
         return b.build();
     }
 
-    Map<String, Template> normalizeTemplates() {
-        Map<String, YouthPolicyRaw> raws = new LinkedHashMap<>();
-        raws.put("S1", base("S1", "청년 월세 지원", "19", "34", "Y", "0057001", "20261001 ~ 20261031", "11680")
-                .mrgSttsCd("0055003").jobCd("0013010").schoolCd("0049010").plcyMajorCd("0011009")
-                .sBizCd("0014010").earnCndSeCd("0043001").build());
-        raws.put("S2", base("S2", "청년 취업 상담", "19", "39", "Y", "0057002", null, "41111")
-                .mrgSttsCd("0055003").jobCd("0013010").schoolCd("0049010").plcyMajorCd("0011009")
-                .sBizCd("0014010").earnCndSeCd("0043001").build());
-        raws.put("C1", base("C1", "청년 주거 정착 지원", "19", "39", "Y", "0057001",
-                "20260901 ~ 20260930, 20261101 ~ 20261130", "11680,11440,26350,27200")
-                .mrgSttsCd("0055002").jobCd("0013003,0013006").schoolCd("0049005,0049006,0049007")
-                .plcyMajorCd("0011005").sBizCd("0014002").earnCndSeCd("0043003")
-                .earnEtcCn("가구 기준중위소득 150% 이하")
-                .addAplyQlfcCndCn("공고일 기준 해당 지역에 6개월 이상 거주한 자")
-                .ptcpPrpTrgtCn("타 기관 동일 사업 참여자 및 휴학생 제외").build());
-        raws.put("C2", base("C2", "청년 학자금 이자 지원", "19", "39", "Y", "0057001",
-                "20261010 ~ 20261020", "41111,41113,11110,26230")
-                .mrgSttsCd("0055003").jobCd("0013001,0013003").schoolCd("0049007,0049008")
-                .plcyMajorCd("0011001,0011002,0011003").sBizCd("0014001").earnCndSeCd("0043003")
-                .earnEtcCn("학자금 지원구간 8구간 이하")
-                .addAplyQlfcCndCn("대학 졸업 후 2년 이내인 자")
-                .ptcpPrpTrgtCn("동일 목적의 정부 지원을 받는 자 제외").build());
-        raws.put("U1", base("U1", "청년 활동 지원", "0", "0", "Y", "0057001", null, "99999")
-                .jobCd("0013009").schoolCd("0049009").plcyMajorCd("0011010").sBizCd("0014009")
-                .earnCndSeCd("0043002").earnMaxAmt("3000").build());
-        raws.put("U2", base("U2", "청년 역량 강화", "19", "34", "N", null, null, null)
-                .mrgSttsCd("0055003,0055002")
-                .addAplyQlfcCndCn("세부 자격은 공고문 참조").build());
+    /**
+     * 템플릿 6건. 온통청년 원본을 data-service 정규화에 넣었을 때의 결과와 같은 조건 행이다
+     * (원본 값은 각 항목 주석, 지역 코드는 seedRegions의 지역 사전으로 매핑·압축한 값).
+     */
+    static Map<String, YouthPolicy> templatePolicies() {
+        Map<String, YouthPolicy> policies = new LinkedHashMap<>();
+        // 단순: 나이 19~34, 강남(11680), 2026-10-01 ~ 10-31, 코드·소득 전부 제한없음
+        policies.put("S1", OpportunityFixtures.youthPolicy("S1", "청년 월세 지원").category("일자리", null)
+                .age(19, 34).residence("1168000000")
+                .fixedPeriod(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31))
+                .codesNoLimit().incomeNoLimit());
+        // 단순: 나이 19~39, 수원 장안구(41111), 상시, 코드·소득 전부 제한없음
+        policies.put("S2", OpportunityFixtures.youthPolicy("S2", "청년 취업 상담").category("일자리", null)
+                .age(19, 39).residence("4111100000").alwaysOpen()
+                .codesNoLimit().incomeNoLimit());
+        // 복합: 여러 지역(11680,11440,26350,27200), 기간 2개, 구체 코드, 가구 기준중위소득 150% 이하, 추가 자격·참여 제한
+        policies.put("C1", OpportunityFixtures.youthPolicy("C1", "청년 주거 정착 지원").category("일자리", null)
+                .age(19, 39).residence("1168000000", "1144000000", "2635000000", "2720000000")
+                .fixedPeriod(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30))
+                .fixedPeriod(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 30))
+                .code(ConditionType.MARITAL, "SINGLE")
+                .code(ConditionType.EMPLOYMENT, "UNEMPLOYED", "STARTUP_PREPARING")
+                .code(ConditionType.EDUCATION, "UNIVERSITY_ENROLLED", "UNIVERSITY_EXPECTED_GRADUATION", "UNIVERSITY_GRADUATED")
+                .code(ConditionType.SPECIALIZATION, "ENGINEERING")
+                .code(ConditionType.SPECIAL_TARGET, "WOMAN")
+                .income(YouthPolicy.income("MAX_ONLY", "type", "MEDIAN_PERCENT", "max", 150, "maxInclusive", true,
+                        "period", "UNKNOWN", "subject", "HOUSEHOLD", "unitConfirmed", true), ValidationStatus.VALID)
+                .additionalQualification("공고일 기준 해당 지역에 6개월 이상 거주한 자")
+                .participationRestriction("타 기관 동일 사업 참여자 및 휴학생 제외"));
+        // 복합: 여러 지역(41111·41113은 수원시로 압축, 11110, 26230), 구체 코드, 학자금 지원구간 8구간 이하, 추가 자격·참여 제한
+        policies.put("C2", OpportunityFixtures.youthPolicy("C2", "청년 학자금 이자 지원").category("일자리", null)
+                .age(19, 39).residence("1111000000", "2623000000", "4111000000")
+                .fixedPeriod(LocalDate.of(2026, 10, 10), LocalDate.of(2026, 10, 20))
+                .codeNoLimit(ConditionType.MARITAL)
+                .code(ConditionType.EMPLOYMENT, "EMPLOYED", "UNEMPLOYED")
+                .code(ConditionType.EDUCATION, "UNIVERSITY_GRADUATED", "GRADUATE_SCHOOL")
+                .code(ConditionType.SPECIALIZATION, "HUMANITIES", "SOCIAL_SCIENCE", "BUSINESS_ECONOMICS")
+                .code(ConditionType.SPECIAL_TARGET, "SME_EMPLOYEE")
+                .income(YouthPolicy.income("MAX_ONLY", "type", "STUDENT_LOAN_BRACKET", "max", 8, "maxInclusive", true,
+                        "period", "UNKNOWN", "subject", "HOUSEHOLD", "unitConfirmed", true), ValidationStatus.VALID)
+                .additionalQualification("대학 졸업 후 2년 이내인 자")
+                .participationRestriction("동일 목적의 정부 지원을 받는 자 제외"));
+        // 불명확: 나이 0/0/Y 충돌, 사전에 없는 지역(99999), 기타·미등록 코드, 단위 불명 소득 금액(연소득 3000), 고정 기간인데 날짜 없음
+        policies.put("U1", OpportunityFixtures.youthPolicy("U1", "청년 활동 지원").category("일자리", null)
+                .ageUnknown(ValidationStatus.DATA_CONFLICT).regionUnknown(ValidationStatus.NEEDS_REVIEW)
+                .period(PeriodType.FIXED, null, null, ValidationStatus.UNKNOWN, null)
+                .code(ConditionType.EMPLOYMENT, "SPECIFIC", ValidationStatus.NEEDS_REVIEW, "OTHER")
+                .code(ConditionType.EDUCATION, "SPECIFIC", ValidationStatus.NEEDS_REVIEW, "OTHER")
+                .code(ConditionType.SPECIALIZATION, "UNKNOWN", ValidationStatus.NEEDS_REVIEW)
+                .code(ConditionType.SPECIAL_TARGET, "SPECIFIC", ValidationStatus.NEEDS_REVIEW, "OTHER")
+                .income(YouthPolicy.income("MAX_ONLY", "type", "AMOUNT", "max", 3000, "period", "YEARLY",
+                        "subject", "UNKNOWN"), ValidationStatus.NEEDS_REVIEW));
+        // 불명확: 나이 19/34/N 충돌, 지역·기간 없음, 혼인 제한없음과 미혼이 함께 옴, 추가 자격 원문
+        policies.put("U2", OpportunityFixtures.youthPolicy("U2", "청년 역량 강화").category("일자리", null)
+                .ageUnknown(ValidationStatus.DATA_CONFLICT)
+                .code(ConditionType.MARITAL, "UNKNOWN", ValidationStatus.NEEDS_REVIEW, "NO_LIMIT", "SINGLE")
+                .additionalQualification("세부 자격은 공고문 참조"));
+        return policies;
+    }
 
+    Map<String, Template> normalizeTemplates() {
         Map<String, Template> templates = new LinkedHashMap<>();
-        for (Map.Entry<String, YouthPolicyRaw> e : raws.entrySet()) {
-            normalizationService.normalize(new NormalizationCommand(1L, e.getValue(), List.of(),
-                    "https://example.invalid/" + e.getKey(), LocalDateTime.of(2026, 10, 14, 9, 0)));
+        for (Map.Entry<String, YouthPolicy> e : templatePolicies().entrySet()) {
+            writeTx.executeWithoutResult(s -> e.getValue().save(em));
             Map<String, Object> row = jdbc.queryForMap(
                     "SELECT o.id, o.current_version_id FROM opportunities o "
                             + "JOIN opportunity_sources s ON s.opportunity_id = o.id WHERE s.external_id = ?", e.getKey());
@@ -197,13 +230,6 @@ class BenchmarkData {
         // 템플릿은 복제 원본으로만 쓰고 판정 대상에서는 뺀다
         jdbc.update("UPDATE opportunities SET current_version_id = NULL WHERE id < ?", CLONE_BASE);
         return templates;
-    }
-
-    private static YouthPolicyRaw.YouthPolicyRawBuilder base(String no, String name, String min, String max, String limit,
-                                                             String periodCode, String period, String zip) {
-        return YouthPolicyRaw.builder().plcyNo(no).plcyNm(name)
-                .sprtTrgtMinAge(min).sprtTrgtMaxAge(max).sprtTrgtAgeLmtYn(limit)
-                .aplyPrdSeCd(periodCode).aplyYmd(period).zipCd(zip).lclsfNm("일자리");
     }
 
     void verifyTemplateCharacteristics(Map<String, Template> templates) {

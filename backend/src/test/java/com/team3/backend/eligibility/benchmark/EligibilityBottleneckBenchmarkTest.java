@@ -20,11 +20,6 @@ import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.ApplicationWindowRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityConditionRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityRegionRepository;
-import com.team3.backend.opportunity.normalization.*;
-import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
-import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;
-import com.team3.backend.opportunity.normalization.official.PeriodEvidenceExtractor;
-import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.directory.RegionIndex;
 import com.team3.backend.region.domain.repository.RegionRepository;
@@ -97,9 +92,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "logging.level.org.hibernate.SQL=OFF"
 })
 @Import({EligibilityQueryService.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
-        YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
-        RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
-        YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+        RegionDirectory.class})
 class EligibilityBottleneckBenchmarkTest {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -163,7 +156,6 @@ class EligibilityBottleneckBenchmarkTest {
     @Autowired private EligibilityQueryService queryService;
     @Autowired private EligibilityEngine engine;
     @Autowired private ApplicationStatusCalculator applicationStatusCalculator;
-    @Autowired private YouthPolicyNormalizationService normalizationService;
     @Autowired private RegionDirectory regionDirectory;
     @Autowired private RegionRepository regionRepository;
     @Autowired private EligibilityProfileRepository profileRepository;
@@ -242,7 +234,7 @@ class EligibilityBottleneckBenchmarkTest {
         TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
         statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         statistics.setStatisticsEnabled(true);
-        data = new BenchmarkData(jdbc, writeTx, regionRepository, regionDirectory, profileRepository, normalizationService);
+        data = new BenchmarkData(jdbc, writeTx, regionRepository, regionDirectory, profileRepository, em);
 
         List<Integer> sizes = intList("YON_BENCH_SIZES", "1000,5000,10000");
         int warmup = intEnv("YON_BENCH_WARMUP", 10);

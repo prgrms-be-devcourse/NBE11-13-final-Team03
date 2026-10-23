@@ -5,18 +5,13 @@ import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.service.EligibilityBatchRefresher;
-import com.team3.backend.opportunity.conditionset.ConditionSetBackfill;
 import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.OpportunitySourceRepository;
 import com.team3.backend.opportunity.dto.*;
-import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
-import com.team3.backend.opportunity.normalization.dto.TrainingNormalizationCommand;
-import com.team3.backend.opportunity.normalization.dto.TrainingCourseRaw;
-import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
-import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
-import com.team3.backend.opportunity.service.TrainingCourseNormalizationService;
-import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
+import com.team3.backend.eligibility.support.EligibilityResultFixtures;
+import com.team3.backend.opportunity.support.OpportunityFixtures;
+import com.team3.backend.opportunity.support.OpportunityFixtures.Saved;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
@@ -85,11 +80,8 @@ class OpportunityEligibilityBatchIntegrationTest {
     @Autowired private EntityManager entityManager;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private RegionDirectory regionDirectory;
-    @Autowired private YouthPolicyNormalizationService policyNormalization;
-    @Autowired private TrainingCourseNormalizationService trainingNormalization;
     @Autowired private OpportunitySourceRepository sourceRepository;
     @Autowired private EligibilityBatchRefresher batchRefresher;
-    @Autowired private ConditionSetBackfill conditionSetBackfill;
     @Autowired private EligibilityResultRepository resultRepository;
     @MockitoSpyBean private EligibilityResultService resultService;
 
@@ -103,14 +95,12 @@ class OpportunityEligibilityBatchIntegrationTest {
         Long failedUserId = users[1];
         Long noProfileUserId = users[2];
 
-        NormalizationResult first = normalizePolicy("BATCH-1", "통합 배치 정책 A", "34", null, today);
-        NormalizationResult second = normalizePolicy("BATCH-2", "통합 배치 정책 B", "34",
+        Saved first = normalizePolicy("BATCH-1", "통합 배치 정책 A", "34", null, today);
+        Saved second = normalizePolicy("BATCH-2", "통합 배치 정책 B", "34",
                 "추가 참여 요건은 원문 확인", today);
-        NormalizationResult third = normalizePolicy("BATCH-3", "통합 배치 정책 C", "34", null, today);
+        Saved third = normalizePolicy("BATCH-3", "통합 배치 정책 C", "34", null, today);
         Long trainingId = normalizeTraining(today);
         Long unknownId = createIncompleteNormalizedOpportunity();
-        // 정규화를 거치지 않은 버전은 조건 묶음이 비어 있다. 판정 배치는 묶음을 채우지 않으므로, 수집·정규화 쪽 백필이 채운 상황을 만든다
-        conditionSetBackfill.run();
         save(ownerId, first.opportunityId());
 
         assertThat(item(first.opportunityId(), ownerId).get("eligibilityStatus")).isNull();
@@ -185,7 +175,7 @@ class OpportunityEligibilityBatchIntegrationTest {
                 List.of(first.opportunityId(), second.opportunityId(), third.opportunityId()))).isEmpty();
         assertThat(batchRefresher.refreshAllUsers(now)).isZero();
 
-        NormalizationResult changed = normalizePolicy("BATCH-1", "통합 배치 정책 A", "20", null, today);
+        Saved changed = normalizePolicy("BATCH-1", "통합 배치 정책 A", "20", null, today);
         assertThat(changed.newVersion()).isTrue();
         assertThat(changed.versionId()).isNotEqualTo(first.versionId());
         assertThat(item(first.opportunityId(), ownerId).get("eligibilityStatus")).isNull();
@@ -230,31 +220,29 @@ class OpportunityEligibilityBatchIntegrationTest {
         return ids;
     }
 
-    private NormalizationResult normalizePolicy(String externalId, String title, String maxAge,
-                                                String additionalQualification, LocalDate today) {
-        YouthPolicyRaw raw = YouthPolicyRaw.builder().plcyNo(externalId).plcyNm(title)
-                .lclsfNm("교육").mclsfNm("취업")
-                .sprtTrgtMinAge("19").sprtTrgtMaxAge(maxAge).sprtTrgtAgeLmtYn("Y")
-                .addAplyQlfcCndCn(additionalQualification)
-                .aplyPrdSeCd("0057001")
-                .aplyYmd(today.minusDays(5).format(DateTimeFormatter.BASIC_ISO_DATE) + " ~ "
-                        + today.plusDays(20).format(DateTimeFormatter.BASIC_ISO_DATE))
-                .zipCd("11680").build();
-        return policyNormalization.normalize(new NormalizationCommand(POLICY_SOURCE, raw, List.of(),
-                "https://example.org/" + externalId, LocalDateTime.now()));
+    /** 정규화된 정책 (data-service 정규화 결과와 같은 조건 행). 같은 외부 ID로 다시 저장하면 내용이 바뀐 경우에만 새 버전 */
+    private Saved normalizePolicy(String externalId, String title, String maxAge,
+                                  String additionalQualification, LocalDate today) {
+        return new TransactionTemplate(transactionManager).execute(ignored -> OpportunityFixtures
+                .youthPolicy(externalId, title).source(POLICY_SOURCE)
+                .category("교육", "취업")
+                .age(19, Integer.parseInt(maxAge))
+                .additionalQualification(additionalQualification)
+                .fixedPeriod(today.minusDays(5), today.plusDays(20))
+                .residence("1168000000")
+                .save(entityManager));
     }
 
+    /** 정규화된 K-디지털 트레이닝 과정 (1회 한정 참여 + 거주지 제한 없음 + 원문 확인 조건) */
     private Long normalizeTraining(LocalDate today) {
-        TrainingCourseRaw raw = TrainingCourseRaw.builder().trprId("BATCH-COURSE")
-                .trprDegr("1").title("통합 배치 훈련").subTitle("훈련기관")
-                .traStartDate(today.plusDays(10).toString())
-                .traEndDate(today.plusDays(60).toString())
-                .trainTarget("K-디지털 트레이닝").trainTargetCd("C0104")
-                .trngAreaCd("11680").build();
-        assertThat(trainingNormalization.normalizePage(new TrainingNormalizationCommand(TRAINING_SOURCE,
-                List.of(raw), LocalDateTime.now())).created()).isEqualTo(1);
-        return sourceRepository.findBySourceIdAndExternalId(TRAINING_SOURCE, "BATCH-COURSE:1")
-                .orElseThrow().getOpportunity().getId();
+        Saved saved = new TransactionTemplate(transactionManager).execute(ignored -> OpportunityFixtures
+                .training("BATCH-COURSE", 1, "통합 배치 훈련").source(TRAINING_SOURCE)
+                .target("C0104", "K-디지털 트레이닝")
+                .dates(today.plusDays(10), today.plusDays(60))
+                .implementation("1168000000")
+                .save(entityManager));
+        assertThat(saved.created()).isTrue();
+        return saved.opportunityId();
     }
 
     private Long createIncompleteNormalizedOpportunity() {
@@ -268,6 +256,8 @@ class OpportunityEligibilityBatchIntegrationTest {
                     .personalizationStatus(PersonalizationStatus.UNKNOWN).build();
             entityManager.persist(version);
             opportunity.changeCurrentVersion(version);
+            // 조건 행이 없는 버전에도 data-service 백필이 조건 묶음을 붙인 상황 (판정 배치는 묶음이 빈 버전을 판정하지 않는다)
+            EligibilityResultFixtures.conditionSetOf(entityManager, version);
             id[0] = opportunity.getId();
         });
         return id[0];

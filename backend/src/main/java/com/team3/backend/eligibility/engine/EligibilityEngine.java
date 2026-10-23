@@ -38,6 +38,8 @@ import static com.team3.backend.eligibility.domain.entity.ConditionMatchResult.*
 public class EligibilityEngine {
 
     private static final String UNSTRUCTURED = "UNSTRUCTURED";
+    /** 코드 조건의 "기타(본문 확인 필요)" 값. data-service 정규화의 코드표(YouthPolicyCodeTable.OTHER)와 같은 값 */
+    private static final String OTHER_CODE = "OTHER";
 
     public EligibilityEvaluation evaluate(EligibilityProfileInput profile, List<EligibilityConditionInput> conditions,
                                           Collection<String> residenceRegionCodes, RegionIndex regionIndex, LocalDate today) {
@@ -188,7 +190,7 @@ public class EligibilityEngine {
         }
         Set<String> matched = new TreeSet<>(user.get().values());
         matched.retainAll(values);
-        matched.remove(com.team3.backend.opportunity.normalization.YouthPolicyCodeTable.OTHER);
+        matched.remove(OTHER_CODE);
         Object actual = user.get().values().size() == 1 ? user.get().values().iterator().next() : user.get().values();
         if (!matched.isEmpty()) {
             if (user.get().onLeave()) {
@@ -196,7 +198,7 @@ public class EligibilityEngine {
             }
             return result(c, "ANY_OF", values, actual, MATCHED, label(c.type()) + " 조건을 충족합니다.");
         }
-        if (values.contains(com.team3.backend.opportunity.normalization.YouthPolicyCodeTable.OTHER)) {
+        if (values.contains(OTHER_CODE)) {
             return result(c, "ANY_OF", values, actual, CHECK_REQUIRED, label(c.type()) + " 기타 조건을 공고 원문에서 확인해야 합니다.");
         }
         return result(c, "ANY_OF", values, actual, NOT_MATCHED, label(c.type()) + " 조건을 충족하지 않습니다.");
