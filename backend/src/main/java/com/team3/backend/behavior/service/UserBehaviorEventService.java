@@ -16,6 +16,7 @@ import com.team3.backend.user.domain.repository.UserRepository;
 import com.team3.backend.user.exception.UserErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** FE에서 발생한 인증 사용자 행동만 검증하고 저장한다. */
@@ -41,6 +42,20 @@ public class UserBehaviorEventService {
 
         eventRepository.save(new UserBehaviorEvent(
                 user, opportunity, request.eventType(), request.source(), request.linkType()));
+    }
+
+    /** 커밋된 저장·숨김 전환을 독립 트랜잭션에서 기록한다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordPreferenceChange(Long userId, Long opportunityId,
+                                       UserBehaviorEventType eventType, UserBehaviorSource source) {
+        if (eventType != UserBehaviorEventType.SAVE && eventType != UserBehaviorEventType.HIDE) {
+            throw new IllegalArgumentException("Only SAVE and HIDE can be recorded internally");
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+        Opportunity opportunity = opportunityRepository.findById(opportunityId)
+                .orElseThrow(() -> new BusinessException(OpportunityErrorCode.OPPORTUNITY_NOT_FOUND));
+        eventRepository.save(new UserBehaviorEvent(user, opportunity, eventType, source, null));
     }
 
     private void validate(UserBehaviorEventRequestDto request) {
