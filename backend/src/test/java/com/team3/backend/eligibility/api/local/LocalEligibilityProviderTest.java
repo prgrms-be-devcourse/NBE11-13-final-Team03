@@ -13,7 +13,13 @@ import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.eligibility.exception.EligibilityErrorCode;
 import com.team3.backend.eligibility.service.EligibilityEvaluator;
 import com.team3.backend.eligibility.service.EligibilityResultService;
-import com.team3.backend.opportunity.support.OpportunityFixtures;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.*;
+import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
+import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;
+import com.team3.backend.opportunity.normalization.official.PeriodEvidenceExtractor;
+import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
@@ -50,13 +56,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 })
 @Import({LocalEligibilityProvider.class, OpportunityInfoAssembler.class, EligibilityResultService.class, EligibilityEvaluator.class,
         EligibilityEngine.class, ApplicationStatusCalculator.class,
-        RegionDirectory.class})
+        YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
+        RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
+        YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
 class LocalEligibilityProviderTest {
 
     private static final Long USER = 1L;
 
     @Autowired
     private EligibilityProvider provider;
+    @Autowired
+    private YouthPolicyNormalizationService normalizationService;
     @Autowired
     private RegionDirectory regionDirectory;
     @PersistenceContext
@@ -229,14 +239,16 @@ class LocalEligibilityProviderTest {
         assertThat(provider.findFreshEligibility(USER, 999_999L, LocalDate.of(2026, 10, 20))).isEmpty();
     }
 
-    /** 정규화된 정책: 19~34세, 시·군·구 하나(5자리 코드) 거주, 2026-01-01 ~ 2099-12-31 신청, 그 밖의 조건 정보 없음 */
-    private Long normalizePolicy(String plcyNo, String sigunguCode) {
-        Long id = OpportunityFixtures.youthPolicy(plcyNo, "청년 월세 지원")
-                .category("주거", "주거지원")
-                .age(19, 34)
-                .residence(sigunguCode + "00000")
-                .fixedPeriod(LocalDate.of(2026, 1, 1), LocalDate.of(2099, 12, 31))
-                .save(em).opportunityId();
+    private Long normalizePolicy(String plcyNo, String zipCd) {
+        YouthPolicyRaw raw = YouthPolicyRaw.builder()
+                .plcyNo(plcyNo).plcyNm("청년 월세 지원")
+                .sprtTrgtMinAge("19").sprtTrgtMaxAge("34").sprtTrgtAgeLmtYn("Y")
+                .aplyPrdSeCd("0057001").aplyYmd("20260101 ~ 20991231")
+                .lclsfNm("주거").mclsfNm("주거지원")
+                .zipCd(zipCd)
+                .build();
+        Long id = normalizationService.normalize(new NormalizationCommand(1L, raw, List.of(),
+                "https://www.youthcenter.go.kr/policy/" + plcyNo, LocalDateTime.of(2026, 10, 14, 9, 0))).opportunityId();
         em.flush();
         em.clear();
         return id;

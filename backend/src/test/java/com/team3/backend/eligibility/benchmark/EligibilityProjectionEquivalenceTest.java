@@ -21,10 +21,13 @@ import com.team3.backend.opportunity.domain.repository.ApplicationWindowReposito
 import com.team3.backend.opportunity.domain.repository.OpportunityConditionRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityRegionRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityRepository;
+import com.team3.backend.opportunity.normalization.*;
+import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
+import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;
+import com.team3.backend.opportunity.normalization.official.PeriodEvidenceExtractor;
+import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.repository.RegionRepository;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,7 +65,9 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
 @Import({EligibilityQueryService.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
-        RegionDirectory.class})
+        YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
+        RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
+        YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
 class EligibilityProjectionEquivalenceTest {
 
     private static final OffsetDateTime NOW = OffsetDateTime.parse("2026-10-15T10:00:00+09:00");
@@ -72,6 +77,7 @@ class EligibilityProjectionEquivalenceTest {
     @Autowired private EligibilityQueryService queryService;
     @Autowired private EligibilityEngine engine;
     @Autowired private ApplicationStatusCalculator applicationStatusCalculator;
+    @Autowired private YouthPolicyNormalizationService normalizationService;
     @Autowired private RegionDirectory regionDirectory;
     @Autowired private RegionRepository regionRepository;
     @Autowired private EligibilityProfileRepository profileRepository;
@@ -81,13 +87,12 @@ class EligibilityProjectionEquivalenceTest {
     @Autowired private ApplicationWindowRepository windowRepository;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private DataSource dataSource;
-    @PersistenceContext private EntityManager em;
 
     @Test
     void Projection_판정은_엔티티_기반_판정과_결과가_같다() {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
-        BenchmarkData data = new BenchmarkData(jdbc, tx, regionRepository, regionDirectory, profileRepository, em);
+        BenchmarkData data = new BenchmarkData(jdbc, tx, regionRepository, regionDirectory, profileRepository, normalizationService);
         try {
             data.seedRegions();
             data.seedProfiles();
