@@ -30,9 +30,9 @@ class DateTrackingReadinessTest {
     }
 
     @Test
-    void pendingOrFailedNormalizationBlocksReadiness() {
+    void pendingNormalizationBlocksReadiness() {
         histories(List.of(success("YOUTH_POLICY")));
-        when(requests.hasIncompleteBefore(eq("YOUTH_POLICY"), any())).thenReturn(true);
+        when(requests.hasPendingBefore(eq("YOUTH_POLICY"), any())).thenReturn(true);
         assertThat(service.ready(date)).isFalse();
     }
 

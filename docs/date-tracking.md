@@ -87,14 +87,17 @@ ApplicationReadyEvent에서 동기 실행하지 않으므로 복구 스캔이 ma
 
 ## 스키마 적용
 
-Hibernate 기본 validate는 그대로 유지한다.
-실제 Application 시작 전 신규 두 테이블을 명시적 SQL로 생성해야 한다.
-자동 실행을 비활성화해도 JPA의 두 Entity를 검증하므로 스키마 준비는 필요하다.
+backend는 마이그레이션 도구 도입 전까지 ddl-auto=update를 사용한다([DB 경계 문서](database-boundaries.md)의 ddl-auto 정책).
+update는 SQL에만 있는 CHECK 제약 등을 만들지 않으므로, Application 기본 테이블이 이미 있는 DB에는
+새 버전 서버를 기동하기 **전에** 신규 두 테이블을 명시적 SQL로 먼저 만든다.
 
 1. 서버를 중지하고 대상 DB/백업/기존 객체를 확인한다.
 2. Application 기본 테이블이 존재하는 DB에 application_user로 접속한다.
 3. database/scripts/date-tracking.sql을 실행한다.
-4. 기본 validate로 기동하고, 테스트 후 자동 스캔 활성화 여부를 결정한다.
+4. 새 버전 서버를 기동하고, 테스트 후 자동 스캔 활성화 여부를 결정한다.
+
+Application 테이블이 하나도 없는 새 로컬 DB는 첫 기동에서 update가 추적 테이블까지 만든다.
+이때는 SQL을 실행하지 않는다(테이블이 이미 있으면 SQL이 실패한다). 이 경우 SQL에만 있는 CHECK 제약은 없다.
 
 SQL은 최초 설치용이며 기존 테이블을 삭제하거나 재생성하지 않는다.
 이미 추적 테이블이 있으면 실행이 실패한다. 반복 설치나 구 추적 브랜치 DB 업그레이드에 사용하지 않는다.

@@ -28,6 +28,6 @@ public class DateTrackingReadiness {
         boolean collected = !today.isEmpty() && today.getFirst().getStatus() == SyncJobStatus.SUCCESS;
         boolean collecting = histories.existsBySourceSourceCodeAndStatusIn("YOUTH_POLICY",
                 List.of(SyncJobStatus.PENDING, SyncJobStatus.RUNNING));
-        return collected && !collecting && !requests.hasIncompleteBefore("YOUTH_POLICY", until);
+        return collected && !collecting && !requests.hasPendingBefore("YOUTH_POLICY", until);
     }
 }

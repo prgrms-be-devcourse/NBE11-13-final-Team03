@@ -36,9 +36,18 @@ public class DateTrackingBatch {
     private final DateTrackingProperties properties;
     private final Clock clock;
 
-    /** Lock execution ownership through page commit, including event inserts and heartbeat. */
     @Transactional
     public PageResult scan(EventScanExecution execution, long afterId) {
+        return scan(execution, afterId, LocalDate.ofInstant(clock.instant(), KST));
+    }
+
+    /**
+     * Lock execution ownership through page commit, including event inserts and heartbeat.
+     * processingDate is fixed by the caller at run start, so a run crossing midnight does not suppress
+     * same-day DEADLINE_SOON events on later pages.
+     */
+    @Transactional
+    public PageResult scan(EventScanExecution execution, long afterId, LocalDate processingDate) {
         var history = histories.lockByScanDate(execution.scanDate()).orElseThrow();
         if (history.getStatus() != EventScanStatus.RUNNING
                 || !history.getExecutionId().equals(execution.executionId())) {
@@ -55,7 +64,6 @@ public class DateTrackingBatch {
                 .collect(Collectors.groupingBy(w -> w.getVersion().getId(),
                         Collectors.mapping(w -> new ApplicationPeriod(w.getPeriodType(), w.getStartDate(),
                                 w.getEndDate(), w.getValidationStatus(), w.getPeriodText()), Collectors.toList())));
-        LocalDate processingDate = LocalDate.ofInstant(clock.instant(), KST);
         for (var opportunity : page) {
             var version = opportunity.getCurrentVersion();
             var periods = periodsByVersion.getOrDefault(version.getId(), List.of());

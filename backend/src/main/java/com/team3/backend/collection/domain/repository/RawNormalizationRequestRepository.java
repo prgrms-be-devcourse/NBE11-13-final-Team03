@@ -8,10 +8,14 @@ import java.time.OffsetDateTime;
 
 public interface RawNormalizationRequestRepository extends JpaRepository<RawNormalizationRequest, Long> {
 
+    /**
+     * Normalization still waiting to run. FAILED is terminal and is not waited on, so an old failure
+     * does not delay the date scan until the cutoff every day.
+     */
     @Query("""
             select count(q) > 0 from RawNormalizationRequest q
             where q.rawRecord.source.sourceCode = :source
-              and q.createdAt < :until and q.status <> 'SUCCESS'
+              and q.createdAt < :until and q.status = 'PENDING'
             """)
-    boolean hasIncompleteBefore(@Param("source") String source, @Param("until") OffsetDateTime until);
+    boolean hasPendingBefore(@Param("source") String source, @Param("until") OffsetDateTime until);
 }
