@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/yon}
+    driver-class-name: org.postgresql.Driver
+    username: notification_user
+    password: ${NOTIFICATION_DB_PASSWORD}
+    hikari:
+      connection-init-sql: SET search_path TO notification, pg_catalog
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: notification

@@ -9,7 +9,9 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 public class BackendApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(BackendApplication.class, args);
+        SpringApplication application = new SpringApplication(BackendApplication.class);
+        application.setAdditionalProfiles("database-boundary");
+        application.run(args);
     }
 
 }

@@ -7,6 +7,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class NotificationApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(NotificationApplication.class, args);
+        SpringApplication application = new SpringApplication(NotificationApplication.class);
+        application.setAdditionalProfiles("database-boundary");
+        application.run(args);
     }
 }
