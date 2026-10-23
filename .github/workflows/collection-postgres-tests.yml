@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'database/**'
       - '.github/workflows/collection-postgres-tests.yml'
       - '.github/workflows/backend-image.yml'
   workflow_dispatch:

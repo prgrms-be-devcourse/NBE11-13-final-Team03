@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: data-service
+  config:
+    import:
+      - optional:classpath:youth-policy-codes.yaml
+      - classpath:application-collection.yaml
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+  # 메인 서비스(backend)와 같은 DB를 쓴다 (DB 공유 1단계).
+  # main() 실행 시에는 database-boundary 프로필이 계정을 application_user로 고정한다 (application-database-boundary.yaml)
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/yon}
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:1234}
+
+  task:
+    scheduling:
+      pool:
+        size: 4
+      thread-name-prefix: yon-data-scheduling-
+
+server:
+  # notification-service가 8081을 쓰므로 8082
+  port: ${DATA_SERVICE_PORT:8082}
+
+# 메인 서비스가 DataService 내부 API를 부를 때 쓰는 전용 키 (X-INTERNAL-KEY).
+# 메인의 INTERNAL_API_KEY와 분리한다 (notification-service의 NOTIFICATION_INTERNAL_API_KEY와 같은 방식).
+# 메인 서비스에는 같은 값을 DATA_SERVICE_INTERNAL_API_KEY로 넣는다.
+internal:
+  api-key: ${DATA_SERVICE_INTERNAL_API_KEY}
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
+
+region-code-api:
+  base-url: https://apis.data.go.kr/1741000/StanReginCd/getStanReginCdList
+  service-key: ${REGION_CODE_API_KEY:}
+  page-size: 1000
+  sync-on-startup: ${REGION_CODE_SYNC_ON_STARTUP:false}
+
+yon:
+  normalization:
+    ingest:
+      # 수집 원본 → 정규화 연동 (LISTEN/NOTIFY + 주기 폴링·대조). false면 LISTEN·스케줄 모두 끈다
+      # 메인 서비스에서 정규화를 걷어내기 전까지는 두 서비스 중 한쪽에서만 true로 둔다 (README 실행 플래그 표)
+      enabled: ${YON_NORMALIZATION_INGEST_ENABLED:true}
+      channel: raw_normalization_requested
+      batch-size: 100
+      # 트랜잭션 1개로 묶는 원본 수 (커밋 대기를 줄이기 위해, 벤치마크로 결정)
+      transaction-size: 100
+      poll-interval-ms: 60000
+      reconcile-interval-ms: 3600000
+    # 기동 시 조건 묶음 백필. 메인 서비스와 동시에 켜면 묶음 생성이 경합하므로 한쪽에서만 true (README 실행 플래그 표)
+    condition-set-backfill:
+      enabled: ${YON_NORMALIZATION_CONDITION_SET_BACKFILL_ENABLED:true}

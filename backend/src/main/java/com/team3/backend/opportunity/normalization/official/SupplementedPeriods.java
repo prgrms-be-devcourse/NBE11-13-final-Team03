@@ -1,6 +1,6 @@
 package com.team3.backend.opportunity.normalization.official;
 
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 
 import java.util.List;
 

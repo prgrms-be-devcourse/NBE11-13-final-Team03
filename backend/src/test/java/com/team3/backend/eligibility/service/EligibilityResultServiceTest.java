@@ -1,13 +1,14 @@
 package com.team3.backend.eligibility.service;
 
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultUpsertRepository;
 import com.team3.backend.eligibility.dto.OpportunityEligibility;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.NormalizationResult;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.*;
 import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
 import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;

@@ -31,7 +31,7 @@ dependencies {
     // JWT
     implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
     //env
-    implementation 'me.paulschwarz:spring-dotenv:3.0.0'
+    developmentOnly 'me.paulschwarz:springboot4-dotenv:5.1.0'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.13.0'
     compileOnly 'org.projectlombok:lombok'
@@ -51,6 +51,13 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+// Administrator SQL is test input, never an application startup resource.
+tasks.named('processTestResources') {
+    from('../database/scripts') {
+        into 'db-boundary'
+    }
 }
 
 tasks.named('bootJar') {
