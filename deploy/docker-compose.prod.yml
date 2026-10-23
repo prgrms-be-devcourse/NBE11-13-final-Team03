@@ -1,0 +1,79 @@
+# EC2 배포용 compose. GitHub Actions(.github/workflows/deploy.yml)가 배포 때마다 EC2의 배포 폴더로 복사한다.
+# 로컬 개발용 DB는 backend/docker-compose.yml을 쓴다.
+#
+# 지금은 EC2 한 대에 backend + data-service (+ PostgreSQL)를 함께 띄운다.
+# 나중에 서버를 나누면 서비스별 compose로 옮기고 DATA_SERVICE_BASE_URL·DB_URL만 바꾼다 (docs/ingest-split.md).
+#
+# 배포 폴더에 필요한 파일
+#   .env        운영 환경변수 (deploy/.env.example 참고, 직접 만든다. git에 올리지 않는다)
+#   deploy.env  BACKEND_IMAGE·DATA_SERVICE_IMAGE=<GHCR 이미지> (Actions가 서비스별로 한 줄씩 쓴다)
+#   db-init/    DB 계정·스키마 초기화 SQL (Actions가 복사, 빈 볼륨에서 처음 한 번만 실행됨)
+#
+# 실행: docker compose -f docker-compose.prod.yml --env-file .env --env-file deploy.env up -d <서비스>
+# DB: .env의 COMPOSE_PROFILES=db면 이 compose의 PostgreSQL을 함께 띄운다. RDS로 옮기면 COMPOSE_PROFILES를 비우고 DB_URL만 바꾼다.
+# 아직 배포하지 않은 서비스의 이미지 값은 비어 있을 수 있다. 서비스를 지정해 up 하므로 그 서비스는 받지 않는다.
+name: yon
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-backend-not-deployed}
+    env_file: .env
+    environment:
+      # 한 서버에 JVM 두 개를 띄우므로 힙 상한을 고정한다 (t3.small 2GB)
+      JAVA_TOOL_OPTIONS: ${BACKEND_JAVA_OPTS:--Xmx512m}
+      DATA_SERVICE_BASE_URL: http://data-service:8082
+      # 수집·정규화는 data-service가 한다. backend에 같은 코드가 남아 있는 동안에도 두 곳에서 돌지 않게 끈다
+      COLLECTION_SCHEDULE_ENABLED: "false"
+      YON_NORMALIZATION_INGEST_ENABLED: "false"
+      YON_NORMALIZATION_CONDITION_SET_BACKFILL_ENABLED: "false"
+      REGION_CODE_SYNC_ON_STARTUP: "false"
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  data-service:
+    image: ${DATA_SERVICE_IMAGE:-data-service-not-deployed}
+    env_file: .env
+    environment:
+      JAVA_TOOL_OPTIONS: ${DATA_SERVICE_JAVA_OPTS:--Xmx384m}
+    # 내부 전용 (Spring Security 없음). 외부에 열지 않고, backend는 compose 네트워크(data-service:8082)로 부른다.
+    # 127.0.0.1 바인딩은 배포 워크플로의 기동 확인용이다
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+    logging: *logging
+
+  postgres-db:
+    image: postgres:16-alpine
+    profiles: ["db"]
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:?.env에 DB_USERNAME이 필요합니다}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?.env에 DB_PASSWORD가 필요합니다}
+      POSTGRES_DB: ${DB_NAME:-yon}
+      TZ: Asia/Seoul
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # 빈 볼륨에서만 실행된다: application_user·notification_user 계정과 스키마 생성 (비밀번호는 README 절차로 따로 설정)
+      - ./db-init/01-database-boundaries.sql:/docker-entrypoint-initdb.d/01-database-boundaries.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,8 +1,10 @@
-name: Deploy backend
+name: Deploy
 
-# main에 push → "Publish backend image"(backend-image.yml)가 GHCR에 이미지를 올림 → 성공하면 이 워크플로가 EC2에 배포한다.
-# 이미지는 빌드하지 않는다. backend-image.yml이 올린 ghcr.io/<저장소>/backend:sha-<커밋 SHA>를 받아 docker compose로 재시작한다.
-# 수동 실행(Run workflow)에서 image_tag를 넣으면 그 이미지로 배포한다 (롤백용, 예: sha-<40자리 커밋 SHA>).
+# main에 push → 이미지 게시 워크플로가 GHCR에 이미지를 올림 → 성공하면 이 워크플로가 EC2에 그 서비스만 배포한다.
+#   "Publish backend image"(backend-image.yml) → backend  (ghcr.io/<저장소>/backend:sha-<커밋 SHA>)
+#   "Data service"(data-service.yml)           → data-service (ghcr.io/<저장소>/data-service:sha-<커밋 SHA>)
+# 이미지는 빌드하지 않는다. deploy.env의 해당 서비스 줄만 바꾸고 그 서비스만 docker compose로 재시작한다.
+# 수동 실행(Run workflow)에서 service와 image_tag를 넣으면 그 이미지로 배포한다 (롤백용, 예: sha-<40자리 커밋 SHA>).
 #
 # 필요한 설정 (Settings → Secrets and variables → Actions)
 #   vars:    EC2_HOST, EC2_USER, (선택) EC2_DEPLOY_DIR
@@ -11,11 +13,16 @@ name: Deploy backend
 
 on:
   workflow_run:
-    workflows: ["Publish backend image"]
+    workflows: ["Publish backend image", "Data service"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
+      service:
+        description: "배포할 서비스"
+        required: true
+        type: choice
+        options: [backend, data-service]
       image_tag:
         description: "배포할 이미지 태그 (예: sha-<40자리 커밋 SHA>). 비우면 실행한 브랜치의 최신 커밋 이미지"
         required: false
@@ -47,18 +54,37 @@ jobs:
           ref: ${{ env.HEAD_SHA }}
           persist-credentials: false
 
-      - name: Resolve image
+      - name: Resolve service and image
         env:
+          INPUT_SERVICE: ${{ inputs.service }}
           INPUT_TAG: ${{ inputs.image_tag }}
+          RUN_WORKFLOW: ${{ github.event.workflow_run.name }}
         run: |
           set -euo pipefail
+          SERVICE="${INPUT_SERVICE:-}"
+          if [ -z "$SERVICE" ]; then
+            case "$RUN_WORKFLOW" in
+              "Publish backend image") SERVICE=backend ;;
+              "Data service") SERVICE=data-service ;;
+              *) echo "::error::알 수 없는 워크플로: $RUN_WORKFLOW"; exit 1 ;;
+            esac
+          fi
+          case "$SERVICE" in
+            backend) IMAGE_VAR=BACKEND_IMAGE ;;
+            data-service) IMAGE_VAR=DATA_SERVICE_IMAGE ;;
+            *) echo "::error::알 수 없는 서비스: $SERVICE"; exit 1 ;;
+          esac
           TAG="${INPUT_TAG:-sha-$HEAD_SHA}"
           # 원격 명령에 들어가므로 형식을 고정한다
           if ! [[ "$TAG" =~ ^sha-[0-9a-f]{40}$ ]]; then
             echo "::error::이미지 태그 형식이 아닙니다: sha-<40자리 커밋 SHA>"
             exit 1
           fi
-          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/backend:$TAG" >> "$GITHUB_ENV"
+          {
+            echo "SERVICE=$SERVICE"
+            echo "IMAGE_VAR=$IMAGE_VAR"
+            echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/$SERVICE:$TAG"
+          } >> "$GITHUB_ENV"
 
       - name: Check image exists
         env:
@@ -71,7 +97,7 @@ jobs:
             exit 1
           fi
           docker logout ghcr.io
-          echo "배포 이미지: \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "배포: \`$SERVICE\` ← \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up SSH
         env:
@@ -91,52 +117,66 @@ jobs:
         run: |
           set -euo pipefail
           SSH="ssh -i $HOME/.ssh/deploy_key"
-          $SSH "$TARGET" "mkdir -p '$DEPLOY_DIR'"
-          scp -i ~/.ssh/deploy_key backend/deploy/docker-compose.prod.yml "$TARGET:$DEPLOY_DIR/docker-compose.prod.yml"
+          $SSH "$TARGET" "mkdir -p '$DEPLOY_DIR/db-init' '$DEPLOY_DIR/sql'"
+          scp -i ~/.ssh/deploy_key deploy/docker-compose.prod.yml "$TARGET:$DEPLOY_DIR/docker-compose.prod.yml"
+          # DB 초기화(빈 볼륨에서만 실행)와 수동 실행용 SQL. README의 "DB 준비" 참고
+          scp -i ~/.ssh/deploy_key database/scripts/database-boundaries.sql "$TARGET:$DEPLOY_DIR/db-init/01-database-boundaries.sql"
+          scp -i ~/.ssh/deploy_key database/scripts/migrate-public-to-application.sql \
+            data-service/src/main/resources/db/scripts/normalization-notifications.sql "$TARGET:$DEPLOY_DIR/sql/"
           # 토큰은 명령줄에 넣지 않고 표준입력으로 권한 600 파일에 쓴다. 원격 스크립트가 로그인 후 바로 지운다.
           printf '%s' "$GHCR_TOKEN" | $SSH "$TARGET" "umask 077 && cat > '$DEPLOY_DIR/.ghcr_token'"
           $SSH "$TARGET" \
-            "DEPLOY_DIR='$DEPLOY_DIR' IMAGE='$IMAGE' GHCR_USER='$GITHUB_ACTOR' bash -s" <<'REMOTE'
+            "DEPLOY_DIR='$DEPLOY_DIR' SERVICE='$SERVICE' IMAGE_VAR='$IMAGE_VAR' IMAGE='$IMAGE' GHCR_USER='$GITHUB_ACTOR' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$DEPLOY_DIR"
           trap 'rm -f .ghcr_token; docker logout ghcr.io > /dev/null 2>&1 || true' EXIT
           if [ ! -f .env ]; then
-            echo "::error::$DEPLOY_DIR/.env 가 없습니다 (backend/deploy/.env.example 참고)"
+            echo "::error::$DEPLOY_DIR/.env 가 없습니다 (deploy/.env.example 참고)"
             exit 1
           fi
 
           docker login ghcr.io -u "$GHCR_USER" --password-stdin < .ghcr_token
           rm -f .ghcr_token
 
-          [ -f deploy.env ] && cp deploy.env deploy.env.prev
-          echo "BACKEND_IMAGE=$IMAGE" > deploy.env
+          # deploy.env는 서비스마다 한 줄. 이번 서비스 줄만 바꾸고 이전 상태는 deploy.env.prev로 남긴다
+          touch deploy.env
+          cp deploy.env deploy.env.prev
+          { grep -v "^$IMAGE_VAR=" deploy.env.prev || true; echo "$IMAGE_VAR=$IMAGE"; } > deploy.env
           compose() { docker compose -f docker-compose.prod.yml --env-file .env --env-file deploy.env "$@"; }
 
-          compose pull backend
-          docker logout ghcr.io > /dev/null
-          compose up -d --remove-orphans
+          if [ "$SERVICE" = backend ] && ! grep -q '^DATA_SERVICE_IMAGE=' deploy.env; then
+            echo "::warning::data-service가 아직 배포되지 않았습니다. backend는 수집·정규화를 하지 않으므로 새 공고가 들어오지 않습니다"
+          fi
 
-          port=$(grep -E '^BACKEND_PORT=' .env | tail -n 1 | cut -d= -f2)
-          port=${port:-8080}
+          compose pull "$SERVICE"
+          docker logout ghcr.io > /dev/null
+          compose up -d "$SERVICE"
+
+          if [ "$SERVICE" = backend ]; then
+            port=$(grep -E '^BACKEND_PORT=' .env | tail -n 1 | cut -d= -f2)
+            url="http://localhost:${port:-8080}/"
+          else
+            url="http://127.0.0.1:8082/"
+          fi
           code=000
           for _ in $(seq 1 36); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/" || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
             [ "$code" != "000" ] && break
             sleep 5
           done
 
           if [ "$code" = "000" ]; then
-            echo "::error::백엔드가 3분 안에 응답하지 않았습니다"
-            compose logs --tail 200 backend || true
-            if [ -f deploy.env.prev ]; then
-              echo "이전 이미지로 되돌립니다: $(cat deploy.env.prev)"
+            echo "::error::$SERVICE 가 3분 안에 응답하지 않았습니다"
+            compose logs --tail 200 "$SERVICE" || true
+            if grep -q "^$IMAGE_VAR=" deploy.env.prev; then
+              echo "이전 이미지로 되돌립니다: $(grep "^$IMAGE_VAR=" deploy.env.prev)"
               cp deploy.env.prev deploy.env
-              compose up -d --remove-orphans
+              compose up -d "$SERVICE"
             fi
             exit 1
           fi
 
-          echo "기동 확인 (HTTP $code): $IMAGE"
+          echo "기동 확인 (HTTP $code): $SERVICE ← $IMAGE"
           docker image prune -f
           REMOTE
 

@@ -104,8 +104,8 @@ backend는 첫 bootRun에서 update로 application 스키마의 테이블을 만
 - 데이터를 유지할 때: 아래 관리자 SQL 1·2단계(프로비저닝, public 이전)를 로컬 DB에 직접 실행하고 비밀번호를 설정한다.
 - 데이터가 필요 없을 때: `docker compose down -v`로 볼륨을 지우고 다시 올린다. 로컬 데이터가 모두 삭제된다.
 
-운영 compose(#33 docker-compose.prod.yml)에도 같은 프로비저닝 단계가 필요하다.
-두 PR 중 나중에 병합되는 쪽에서 초기화 SQL 마운트와 .env.example 항목을 맞춘다.
+운영 compose(`deploy/docker-compose.prod.yml`)도 빈 볼륨에서 같은 초기화 SQL을 실행한다.
+비밀번호 설정, 기존 볼륨 이전, NOTIFY 트리거 설치 절차는 `deploy/README.md`의 "DB 준비"를 따른다.
 
 ## 관리자 SQL: 자동 실행 금지
 
