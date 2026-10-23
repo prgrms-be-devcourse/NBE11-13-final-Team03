@@ -67,6 +67,9 @@ public class SecurityConfig {
 
                         ).permitAll()
 
+                        .requestMatchers(HttpMethod.GET, "/api/opportunities/recommendations")
+                        .hasAnyAuthority("USER", "ADMIN")
+
                         // 비회원도 조회 가능한 기회 API
                         .requestMatchers(
                                 HttpMethod.GET,
