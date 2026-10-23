@@ -33,8 +33,8 @@
 
 ## 수집 내부 API gRPC 전환 — PR B
 
-- 작업 기준은 #45 브랜치다. #45·#50 및 #39의 선행 작업이 main에 반영되면 PR 기준을 main으로 변경하고 검증한다.
-- #50의 `contracts/proto/collection/v1/collection.proto`를 동일한 내용으로 사용한다. 서버 구현은 #50 소유다.
+- 작업 기준은 #45 브랜치다. #45·#53 및 #39의 선행 작업이 main에 반영되면 PR 기준을 main으로 변경하고 검증한다.
+- #53의 `contracts/proto/collection/v1/collection.proto`를 동일한 내용으로 사용한다. 서버 구현은 #53 소유다.
 - backend의 `/api/admin/collection/**` 5개 경로와 ADMIN 권한, HTTP 응답 DTO는 유지하고 내부 Feign 호출만 gRPC로 바꾼다.
 - `totalCount`는 항상 null, `payloadHash`는 요청 호환용으로 받되 서버가 계산한다.
 - 목록의 recordFailures는 빈 배열이며, 실패 건수는 유지된다. 단건 조회는 상세를 포함한다.
@@ -68,6 +68,6 @@ OpenFeign·Spring Cloud BOM·EnableFeignClients는 #39의 알림 호출을 위�
 운영 compose가 준비되면 DATA_SERVICE_GRPC_ADDRESS=static://data-service:9092를 backend에 전달한다.
 이 포트는 내부 네트워크에만 두고, 호스트를 분리할 때 TLS를 적용한다.
 
-배포 순서는 data-service gRPC 서버(#50) → backend 클라이언트(이 단계) → REST 제거(PR C)다.
+배포 순서는 data-service gRPC 서버(#53) → backend 클라이언트(이 단계) → REST 제거(PR C)다.
 PR B 배포·실제 수집 확인 전에는 REST를 제거하지 않는다.
 현재 분기에는 운영 compose가 없으므로 #49 병합 후 주소 환경변수와 배포 구성을 맞춰야 한다.
