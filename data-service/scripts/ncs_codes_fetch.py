@@ -6,7 +6,7 @@
 키: 환경변수 EMPLOYMENT24_CODE_API_KEY (공통코드 API용 키가 따로 나온 경우), 없으면 EMPLOYMENT24_API_KEY.
     실행 전 set -a; . ~/yon-e2e.env; set +a. 키는 화면·파일에 남기지 않는다.
 실행: python3 ncs_codes_fetch.py  → ./ncs-codes.tsv 생성, 화면에 요약
-결과 파일을 backend/src/main/resources/ncs-codes.tsv로 복사해 커밋한다 (앱은 API를 부르지 않고 이 파일만 읽음)
+결과 파일을 data-service/src/main/resources/ncs-codes.tsv로 복사해 커밋한다 (앱은 API를 부르지 않고 이 파일만 읽음)
 
 불완전한 표가 만들어지지 않도록, 아래 중 하나라도 있으면 파일을 만들지 않고 중단한다 (기존 파일도 그대로 둔다).
 - 호출 실패, XML이 아닌 응답, <error> 응답
@@ -103,7 +103,7 @@ def main():
         out.write("# NCS 분류 코드 → 이름 (NcsClassification)\n")
         out.write("# 형식: 코드<TAB>이름. 2자리 = 대분류(1차), 4자리 = 중분류(2차)\n")
         out.write(f"# 출처: 고용24 공통코드 API callOpenApiSvcInfo319L01 (srchType 05 대분류, 06 중분류), {today} 생성\n")
-        out.write("# 다시 만들기: backend/scripts/ncs_codes_fetch.py (홈서버에서 실행 후 이 파일로 복사)\n")
+        out.write("# 다시 만들기: data-service/scripts/ncs_codes_fetch.py (홈서버에서 실행 후 이 파일로 복사)\n")
         for code, name in sorted(lines):
             out.write(f"{code}\t{name}\n")
     os.replace(tmp, OUTPUT)

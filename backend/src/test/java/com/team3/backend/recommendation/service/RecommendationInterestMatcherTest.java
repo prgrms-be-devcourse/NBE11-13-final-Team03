@@ -12,19 +12,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -124,28 +115,6 @@ class RecommendationInterestMatcherTest {
         when(userInterestService.getInterests(1L))
                 .thenReturn(new UserInterestsResponse(List.of(subCategory, category)));
         assertEquals(first.match(candidate), new RecommendationInterestMatcher(userInterestService).load(1L).match(candidate));
-    }
-
-    @Test
-    void ncsMiddleNamesRemainUniqueAcrossMajorCategories() throws IOException {
-        var resource = getClass().getClassLoader().getResourceAsStream("ncs-codes.tsv");
-        assertNotNull(resource);
-        Map<String, Set<String>> parentsByName = new HashMap<>();
-        try (var reader = new BufferedReader(new InputStreamReader(resource, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] columns = line.split("\t", 2);
-                if (columns.length == 2 && columns[0].matches("\\d{4}")) {
-                    parentsByName.computeIfAbsent(columns[1], ignored -> new HashSet<>())
-                            .add(columns[0].substring(0, 2));
-                }
-            }
-        }
-        assertEquals(List.of(), parentsByName.entrySet().stream()
-                .filter(entry -> entry.getValue().size() > 1)
-                .map(Map.Entry::getKey)
-                .sorted()
-                .toList());
     }
 
     private RecommendationInterestMatcher.MatchContext load(UserInterestResponse... interests) {
