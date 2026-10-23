@@ -17,6 +17,12 @@ import static com.team3.backend.tracking.config.DateTrackingConfig.KST;
  * raw_external_record, external_source)을 공유 DB에서 읽기만 해서 판단한다.
  * 수집 영역의 엔티티·Repository를 쓰지 않고 테이블 컬럼을 계약으로 삼는다. 수집 쪽 컬럼·상태 값이 바뀌면 이 클래스만 고친다.
  * DB를 서비스별로 분리하면 이 조회는 data-service API(또는 완료 이벤트)로 바꾼다.
+ *
+ * 읽는 컬럼: external_source(id, source_code), sync_history(source_id, status, started_at, id),
+ * raw_external_record(id, source_id), raw_normalization_request(raw_record_id, status, created_at).
+ * 상태 값: sync_history.status의 PENDING·RUNNING·SUCCESS, raw_normalization_request.status의 PENDING.
+ * DateTrackingReadinessTest는 이 목록대로 만든 최소 테이블로 SQL만 검증하므로, data-service가 위 컬럼이나 상태 값을
+ * 바꾸면 테스트로는 드러나지 않는다. 운영에서는 조회 실패 경고 로그가 남고 마지노선으로 넘어가므로, 그 변경 때 이 클래스도 함께 고친다.
  */
 @Slf4j
 @Service
