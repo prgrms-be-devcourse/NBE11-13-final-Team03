@@ -53,12 +53,40 @@ Hibernate default_schema와 Hikari connection-init-sql을 각 소유 스키마�
 Hikari를 거치지 않는 기존 RawIngestListener의 JDBC 연결도 올바르게 동작하도록
 로그인 계정의 DB별 search_path를 관리자 SQL로 설정한다. 적용 후 기존 연결을 재사용하지 말고 재접속한다.
 
-런타임 기본 ddl-auto는 validate다. 누락된 테이블을 자동 생성하거나 운영 테이블을
-update하지 않는다. 운영 DDL/마이그레이션은 해당 스키마 소유자로 명시적으로 적용한다.
-관리자로 DDL을 적용한다면 SET ROLE로 소유자를 지정하고 실제 객체 소유권/ACL도 검토한다.
-이 PR은 전체 도메인 신규 설치용 DDL baseline이나 Flyway를 도입하지 않는다.
-비어 있는 개발용 폐기 DB의 초기 테이블 생성이 필요하면 별도로 합의한 초기화 절차를 사용한다.
-운영에서 validate 오류를 피하려고 create/update로 우회하지 않는다.
+코드의 네이티브 SQL(업서트, ANALYZE, pg_stats 등)은 스키마 이름을 붙이지 않고 search_path에 맡긴다.
+네이티브 SQL에 public. 같은 스키마 접두사를 붙이거나 search_path를 바꾸지 않는다.
+pg_stats처럼 스키마를 조건으로 써야 하면 current_schema()를 사용한다.
+
+### ddl-auto 정책
+
+| 프로젝트 | ddl-auto | 이유 |
+| --- | --- | --- |
+| backend | update | 기존 스키마 변경 PR이 update에 의존해 왔고 아직 마이그레이션 도구가 없다 |
+| notification-service | validate | 새 프로젝트라 처음부터 database/scripts의 수동 DDL로 관리한다 |
+
+backend는 마이그레이션 도구(Flyway 등)를 도입하기 전까지 update를 유지한다.
+application_user는 application 스키마만 소유하므로 update가 다른 스키마나 public을 바꾸지 않는다.
+update는 컬럼 타입 변경·삭제를 하지 않으므로, 그런 변경은 application_user로 명시적 DDL을 적용한다.
+Flyway 도입과 backend validate 전환은 후속 작업으로 팀이 함께 결정한다.
+
+## 로컬 개발 DB
+
+backend/docker-compose.yml은 데이터 볼륨이 비어 있을 때 다음을 자동 실행한다.
+
+1. database/scripts/database-boundaries.sql: 두 계정과 스키마 생성
+2. database/local/02-set-local-passwords.sh: 두 계정의 비밀번호 설정 (로컬 전용)
+
+backend/.env에 APPLICATION_DB_PASSWORD와 NOTIFICATION_DB_PASSWORD를 둘 다 넣어야 compose가 실행된다
+(backend/.env.example 참고). notification-service/.env의 NOTIFICATION_DB_PASSWORD도 같은 값을 쓴다.
+backend는 첫 bootRun에서 update로 application 스키마의 테이블을 만든다.
+
+초기화 스크립트는 빈 볼륨에서만 실행된다. 기존 로컬 볼륨에 public 테이블이 있으면 둘 중 하나를 선택한다.
+
+- 데이터를 유지할 때: 아래 관리자 SQL 1·2단계(프로비저닝, public 이전)를 로컬 DB에 직접 실행하고 비밀번호를 설정한다.
+- 데이터가 필요 없을 때: `docker compose down -v`로 볼륨을 지우고 다시 올린다. 로컬 데이터가 모두 삭제된다.
+
+운영 compose(#33 docker-compose.prod.yml)에도 같은 프로비저닝 단계가 필요하다.
+두 PR 중 나중에 병합되는 쪽에서 초기화 SQL 마운트와 .env.example 항목을 맞춘다.
 
 ## 관리자 SQL: 자동 실행 금지
 
@@ -127,9 +155,15 @@ application_user와 search_path=application,pg_catalog로 접속해 별도 설�
 public에 다시 설치하거나 Notification에 설치하지 않는다.
 
 데이터 건수, 시퀀스 다음 값, 인덱스/FK, 트리거/함수 소유권, 두 로그인 권한을 확인하고 서버를 실행한다.
-런타임 가드는 실제 로그인·current_schema·search_path·상대/public 접근·관리자 권한·역할 멤버십·
-DB CREATE·남은 public 테이블·스키마 간 FK를 Hibernate 초기화 전에 확인한다.
+런타임 가드는 실제 로그인·current_schema·search_path·상대 스키마 존재·상대/public 접근·관리자 권한·
+역할 멤버십·DB CREATE·남은 public 테이블·스키마 간 FK를 Hibernate 초기화 전에 확인한다.
 가드는 DDL 마이그레이션/전체 데이터 검증의 대체물이 아니다.
+
+- 상대 스키마가 없으면 "notification schema exists"(backend) 또는 "application schema exists"(Notification)로 실패한다.
+  두 서버는 같은 프로비저닝 SQL로 함께 준비하므로, 한쪽 스키마만 있는 DB에서는 어느 서버도 뜨지 않는다.
+- public에 테이블이 하나라도 있으면 기동을 거부한다. 확장 모듈이 public에 테이블을 만드는 경우도 포함된다.
+  의도된 엄격함이며, 그런 확장은 public이 아닌 별도 스키마에 설치한다.
+- 두 가드 코드는 계정·스키마 이름만 다르다. 한쪽을 고치면 상대 프로젝트의 같은 파일도 함께 고친다.
 
 PostgreSQL의 스키마별 기본 권한 회수는 전역 기본 부여를 취소하지 못하므로,
 함수 PUBLIC EXECUTE를 포함한 기본 권한은 전역과 스키마 수준에서 함께 회수한다.
