@@ -1,7 +1,7 @@
 package com.team3.backend.opportunity.dto;
 
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.dto.NormalizationResultResponse.ReviewSummary;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResultResponse.ReviewSummary;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

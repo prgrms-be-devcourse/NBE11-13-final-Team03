@@ -1,9 +1,9 @@
 package com.team3.backend.opportunity.domain.repository;
 
 import com.team3.backend.opportunity.domain.entity.*;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -20,7 +20,7 @@ import org.springframework.test.context.TestPropertySource;
 import java.time.LocalDate;
 import java.util.*;
 
-import static com.team3.backend.opportunity.normalization.ApplicationStatus.*;
+import static com.team3.backend.opportunity.domain.status.ApplicationStatus.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**

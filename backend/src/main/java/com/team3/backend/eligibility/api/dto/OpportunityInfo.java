@@ -1,7 +1,7 @@
 package com.team3.backend.eligibility.api.dto;
 
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;

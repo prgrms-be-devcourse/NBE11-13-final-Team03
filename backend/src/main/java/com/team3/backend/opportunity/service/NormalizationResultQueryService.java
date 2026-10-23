@@ -3,7 +3,7 @@ package com.team3.backend.opportunity.service;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.*;
-import com.team3.backend.opportunity.dto.NormalizationResultResponse;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResultResponse;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.directory.RegionIndex;
 import lombok.RequiredArgsConstructor;

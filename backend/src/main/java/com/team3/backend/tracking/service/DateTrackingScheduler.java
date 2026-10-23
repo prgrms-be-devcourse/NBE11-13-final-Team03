@@ -18,7 +18,7 @@ public class DateTrackingScheduler {
         try {
             service.runDueScans();
         } catch (RuntimeException exception) {
-            log.error("Date tracking scan failed: {}", exception.getClass().getSimpleName());
+            log.error("Date tracking run failed", exception);
         }
     }
 }

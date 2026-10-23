@@ -34,12 +34,19 @@ Application(backend)에서 날짜 이벤트를 생성·저장한다. Notificatio
 
 1. 당일 청년정책의 최신 수집 이력이 SUCCESS다.
 2. 청년정책 수집의 PENDING/RUNNING 이력이 없다.
-3. 당일 종료 전까지 등록된 청년정책 정규화 요청 중 SUCCESS가 아닌 요청이 없다.
+3. 당일 종료 전까지 등록된 청년정책 정규화 요청 중 PENDING 요청이 없다.
 
-FAILED 정규화나 부분 수집을 성공으로 간주하지 않는다.
+FAILED 정규화는 종료 상태이므로 기다리지 않는다(재시도되면 새 PENDING 요청으로 다시 대기한다).
+부분 수집은 성공으로 간주하지 않는다.
+
+수집·정규화 테이블(sync_history, raw_normalization_request, raw_external_record, external_source)은
+data-service 소유다. backend는 수집 엔티티·Repository를 쓰지 않고 `DateTrackingReadiness`에서
+공유 DB를 SQL로 읽기만 한다. 조회가 실패하면(예: data-service가 아직 테이블을 만들지 않음) 준비되지 않은 것으로 보고
+마지노선을 기다린다. 서비스별로 DB를 분리하면 이 조회를 data-service API나 완료 이벤트로 바꾼다.
 마지노선이 되면 완료 여부와 무관하게 현재 DB의 정규화 데이터로 수행한다.
 폴링 방식이므로 수집 완료부터 실행까지 기본적으로 최대 한 폴링 간격 지연이 있다.
 과거 날짜의 복구는 당일 수집 완료를 기다리지 않는다.
+당일 스캔은 과거 복구보다 먼저, 복구 예산과 별도로 실행해 과거 날짜 실패가 당일 추적을 막지 않게 한다.
 이는 원본을 과거 시점으로 되돌리는 기능이 아니며, 스캔 시점의 현재 버전으로 날짜를 재계산한다.
 
 ## 실행 이력과 트랜잭션
@@ -79,10 +86,16 @@ app.scheduling.enabled=false인 경우도 자동 실행하지 않는다.
 | yon.tracking.date.cutoff | 13:00 | KST 마지노선. 확정 운영 시간이 아닌 조정 가능한 초기값 |
 | yon.tracking.date.lease-timeout | PT30M | heartbeat 만료 초기값. 운영 처리 시간에 맞게 조정 |
 | yon.tracking.date.batch-size | 100 | 정책 페이지 크기 |
-| yon.tracking.date.max-dates-per-run | 7 | 한 폴링당 처리 시도할 날짜 수 |
+| yon.tracking.date.max-dates-per-run | 7 | 한 폴링당 실행권을 얻어 처리할 과거 날짜 수. 당일은 포함하지 않는다 |
+| yon.tracking.date.recovery-days | 3 | 오늘 이전 며칠까지 복구할지. 0이면 당일만 스캔한다 |
 | yon.tracking.date.poll-interval-ms | 60000 | 폴링 간격 |
 
-start-date부터 오늘까지 누락/실패 날짜를 먼저 보완하고 SUCCESS 날짜는 건너뛴다.
+당일을 먼저 스캔한 뒤 max(start-date, 오늘 - recovery-days)부터 어제까지의 누락/실패 날짜를 보완하고
+SUCCESS 날짜는 건너뛴다. 다른 실행이 잡고 있어 실행권을 얻지 못한 날짜는 예산에 넣지 않는다.
+늦게 복구한 날짜의 마감 임박은 THRESHOLD_ALREADY_PASSED로 억제되므로 오래된 날짜를 복구해도
+발송할 이벤트가 거의 없다. 그래서 복구 범위를 최근 며칠로 제한하고, 범위를 벗어난 실패 날짜는
+더 이상 시도하지 않는다. 범위 밖 날짜의 FAILED 이력은 의도적으로 그대로 두며, 처리해야 할 장애가 남았다는 뜻이 아니다.
+실패 원인은 last_error와 로그로 확인한다. 기본값 3일은 주말 동안 서버가 멈춘 경우의 신청 시작 이벤트까지 고려한 초기값이다.
 자동 실행 활성화 때 최초 추적일을 명시해 서버 재시작으로 복구 시작일이 밀리지 않도록 한다.
 기동 후 첫 스케줄부터 실행하고 이후 fixed delay로 반복한다.
 ApplicationReadyEvent에서 동기 실행하지 않으므로 복구 스캔이 main 기동 스레드를 점유하지 않는다.
@@ -90,14 +103,18 @@ ApplicationReadyEvent에서 동기 실행하지 않으므로 복구 스캔이 ma
 
 ## 스키마 적용
 
-Hibernate 기본 validate는 그대로 유지한다.
-실제 Application 시작 전 신규 두 테이블을 명시적 SQL로 생성해야 한다.
-자동 실행을 비활성화해도 JPA의 두 Entity를 검증하므로 스키마 준비는 필요하다.
+backend는 마이그레이션 도구 도입 전까지 ddl-auto=update를 사용한다([DB 경계 문서](database-boundaries.md)의 ddl-auto 정책).
+Application 기본 테이블이 이미 있는 DB에는 새 버전 서버를 기동하기 **전에** 신규 두 테이블을 명시적 SQL로 먼저 만든다.
+SQL은 실행 계정(application_user)을 확인하고 제약·인덱스 이름을 고정한다. update가 먼저 테이블을 만들면
+이후 SQL은 테이블이 이미 있어 실패하므로 순서를 지킨다.
 
 1. 서버를 중지하고 대상 DB/백업/기존 객체를 확인한다.
 2. Application 기본 테이블이 존재하는 DB에 application_user로 접속한다.
 3. database/scripts/date-tracking.sql을 실행한다.
-4. 기본 validate로 기동하고, 테스트 후 자동 스캔 활성화 여부를 결정한다.
+4. 새 버전 서버를 기동하고, 테스트 후 자동 스캔 활성화 여부를 결정한다.
+
+Application 테이블이 하나도 없는 새 로컬 DB는 첫 기동에서 update가 추적 테이블까지 만든다.
+이때는 SQL을 실행하지 않는다(테이블이 이미 있으면 SQL이 실패한다).
 
 SQL은 최초 설치용이며 기존 테이블을 삭제하거나 재생성하지 않는다.
 이미 추적 테이블이 있으면 실행이 실패한다. 반복 설치나 구 추적 브랜치 DB 업그레이드에 사용하지 않는다.
@@ -125,6 +142,7 @@ Docker를 실행한 뒤 backend에서 실행한다.
 
 - 당일 수집·정규화 완료 전 대기와 마지노선 fallback
 - 과거 누락 보완, 성공 날짜 건너뜀, 실패 기록 및 페이지 순회
+- 과거 날짜가 계속 실패해도 당일을 먼저 스캔, 복구 범위 밖 날짜 제외, 실행권을 얻은 날짜만 예산 차감
 - 오래된 RUNNING 재점유와 예전 실행의 저장/완료/실패 차단
 - 페이지 잠금 중 재점유 대기 및 커밋된 heartbeat 존중
 - 부분 커밋 후 재시작의 이벤트 중복 방지

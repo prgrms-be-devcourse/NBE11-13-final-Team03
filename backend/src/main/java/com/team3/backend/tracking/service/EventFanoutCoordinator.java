@@ -21,13 +21,19 @@ public class EventFanoutCoordinator {
     private final EventFanoutProperties properties;
     private final Clock clock;
 
+    /** Ends stale or exhausted fanouts as FAILED so they are never reclaimed. */
     @Transactional
+    public int recoverExhausted() {
+        var now = clock.instant();
+        return events.failExhaustedFanouts(now, now.minus(properties.leaseTimeout()), properties.maxAttempts(),
+                PENDING, PROCESSING, FAILED);
+    }
+
+    @Transactional(readOnly = true)
     public List<Long> candidates() {
         var now = clock.instant();
-        var staleBefore = now.minus(properties.leaseTimeout());
-        events.failExhaustedFanouts(now, staleBefore, properties.maxAttempts(), PENDING, PROCESSING, FAILED);
-        return events.findFanoutCandidates(now, staleBefore, properties.maxAttempts(), PENDING, PROCESSING,
-                PageRequest.of(0, properties.maxEventsPerRun()));
+        return events.findFanoutCandidates(now, now.minus(properties.leaseTimeout()), properties.maxAttempts(),
+                PENDING, PROCESSING, PageRequest.of(0, properties.maxEventsPerRun()));
     }
 
     @Transactional

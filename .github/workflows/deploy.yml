@@ -1,0 +1,145 @@
+name: Deploy backend
+
+# main에 push → "Publish backend image"(backend-image.yml)가 GHCR에 이미지를 올림 → 성공하면 이 워크플로가 EC2에 배포한다.
+# 이미지는 빌드하지 않는다. backend-image.yml이 올린 ghcr.io/<저장소>/backend:sha-<커밋 SHA>를 받아 docker compose로 재시작한다.
+# 수동 실행(Run workflow)에서 image_tag를 넣으면 그 이미지로 배포한다 (롤백용, 예: sha-<40자리 커밋 SHA>).
+#
+# 필요한 설정 (Settings → Secrets and variables → Actions)
+#   vars:    EC2_HOST, EC2_USER, (선택) EC2_DEPLOY_DIR
+#   secrets: EC2_SSH_KEY (EC2 접속용 개인키)
+# GHCR 로그인은 이 실행의 GITHUB_TOKEN(packages: read)으로 EC2에서 잠깐 하고 바로 로그아웃한다. 별도 토큰 불필요.
+
+on:
+  workflow_run:
+    workflows: ["Publish backend image"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "배포할 이미지 태그 (예: sha-<40자리 커밋 SHA>). 비우면 실행한 브랜치의 최신 커밋 이미지"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # 자동 실행은 main push로 이미지 게시가 성공했을 때만. EC2 설정(vars.EC2_HOST) 전에는 건너뛴다
+    if: >-
+      vars.EC2_HOST != '' && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          persist-credentials: false
+
+      - name: Resolve image
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-sha-$HEAD_SHA}"
+          # 원격 명령에 들어가므로 형식을 고정한다
+          if ! [[ "$TAG" =~ ^sha-[0-9a-f]{40}$ ]]; then
+            echo "::error::이미지 태그 형식이 아닙니다: sha-<40자리 커밋 SHA>"
+            exit 1
+          fi
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/backend:$TAG" >> "$GITHUB_ENV"
+
+      - name: Check image exists
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if ! docker manifest inspect "$IMAGE" > /dev/null; then
+            echo "::error::GHCR에 이미지가 없습니다: $IMAGE"
+            exit 1
+          fi
+          docker logout ghcr.io
+          echo "배포 이미지: \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ vars.EC2_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
+        env:
+          TARGET: ${{ vars.EC2_USER }}@${{ vars.EC2_HOST }}
+          DEPLOY_DIR: ${{ vars.EC2_DEPLOY_DIR || format('/home/{0}/yon', vars.EC2_USER) }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SSH="ssh -i $HOME/.ssh/deploy_key"
+          $SSH "$TARGET" "mkdir -p '$DEPLOY_DIR'"
+          scp -i ~/.ssh/deploy_key backend/deploy/docker-compose.prod.yml "$TARGET:$DEPLOY_DIR/docker-compose.prod.yml"
+          # 토큰은 명령줄에 넣지 않고 표준입력으로 권한 600 파일에 쓴다. 원격 스크립트가 로그인 후 바로 지운다.
+          printf '%s' "$GHCR_TOKEN" | $SSH "$TARGET" "umask 077 && cat > '$DEPLOY_DIR/.ghcr_token'"
+          $SSH "$TARGET" \
+            "DEPLOY_DIR='$DEPLOY_DIR' IMAGE='$IMAGE' GHCR_USER='$GITHUB_ACTOR' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_DIR"
+          trap 'rm -f .ghcr_token; docker logout ghcr.io > /dev/null 2>&1 || true' EXIT
+          if [ ! -f .env ]; then
+            echo "::error::$DEPLOY_DIR/.env 가 없습니다 (backend/deploy/.env.example 참고)"
+            exit 1
+          fi
+
+          docker login ghcr.io -u "$GHCR_USER" --password-stdin < .ghcr_token
+          rm -f .ghcr_token
+
+          [ -f deploy.env ] && cp deploy.env deploy.env.prev
+          echo "BACKEND_IMAGE=$IMAGE" > deploy.env
+          compose() { docker compose -f docker-compose.prod.yml --env-file .env --env-file deploy.env "$@"; }
+
+          compose pull backend
+          docker logout ghcr.io > /dev/null
+          compose up -d --remove-orphans
+
+          port=$(grep -E '^BACKEND_PORT=' .env | tail -n 1 | cut -d= -f2)
+          port=${port:-8080}
+          code=000
+          for _ in $(seq 1 36); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/" || true)
+            [ "$code" != "000" ] && break
+            sleep 5
+          done
+
+          if [ "$code" = "000" ]; then
+            echo "::error::백엔드가 3분 안에 응답하지 않았습니다"
+            compose logs --tail 200 backend || true
+            if [ -f deploy.env.prev ]; then
+              echo "이전 이미지로 되돌립니다: $(cat deploy.env.prev)"
+              cp deploy.env.prev deploy.env
+              compose up -d --remove-orphans
+            fi
+            exit 1
+          fi
+
+          echo "기동 확인 (HTTP $code): $IMAGE"
+          docker image prune -f
+          REMOTE
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

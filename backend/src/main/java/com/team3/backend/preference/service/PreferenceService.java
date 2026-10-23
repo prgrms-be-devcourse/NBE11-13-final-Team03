@@ -135,6 +135,15 @@ public class PreferenceService {
         return Set.copyOf(preferenceRepository.findSavedOpportunityIds(userId, opportunityIds));
     }
 
+    /** 지정한 공고 중 사용자가 숨긴 공고 ID를 일괄 조회한다. */
+    @Transactional(readOnly = true)
+    public Set<Long> getHiddenOpportunityIds(Long userId, Collection<Long> opportunityIds) {
+        if (opportunityIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(preferenceRepository.findHiddenOpportunityIds(userId, opportunityIds));
+    }
+
     /** 저장 사용자 ID를 커서 다음부터 조회하며 첫 호출의 커서는 0이다. */
     @Transactional(readOnly = true)
     public List<Long> getSavedUserIdsAfter(Long opportunityId, Long afterUserId, int size) {

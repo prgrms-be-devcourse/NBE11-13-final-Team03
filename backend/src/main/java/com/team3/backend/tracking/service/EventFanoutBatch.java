@@ -2,7 +2,7 @@ package com.team3.backend.tracking.service;
 
 import com.team3.backend.opportunity.domain.repository.ApplicationWindowRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityRepository;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 import com.team3.backend.outbox.domain.entity.OutboxEvent;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
 import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceRepository;
@@ -10,11 +10,13 @@ import com.team3.backend.tracking.config.EventFanoutProperties;
 import com.team3.backend.tracking.domain.model.EventFanoutExecution;
 import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class EventFanoutBatch {
@@ -59,10 +61,18 @@ public class EventFanoutBatch {
             event.complete(clock.instant());
             return true;
         }
-        for (var preference : preferences.lockSavedForNotification(event.getOpportunity().getId(), userIds)) {
+        var saved = preferences.lockSavedForNotification(event.getOpportunity().getId(), userIds);
+        for (int i = 0; i < saved.size(); i++) {
             var now = clock.instant();
-            if (!now.isBefore(prepared.orElseThrow().expiresAt())) break;
-            Long userId = preference.getUser().getId();
+            if (!now.isBefore(prepared.orElseThrow().expiresAt())) {
+                // Expired messages are not sent; record where and how many were left instead of moving on silently.
+                outboxes.flush();
+                log.info("Event fanout expired during page: eventId={}, lastUserId={}, skippedUsersInPage={}",
+                        event.getEventId(), event.getLastUserId(), saved.size() - i);
+                event.skipFanout(now, "EXPIRED_DURING_FANOUT");
+                return true;
+            }
+            Long userId = saved.get(i).getUser().getId();
             String key = OutboxEvent.notificationDedupKey(event.getEventId(), userId);
             if (!outboxes.existsByDedupKey(key)) {
                 outboxes.save(messages.create(event, userId, prepared.orElseThrow(), now));

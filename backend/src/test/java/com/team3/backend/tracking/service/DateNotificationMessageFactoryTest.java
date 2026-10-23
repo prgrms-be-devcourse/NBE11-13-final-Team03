@@ -1,8 +1,8 @@
 package com.team3.backend.tracking.service;
 
 import com.team3.backend.opportunity.domain.entity.*;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.outbox.domain.entity.OutboxStatus;
 import com.team3.backend.tracking.domain.entity.*;
 import org.junit.jupiter.api.Test;
