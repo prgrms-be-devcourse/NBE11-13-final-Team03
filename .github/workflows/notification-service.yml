@@ -9,6 +9,9 @@ on:
       - '.github/workflows/notification-service.yml'
   push:
     branches: [main]
+    paths:
+      - 'notification-service/**'
+      - '.github/workflows/notification-service.yml'
   workflow_dispatch:
 
 permissions:
