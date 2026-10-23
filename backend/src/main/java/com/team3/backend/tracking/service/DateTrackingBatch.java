@@ -3,7 +3,7 @@ package com.team3.backend.tracking.service;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.repository.ApplicationWindowRepository;
 import com.team3.backend.opportunity.domain.repository.OpportunityRepository;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 import com.team3.backend.tracking.config.DateTrackingProperties;
 import com.team3.backend.tracking.domain.entity.EventScanStatus;
 import com.team3.backend.tracking.domain.entity.OpportunityEvent;

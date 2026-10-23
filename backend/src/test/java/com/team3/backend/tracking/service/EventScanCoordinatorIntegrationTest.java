@@ -7,7 +7,7 @@ import com.team3.backend.tracking.domain.repository.EventScanHistoryRepository;
 import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.*;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.tracking.config.DateTrackingProperties;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
