@@ -29,6 +29,7 @@
 - 요청 범위를 벗어난 변경을 하지 않는다.
 - 불필요한 추상화와 새 의존성을 추가하지 않는다.
 - 보안, 예외 처리, 데이터 정합성을 생략하지 않는다.
+- 알림 기능은 `notification-service/` 프로젝트에만 둔다. `backend`에 `com.team3.backend.notification` 패키지를 만들지 않는다 (`ApplicationPersistenceCompletenessTest`가 검사한다).
 
 ## Workflow
 
