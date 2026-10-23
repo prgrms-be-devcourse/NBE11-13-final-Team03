@@ -2,8 +2,9 @@ name: Collection PostgreSQL tests
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/backend-collection-proxy]
     paths:
+      - 'contracts/proto/**'
       - 'backend/**'
       - 'database/**'
       - '.github/workflows/collection-postgres-tests.yml'

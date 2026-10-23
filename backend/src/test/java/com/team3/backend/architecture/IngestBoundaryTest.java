@@ -28,12 +28,12 @@ class IngestBoundaryTest {
 
     /** 수집·정규화 서비스로 옮길 패키지 */
     private static final Pattern INGEST_IMPORT = Pattern.compile(
-            "^import (static )?com\\.team3\\.backend\\.(collection|opportunity\\.(ingest|normalization|service|conditionset)|region\\.(client|service))\\.",
+            "^import (static )?com\\.team3\\.backend\\.(opportunity\\.(ingest|normalization|service|conditionset)|region\\.(client|service))\\.",
             Pattern.MULTILINE);
 
     /** 메인 서버에 남는 패키지와 공용 패키지 */
     private static final List<String> MAIN_AND_SHARED = List.of(
-            "auth", "eligibility", "search", "interest", "preference", "user", "config", "global",
+            "client", "collection", "auth", "eligibility", "search", "interest", "preference", "user", "config", "global",
             "opportunity/domain", "opportunity/dto", "region/directory", "region/domain");
 
     @Test
@@ -56,6 +56,17 @@ class IngestBoundaryTest {
         assertThat(violations)
                 .as("메인·공용 패키지가 수집·정규화 패키지에 의존하면 서비스 분리 때 끊어진다")
                 .isEmpty();
+    }
+
+    @Test
+    void collectionContainsOnlyAdminApiDtosAndErrors() throws IOException {
+        var allowed = java.util.Set.of("controller", "dto", "exception");
+        try (var files = Files.walk(MAIN_SOURCES.resolve("collection"))) {
+            var violations = files.filter(path -> path.toString().endsWith(".java"))
+                    .map(path -> MAIN_SOURCES.resolve("collection").relativize(path))
+                    .filter(path -> !allowed.contains(path.getName(0).toString())).toList();
+            assertThat(violations).as("수집 실행 코드는 data-service에만 둔다").isEmpty();
+        }
     }
 
     @Test

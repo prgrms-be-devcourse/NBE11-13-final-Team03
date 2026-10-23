@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'com.google.protobuf' version '0.9.6'
     id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
 }
@@ -23,8 +24,19 @@ ext {
 }
 
 
+sourceSets.main.proto.srcDir '../contracts/proto'
+
+// Match PR A and the Spring Boot 4.1.1 managed runtime versions.
+protobuf {
+    protoc { artifact = 'com.google.protobuf:protoc:4.35.1' }
+    plugins { grpc { artifact = 'io.grpc:protoc-gen-grpc-java:1.83.1' } }
+    generateProtoTasks { all().configureEach { plugins { grpc {} } } }
+}
+
 dependencies {
-    // 수집 관리 API를 DataService 내부 API로 전달 (알림 서비스 연동과 같은 OpenFeign)
+    implementation 'org.springframework.boot:spring-boot-starter-grpc-client'
+
+    // 알림 서비스 연동(#39)이 사용하는 OpenFeign은 유지한다.
     implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-security'

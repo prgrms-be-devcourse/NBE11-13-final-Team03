@@ -12,13 +12,16 @@ spring:
     properties:
       hibernate.type.json_format_mapper: org.hibernate.type.format.jackson.Jackson3JsonFormatMapper
 
-  cloud:
-    openfeign:
-      client:
-        config:
-          data-service:
-            connect-timeout: 3000
-            read-timeout: 10000
+  grpc:
+    client:
+      channel:
+        data-service:
+          target: ${DATA_SERVICE_GRPC_ADDRESS:static://localhost:9092}
+          ssl:
+            enabled: false
+          inbound:
+            message:
+              max-size: 16MB
 
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/yon}
@@ -84,7 +87,5 @@ yon:
     provider: ${YON_ELIGIBILITY_PROVIDER:local}
   # 수집·정규화 서비스. 수집 관리자 API(/api/admin/collection/**)를 내부 API로 전달한다
   data-service:
-    # 기본값은 로컬 실행용. 운영은 compose가 http://data-service:8082를 넣는다 (deploy/docker-compose.prod.yml)
-    base-url: ${DATA_SERVICE_BASE_URL:http://localhost:8082}
     # DataService 전용 내부 키. data-service의 DATA_SERVICE_INTERNAL_API_KEY와 같은 값
     internal-api-key: ${DATA_SERVICE_INTERNAL_API_KEY}

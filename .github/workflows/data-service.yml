@@ -2,8 +2,9 @@ name: Data service
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/backend-collection-proxy]
     paths:
+      - 'contracts/proto/**'
       - 'data-service/**'
       - 'database/**'
       - '.github/workflows/data-service.yml'
