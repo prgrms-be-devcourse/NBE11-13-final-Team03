@@ -6,7 +6,7 @@ import com.team3.backend.eligibility.engine.ConditionEvaluation;
 import com.team3.backend.eligibility.engine.EligibilityEvaluation;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 
 import java.time.OffsetDateTime;
 import java.util.List;

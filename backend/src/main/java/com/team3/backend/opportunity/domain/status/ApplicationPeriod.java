@@ -1,4 +1,4 @@
-package com.team3.backend.opportunity.normalization;
+package com.team3.backend.opportunity.domain.status;
 
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
