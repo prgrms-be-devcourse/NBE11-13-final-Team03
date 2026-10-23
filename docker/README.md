@@ -1,0 +1,67 @@
+# 로컬 Docker 실행
+
+DB, backend, notification-service, nginx를 `docker/compose.yaml` 하나로 띄운다.
+기동 순서는 compose가 healthcheck로 맞춘다(DB → 두 서버 → nginx).
+
+| 서비스 | 내용 | 호스트 포트 |
+| --- | --- | --- |
+| `postgres-db` | PostgreSQL 16, 첫 기동 시 DB 초기화 | 5432 |
+| `backend` | Application 서버 | 8080 (디버깅용) |
+| `notification-service` | Notification 서버 | 공개하지 않음 |
+| `nginx` | 브라우저 진입점 | 80 |
+
+## 준비
+
+1. Docker와 Java 25를 설치한다.
+2. `docker/.env.example`을 `docker/.env`로 복사하고 값을 채운다. `.env`는 커밋하지 않는다.
+3. 카카오 로그인을 확인하려면 카카오 개발자 콘솔에 Redirect URI
+   `http://localhost/login/oauth2/code/kakao`를 등록한다. `HTTP_PORT`를 바꾸면 포트도 포함해 등록한다.
+
+## 실행과 종료
+
+`docker/` 폴더에서 실행한다.
+
+```bash
+./start.sh                                  # JAR 빌드 후 전체 기동
+./start.sh --no-build                       # 이미 빌드한 JAR·이미지로 기동
+docker compose up -d postgres-db            # DB만 (IDE·bootRun 개발용)
+docker compose up -d --build backend        # backend만 다시 빌드·재시작 (먼저 backend에서 ./gradlew bootJar)
+docker compose logs -f backend              # 로그 보기
+docker compose down                         # 종료, DB 데이터 유지
+docker compose down -v                      # 볼륨까지 삭제 (로컬 DB 데이터 삭제, 다음 기동 때 초기화 다시 실행)
+```
+
+Dockerfile이 빌드된 Boot JAR를 복사하므로, 서버 이미지를 다시 만들기 전에는 해당 프로젝트에서 `./gradlew bootJar`를 먼저 실행한다. `start.sh`는 이 과정을 함께 한다.
+
+## 접속
+
+| 대상 | 주소 |
+| --- | --- |
+| 브라우저 진입점(nginx) | http://localhost |
+| backend 직접(디버깅, Swagger) | http://localhost:8080/swagger-ui.html |
+| PostgreSQL(호스트) | localhost:5432 |
+| notification-service | 호스트에 공개하지 않음. 컨테이너끼리 `http://notification-service:8081`로 호출 |
+
+포트가 이미 쓰이고 있으면 `docker/.env`의 `DB_PORT`, `BACKEND_PORT`, `HTTP_PORT`를 바꾼다.
+
+## DB 초기화
+
+빈 볼륨으로 처음 기동할 때만 다음이 순서대로 실행된다. 자세한 내용은 [DB 경계 문서](../docs/database-boundaries.md)를 따른다.
+
+1. 계정·스키마 생성(`database/scripts/database-boundaries.sql`)
+2. 두 계정 비밀번호 설정(`database/local/02-set-local-passwords.sh`)
+3. Notification 테이블 생성(`database/local/03-apply-notification-ddl.sh`)
+
+application 스키마 테이블은 backend가 첫 기동에서 `ddl-auto: update`로 만든다.
+초기화 스크립트나 DDL을 바꿨다면 `docker compose down -v` 후 다시 기동해야 반영된다.
+
+## 알림 전달
+
+`NOTIFICATION_PUBLISHER_ENABLED`, `NOTIFICATION_RECEIVER_ENABLED`는 기본 `false`다.
+탈퇴 사용자 차단(Tombstone)이 구현되기 전까지 켜지 않는다.
+켤 때는 두 서버가 같은 `NOTIFICATION_INTERNAL_API_KEY`를 사용한다.
+
+## 운영 배포와의 관계
+
+이 구성은 로컬 개발용이다. 운영은 CI가 만든 GHCR 이미지를 쓰는 배포 compose(#33)를 사용하고,
+그쪽에도 notification-service와 같은 DB 초기화 단계를 추가해야 한다.
