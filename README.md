@@ -63,6 +63,11 @@ Y:ON은 대학생, 취업준비생, 사회초년생 등 청년을 위한 **맞�
 | Test | JUnit 5, Testcontainers |
 | Version Control | Git, GitHub |
 
+## 로컬 실행
+
+- `./gradlew bootRun`으로 실행하면 각 프로젝트의 `.env`를 자동으로 읽는다.
+- 빌드한 JAR(`java -jar`)는 `.env`를 읽지 않는다. 필요한 값은 환경변수로 직접 주입한다.
+
 ## Git Convention
 
 ### Branch Strategy
