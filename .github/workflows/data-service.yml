@@ -6,6 +6,8 @@ on:
     paths:
       - 'contracts/proto/**'
       - 'data-service/**'
+      - 'deploy/tests/**'
+      - '.github/workflows/deploy.yml'
       - 'database/**'
       - '.github/workflows/data-service.yml'
   # main에 반영되면 이미지를 GHCR에 올린다 → deploy.yml이 EC2에 배포한다
@@ -14,6 +16,8 @@ on:
     paths:
       - 'contracts/proto/**'
       - 'data-service/**'
+      - 'deploy/tests/**'
+      - '.github/workflows/deploy.yml'
       - 'database/**'
       - '.github/workflows/data-service.yml'
   workflow_dispatch:
@@ -35,6 +39,8 @@ jobs:
           cache-dependency-path: |
             data-service/*.gradle
             data-service/gradle/wrapper/gradle-wrapper.properties
+      - name: Check deployment readiness and rollback
+        run: python3 deploy/tests/test_grpc_readiness.py
       # 정규화 요청 NOTIFY 트리거 테스트(Testcontainers PostgreSQL)가 Docker를 쓴다
       - name: Require Docker
         run: docker info

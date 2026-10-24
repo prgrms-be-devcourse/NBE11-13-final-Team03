@@ -34,8 +34,6 @@ spring:
 # 메인 서비스가 DataService gRPC API를 부를 때 쓰는 전용 키 (metadata x-internal-key).
 # 메인의 INTERNAL_API_KEY와 분리한다 (notification-service의 NOTIFICATION_INTERNAL_API_KEY와 같은 방식).
 # 메인 서비스에는 같은 값을 DATA_SERVICE_INTERNAL_API_KEY로 넣는다.
-internal:
-  api-key: ${DATA_SERVICE_INTERNAL_API_KEY}
 
 logging:
   pattern:
@@ -48,6 +46,8 @@ region-code-api:
   sync-on-startup: ${REGION_CODE_SYNC_ON_STARTUP:false}
 
 yon:
+  data-service:
+    internal-api-key: ${DATA_SERVICE_INTERNAL_API_KEY}
   normalization:
     ingest:
       # 수집 원본 → 정규화 연동 (LISTEN/NOTIFY + 주기 폴링·대조). false면 LISTEN·스케줄 모두 끈다

@@ -29,7 +29,7 @@ import static org.mockito.Mockito.*;
 
 /** Checks non-web Boot startup, all five RPCs and global interceptors over Netty. */
 @ActiveProfiles("test")
-@SpringBootTest(properties = "spring.grpc.server.port=0")
+@SpringBootTest(properties = {"spring.grpc.server.port=0", "internal.api-key=backend-only-key"})
 class CollectionGrpcTransportTest {
     @Autowired GrpcServerLifecycle lifecycle;
     @Autowired CollectionProtoMapper mapper;

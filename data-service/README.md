@@ -41,8 +41,7 @@ backend의 `/api/admin/collection/**` 공개 HTTP API·ADMIN 권한은 유지된
 
 1. PR A(#53)의 서버와 PR B(#54)의 backend를 먼저 배포한다.
 2. 실제 관리자 요청으로 접수·작업 조회·원본 저장/조회 및 DB 반영을 확인한다.
-3. #49의 배포 구성과 합칠 때 HTTP 8082 기동 확인·포트 매핑을 제거하고 gRPC 포트 기준으로 변경한다.
-   TCP 연결 확인만으로 내부 키·업무 동작을 보장할 수 없으므로 인증된 RPC smoke test도 수행한다.
+3. #56의 배포 구성과 로컬 compose는 9092를 사용한다. 배포 워크플로는 인증된 읽기 RPC로 기동을 점검한다.
 4. 이 REST 제거 버전을 배포한다. 이후 REST 클라이언트인 이전 backend로 롤백하려면 data-service도 PR A 버전으로 함께 롤백한다.
 
 이 PR은 제거 코드를 미리 준비한 것이며, PR B 운영 배포·smoke test 완료를 의미하지 않는다.
@@ -127,10 +126,9 @@ backend의 주소는 `DATA_SERVICE_GRPC_ADDRESS=static://<데이터 서버 사�
 내부 키는 호출 인증용이고 전송 암호화를 제공하지 않는다.
 이 접근 제한을 유지할 수 없는 네트워크나 전송 암호화가 필요한 환경에서는 서버·클라이언트에 TLS를 설정한다.
 
-이 PR A는 REST 8082와 gRPC 9092를 공존시킨다.
-현재 운영 compose·Dockerfile·기동 확인은 아직 8082 기준이며, 9092 포트 매핑·Dockerfile EXPOSE·
-배포 기동 확인과 보안 그룹 안내는 배포 담당자의 별도 PR에서 맞춘다.
-PR C(#55)의 REST 제거와 함께 반영해야 하며, 그 전에 HTTP 8082 규칙을 제거하지 않는다.
+이 REST 제거 버전은 HTTP 8082를 제공하지 않는다. 운영 compose·Dockerfile·로컬 healthcheck는 9092로 바꿨다.
+배포 워크플로는 환경변수의 키로 CollectionGrpcProbe를 실행해 인증과 DB 조회를 확인한다.
+TLS는 기존 평문 전제를 유지하며 **팀 논의가 필요한 미결정 사항**으로 남긴다.
 
 ### 포트 바인딩과 기동 완료
 
@@ -155,3 +153,10 @@ DB 경계 검사는 DataSource 초기화 중 수행되지만, 기동 후 지역 
 배포 순서는 data-service(서버 추가) → backend(클라이언트 전환) → data-service(REST 제거)다.
 현재 backend-image 워크플로는 모든 main push에서 실행하므로 proto 변경도 이미 포함한다.
 data-service 및 backend PostgreSQL PR 워크플로는 `contracts/proto/**`도 검사한다.
+
+
+### 내부 키 설정과 배포 probe
+
+서버 속성은 yon.data-service.internal-api-key이며 값은 기존 DATA_SERVICE_INTERNAL_API_KEY 환경변수다.
+공유 .env의 backend INTERNAL_API_KEY와 이름이 겹치지 않아 compose의 키 덮어쓰기 우회를 제거했다.
+배포 점검 명령과 과거 이미지 롤백 제약은 deploy/README.md를 따른다.

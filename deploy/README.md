@@ -21,9 +21,9 @@
 |---|---|
 | `yon-db` | 5432 ← `yon-main`, `yon-data` 보안 그룹만 / 22 |
 | `yon-main` | `BACKEND_PORT`(8080) ← 공개 / 22 |
-| `yon-data` | 9092 ← `yon-main` 보안 그룹만 / 22 (REST 공존 기간에만 8082도 같은 제한) |
+| `yon-data` | 9092 ← `yon-main` 보안 그룹만 / 22 |
 
-**5432·9092(공존 기간 8082 포함)는 0.0.0.0/0으로 열지 않는다.** data-service는 Spring Security가 없다.
+**5432·9092는 0.0.0.0/0으로 열지 않는다.** data-service는 Spring Security가 없다.
 한 겹 더: DB 서버 `.env`의 `DB_BIND_IP`, 데이터 서버 `.env`의 `DATA_SERVICE_BIND_IP`에 각 서버의 사설 IP를 넣으면 포트가 사설 IP에만 바인딩된다 (보안 그룹 실수 대비).
 
 ### 운영 진입점 (TLS): 미정
@@ -48,7 +48,7 @@ EC2 재구축 전에 TLS 종단(nginx+certbot 또는 ALB/CloudFront)을 정하�
 2. GHCR에 그 커밋 이미지가 있는지 확인
 3. 그 서버 폴더의 `docker-compose.yml`을 배포 폴더로 복사
 4. `deploy.env`의 이미지 줄(`BACKEND_IMAGE` / `DATA_SERVICE_IMAGE`)만 바꾸고 `docker compose pull/up -d <서비스>`
-5. 최대 3분 응답 확인 (각 서버의 `localhost:8080` / `localhost:8082`). 응답이 없으면 로그를 남기고 **이전 이미지로 되돌린 뒤 실패**
+5. 약 3분 동안 backend는 HTTP 8080 응답을, data-service는 컨테이너 안에서 인증된 gRPC 9092 읽기 RPC를 확인한다. 실패하면 로그를 남기고 **이전 이미지로 되돌린 뒤 실패**
 
 - 수동 실행: Actions → Deploy → Run workflow → `service`(backend/data-service), `image_tag`(비우면 최신 커밋, 롤백은 `sha-<40자리 커밋 SHA>`)
 - 배포는 한 번에 하나씩 (`concurrency: deploy-production`)
@@ -164,7 +164,7 @@ nano .env && chmod 600 .env
 
 **지역 사전**: `regions`가 비어 있으면 첫 기동 때만 `.env`의 `REGION_CODE_SYNC_ON_STARTUP=true`로 띄우고, 끝나면 `false`로 돌린 뒤 재시작한다.
 
-배포 워크플로의 기동 확인은 `DATA_SERVICE_BIND_IP`가 있으면 그 주소로, 없으면 `localhost:8082`로 한다.
+배포 워크플로는 컨테이너 내부의 gRPC 9092에 인증된 읽기 RPC를 호출한다. DATA_SERVICE_BIND_IP는 외부 메인 서버가 접속할 사설 IP 바인딩에 사용한다.
 
 ## 메인 서버
 
@@ -197,14 +197,24 @@ docker stats --no-stream
 - **테스트**: 테스트는 이미지 게시 워크플로가 돌린다. 테스트가 실패하면 이미지도 배포도 없다.
 
 
-### 수집 gRPC 전환과 내부 TLS 논의
+### 수집 gRPC 배포 점검과 롤백
 
-로컬 compose는 서비스 DNS `static://data-service:9092`를 사용한다.
-운영은 EC2가 분리되어 있으므로 데이터 서버의 사설 IP를 주소에 넣는다.
-`DATA_SERVICE_BIND_IP`는 필수이며 데이터 서버의 사설 IP로 9092를 바인딩한다.
-PR B는 8082를 REST 롤백 호환용으로 유지하고, PR C 배포 시 8082 매핑·점검을 제거한다.
+운영 backend는 DATA_SERVICE_GRPC_ADDRESS=static://<데이터 서버 사설 IP>:9092를 사용한다.
+DATA_SERVICE_BIND_IP는 필수이며 데이터 서버 사설 IP를 넣는다. 포트 매핑과 Dockerfile은 9092만 제공한다.
+로컬 compose의 서비스 DNS(data-service)는 다른 EC2에서 해석되지 않는다.
+
+배포 워크플로는 data-service 컨테이너 내부에서 CollectionGrpcProbe를 별도 JVM으로 실행한다.
+기존 gRPC 클라이언트 의존성을 재사용하며, 환경변수의 전용 키로 한국 날짜의 ListSyncJobsByDate를 호출한다.
+응답 목록이 비어 있어도 정상이며, 인증 실패·DB 오류·기한 초과는 점검 실패다.
+키·원격 오류 본문은 출력하지 않는다. backend 키(INTERNAL_API_KEY)는 사용하지 않는다.
+TCP healthcheck와 RPC 조회 성공이 복구·백필 같은 모든 기동 작업 완료를 보장하지는 않는다.
+이 점검은 컨테이너 내부 연결이므로 실제 main→data 사설망·보안 그룹은 backend 관리자 API로 별도 확인한다.
+
+자동 실패 시 이전 deploy.env로 돌아가는 동작은 유지한다.
+새 점검 프로그램이 없는 과거 data-service 이미지를 수동 배포할 때는 해당 커밋의 워크플로를 선택하거나
+서버에서 compose로 이미지를 되돌리고 그 버전의 점검 방식으로 확인한다. REST backend로 롤백하려면
+REST를 제공하는 data-service도 함께 되돌려야 한다.
 
 현재는 기존 REST와 같은 사설 VPC·사설 IP 바인딩·yon-main 보안 그룹 제한 및 전용 내부 키 전제로
 평문 gRPC를 유지한다. **TLS 필수 여부와 인증서 운영은 팀 논의가 필요한 미결정 사항**이다.
-이는 TLS를 적용했다고 보거나 운영 보안 승인을 완료했다는 의미가 아니다.
-내부 키는 전송 암호화를 제공하지 않으며, 공유망/공개망에 이 포트를 노출하지 않는다.
+내부 키는 암호화를 제공하지 않으며 공개망에 9092를 노출하지 않는다.

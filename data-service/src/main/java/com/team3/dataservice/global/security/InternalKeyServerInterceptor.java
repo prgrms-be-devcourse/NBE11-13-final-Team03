@@ -21,8 +21,8 @@ public class InternalKeyServerInterceptor implements ServerInterceptor {
     public static final Metadata.Key<String> INTERNAL_KEY = Metadata.Key.of("x-internal-key", Metadata.ASCII_STRING_MARSHALLER);
     private final byte[] expectedKey;
 
-    public InternalKeyServerInterceptor(@Value("${internal.api-key}") String key) {
-        if (key == null || key.isBlank()) throw new IllegalStateException("internal.api-key must not be blank");
+    public InternalKeyServerInterceptor(@Value("${yon.data-service.internal-api-key}") String key) {
+        if (key == null || key.isBlank()) throw new IllegalStateException("yon.data-service.internal-api-key must not be blank");
         expectedKey = key.getBytes(StandardCharsets.UTF_8);
     }
 

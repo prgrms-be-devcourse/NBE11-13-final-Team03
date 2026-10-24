@@ -14,11 +14,9 @@ services:
     env_file: .env
     environment:
       JAVA_TOOL_OPTIONS: ${DATA_SERVICE_JAVA_OPTS:--XX:MaxRAMPercentage=70.0}
-    # 내부 전용 (Spring Security 없음). 보안 그룹에서 8082는 메인 서버의 보안 그룹에만 연다 (0.0.0.0/0 금지)
+    # 내부 전용 (Spring Security 없음). 보안 그룹에서 9092는 메인 서버의 보안 그룹에만 연다 (0.0.0.0/0 금지)
     # DATA_SERVICE_BIND_IP에 이 서버의 사설 IP를 넣으면 공개 IP로는 열리지 않는다 (보안 그룹 실수 대비)
     ports:
-      # REST 8082는 PR C까지 롤백 호환용으로 유지한다.
-      - "${DATA_SERVICE_BIND_IP:?Set DATA_SERVICE_BIND_IP to the private IP}:8082:8082"
       - "${DATA_SERVICE_BIND_IP:?Set DATA_SERVICE_BIND_IP to the private IP}:9092:9092"
     restart: unless-stopped
     logging:
