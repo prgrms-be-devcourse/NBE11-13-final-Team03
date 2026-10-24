@@ -7,9 +7,12 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
+import java.util.Optional;
 import java.util.Set;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
+    Optional<OutboxEvent> findByDedupKey(String dedupKey);
+
     /** Payload is the complete envelope, so the business deadline is nested under payload. */
     @Modifying(flushAutomatically = true)
     @Query(value = """

@@ -137,6 +137,26 @@ class NotificationReceptionPostgresTest {
     }
 
     @Test
+    void allEligibilityTypesAreStoredAndReplayedWithoutDuplicateNotifications() throws Exception {
+        String template = new ClassPathResource("contracts/notification-eligibility-v1.json").getContentAsString(StandardCharsets.UTF_8);
+        try (var client = HttpClient.newHttpClient()) {
+            for (String type : List.of("BECAME_ELIGIBLE", "ELIGIBILITY_DOWNGRADED", "ELIGIBILITY_REVIEW_REQUIRED")) {
+                var json = template.replace("BECAME_ELIGIBLE", type)
+                        .replace("11111111-1111-4111-8111-111111111111", UUID.randomUUID().toString())
+                        .replace("22222222-2222-4222-8222-222222222222", UUID.randomUUID().toString());
+                if (!type.equals("BECAME_ELIGIBLE")) json = json.replace("[\"IN_APP\", \"PUSH\"]", "[\"IN_APP\"]");
+                // The shared example occurs two days after this class's default test clock.
+                clock.set(Instant.parse("2026-10-25T00:00:00Z"));
+                assertThat(post(client, json).statusCode()).isEqualTo(200);
+                assertThat(post(client, json).statusCode()).isEqualTo(200);
+            }
+        }
+        assertThat(notifications.count()).isEqualTo(3); assertThat(consumed.count()).isEqualTo(3);
+        assertThat(jdbc.queryForList("SELECT type FROM notification.notifications ORDER BY id", String.class))
+                .containsExactly("BECAME_ELIGIBLE", "ELIGIBILITY_DOWNGRADED", "ELIGIBILITY_REVIEW_REQUIRED");
+    }
+
+    @Test
     void realHttpStorageFailureReturns503AfterAtomicRollbackAndCanBeRetried() throws Exception {
         try (var client = HttpClient.newHttpClient()) {
             jdbc.execute("ALTER TABLE notification.consumed_messages ADD CONSTRAINT reject_http_consume CHECK (user_id <> 7)");
