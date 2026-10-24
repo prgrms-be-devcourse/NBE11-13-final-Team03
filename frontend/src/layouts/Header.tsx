@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import styles from './Header.module.css'
 
@@ -12,8 +12,16 @@ const navigation = [
 ]
 
 function Header() {
+  const location = useLocation()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [previousLocation, setPreviousLocation] = useState(location)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
+
+  // 뒤로가기를 포함한 경로 변경 시 헤더 DOM을 유지하고 메뉴 상태만 초기화한다.
+  if (location !== previousLocation) {
+    setPreviousLocation(location)
+    setIsMenuOpen(false)
+  }
 
   return (
     <header
@@ -27,7 +35,7 @@ function Header() {
     >
       <div className={styles.inner}>
         <Link className={styles.brand} to="/" onClick={() => setIsMenuOpen(false)} aria-label="Y:ON 홈">
-          <img className={styles.logo} src="/logo/yon-symbol.png" alt="" width={1254} height={1254} />
+          <img className={styles.logo} src="/logo/yon-symbol.png" alt="" width={80} height={80} />
           <span>Y:ON</span>
         </Link>
         <button

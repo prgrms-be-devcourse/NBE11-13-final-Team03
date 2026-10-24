@@ -24,7 +24,7 @@ function Button({
       disabled={disabled || loading}
       aria-busy={loading || ariaBusy}
     >
-      {loading ? '처리 중…' : children}
+      {children}
     </button>
   )
 }

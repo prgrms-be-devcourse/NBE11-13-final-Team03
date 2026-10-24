@@ -30,6 +30,7 @@
 }
 
 .brand > span {
+  /* Pretendard 워드마크를 전구 심볼의 시각적 중심에 맞춘다. */
   transform: translateY(2px);
 }
 
