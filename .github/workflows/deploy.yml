@@ -163,6 +163,7 @@ jobs:
           docker logout ghcr.io > /dev/null
           compose up -d "$SERVICE"
 
+          # The adjacent block anchors are used by deploy/tests/test_grpc_readiness.py.
           # backend keeps its existing HTTP reachability check. data-service has no HTTP listener.
           # Read the key from the container environment; never put it in the command line or logs.
           probe() {

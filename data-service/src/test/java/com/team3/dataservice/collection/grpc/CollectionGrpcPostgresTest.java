@@ -43,6 +43,8 @@ class CollectionGrpcPostgresTest {
     }
     @Autowired GrpcServerLifecycle lifecycle;
     @Autowired JdbcTemplate db;
+    @Autowired com.team3.dataservice.collection.domain.repository.ExternalSourceRepository sources;
+    @Autowired com.team3.dataservice.collection.domain.repository.SyncHistoryRepository histories;
     @Autowired SyncJobService jobs;
     @Autowired CollectionProtoMapper mapper;
     @Autowired RawRecordFingerprint fingerprint;
@@ -133,4 +135,105 @@ class CollectionGrpcPostgresTest {
                 .startSync(StartSyncRequest.newBuilder().setSource(CollectionSource.YOUTH_POLICY).build()), Status.Code.UNAUTHENTICATED, "AUTH_008");
         assertEquals(0, db.queryForObject("SELECT count(*) FROM sync_history", Integer.class));
     }
+    @Test
+    void listsEveryStatusByKoreanDateWithStableNewestFirstOrder() {
+        var from = OffsetDateTime.parse("2026-10-20T15:00:00Z");
+        var until = from.plusDays(1);
+        var youth = sources.save(new com.team3.dataservice.collection.domain.entity.ExternalSource(
+                "YOUTH_POLICY", "youth", "https://example.test", true, from));
+        var employment = sources.save(new com.team3.dataservice.collection.domain.entity.ExternalSource(
+                "EMPLOYMENT24", "employment", "https://example.test", true, from));
+        history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.FAILED, from.minusNanos(1000));
+        var success = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.SUCCESS, from);
+        var pending = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.PENDING, from.plusHours(1));
+        var running = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.RUNNING, from.plusHours(2));
+        var partial = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.PARTIAL_SUCCESS, from.plusHours(3));
+        var failed = history(employment, com.team3.dataservice.collection.domain.SyncJobStatus.FAILED, until.minusNanos(1000));
+        var interrupted = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.INTERRUPTED, until.minusNanos(1000));
+        history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.SUCCESS, until);
+        var result = client().listSyncJobsByDate(ListSyncJobsByDateRequest.newBuilder().setDate("2026-10-21").build());
+        assertEquals(java.util.List.of(interrupted.getId(), failed.getId(), partial.getId(), running.getId(), pending.getId(), success.getId()),
+                result.getJobsList().stream().map(SyncJob::getJobId).toList());
+        assertEquals(java.util.List.of("INTERRUPTED", "FAILED", "PARTIAL_SUCCESS", "RUNNING", "PENDING", "SUCCESS"),
+                result.getJobsList().stream().map(job -> job.getStatus().name()).toList());
+        assertEquals(CollectionSource.EMPLOYMENT24, result.getJobs(1).getSource());
+        assertEquals("test failure", result.getJobs(1).getFailureReason());
+        assertEquals(1, result.getJobs(2).getFailedPageCount());
+        assertEquals("HTTP_500", result.getJobs(2).getPageFailures(0).getErrorCode());
+        assertFalse(result.getJobs(3).hasCompletedAt());
+    }
+
+    private com.team3.dataservice.collection.domain.entity.SyncHistory history(
+            com.team3.dataservice.collection.domain.entity.ExternalSource source,
+            com.team3.dataservice.collection.domain.SyncJobStatus status, OffsetDateTime at) {
+        var value = com.team3.dataservice.collection.domain.entity.SyncHistory.pending(source, "SCHEDULED", at);
+        switch (status) {
+            case RUNNING -> value.start();
+            case SUCCESS, PARTIAL_SUCCESS -> {
+                value.start();
+                if (status == com.team3.dataservice.collection.domain.SyncJobStatus.PARTIAL_SUCCESS) {
+                    value.recordSuccess(com.team3.dataservice.collection.domain.RecordResultType.CREATED);
+                    value.recordCollection(1, java.util.List.of(new com.team3.dataservice.collection.dto.response.SyncPageFailureResponse(
+                            2, "HTTP_500", "upstream error", true)), java.util.List.of(), java.util.List.of());
+                }
+                value.finish(status == com.team3.dataservice.collection.domain.SyncJobStatus.SUCCESS, at.plusMinutes(1));
+            }
+            case FAILED, INTERRUPTED -> value.fail("test failure",
+                    status == com.team3.dataservice.collection.domain.SyncJobStatus.INTERRUPTED, at.plusMinutes(1));
+            default -> { }
+        }
+        return histories.save(value);
+    }
+
+    @Test
+    void returnsEmptyHistoryForDateWithoutJobs() {
+        assertEquals(0, client().listSyncJobsByDate(ListSyncJobsByDateRequest.newBuilder().setDate("2030-01-01").build()).getJobsCount());
+    }
+
+    @Test
+    void invalidSourceAndLimitsDoNotCreateHistory() {
+        for (int source : new int[]{0, 999}) {
+            error(() -> client().startSync(StartSyncRequest.newBuilder().setSourceValue(source).build()), Status.Code.INVALID_ARGUMENT, "COLLECTION_003");
+        }
+        for (int size : new int[]{-1, 101}) {
+            error(() -> client().startSync(StartSyncRequest.newBuilder().setSource(CollectionSource.YOUTH_POLICY).setPageSize(size).build()),
+                    Status.Code.INVALID_ARGUMENT, "COLLECTION_003");
+        }
+        error(() -> client().startSync(StartSyncRequest.newBuilder().setSource(CollectionSource.YOUTH_POLICY).setMaxPages(1001).build()),
+                Status.Code.INVALID_ARGUMENT, "COLLECTION_003");
+        error(() -> client().getSyncJob(GetSyncJobRequest.getDefaultInstance()), Status.Code.INVALID_ARGUMENT, "COLLECTION_003");
+        assertEquals(0, histories.count());
+    }
+
+    @Test
+    void preservesAllSnapshotsWhenContentChangesBack() {
+        long id = start(); jobs.start(id);
+        var at = OffsetDateTime.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        var first = client().saveRawRecord(raw(id, "{\"value\":\"A\"}", at));
+        var second = client().saveRawRecord(raw(id, "{\"value\":\"B\"}", at.plusSeconds(1)));
+        var third = client().saveRawRecord(raw(id, "{\"value\":\"A\"}", at.plusSeconds(2)));
+        assertEquals(3, java.util.Set.of(first.getRawRecordId(), second.getRawRecordId(), third.getRawRecordId()).size());
+        assertEquals(first.getPayloadHash(), third.getPayloadHash());
+        assertEquals(3, db.queryForObject("SELECT count(*) FROM raw_external_record", Integer.class));
+        for (var record : java.util.List.of(first, second, third)) {
+            assertEquals(record, client().getRawRecord(GetRawRecordRequest.newBuilder().setRawRecordId(record.getRawRecordId()).build()));
+        }
+    }
+
+    @Test
+    void concurrentFirstObservationsAcrossExecutionsProduceOneSnapshot() throws Exception {
+        var at = OffsetDateTime.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        var source = sources.save(new com.team3.dataservice.collection.domain.entity.ExternalSource(
+                "YOUTH_POLICY", "youth", "https://example.test", true, at.minusSeconds(2)));
+        long firstId = histories.save(new com.team3.dataservice.collection.domain.entity.SyncHistory(source, "FULL", at.minusSeconds(1))).getId();
+        long secondId = histories.save(new com.team3.dataservice.collection.domain.entity.SyncHistory(source, "FULL", at.minusSeconds(1))).getId();
+        var barrier = new java.util.concurrent.CyclicBarrier(2);
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> { barrier.await(10, TimeUnit.SECONDS); return client().saveRawRecord(raw(firstId, "{\"value\":\"A\"}", at)).getRawRecordId(); });
+            var second = executor.submit(() -> { barrier.await(10, TimeUnit.SECONDS); return client().saveRawRecord(raw(secondId, "{\"value\":\"A\"}", at)).getRawRecordId(); });
+            assertEquals(first.get(15, TimeUnit.SECONDS), second.get(15, TimeUnit.SECONDS));
+        }
+        assertEquals(1, db.queryForObject("SELECT count(*) FROM raw_external_record", Integer.class));
+    }
+
 }
