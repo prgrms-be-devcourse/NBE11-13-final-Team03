@@ -1,6 +1,7 @@
 -- Apply once as notification_user, after notification-inbox.sql and before the new service boots.
 BEGIN;
 SET LOCAL search_path TO notification;
+SET LOCAL lock_timeout = '5s';
 DO $$ BEGIN
     IF current_user <> 'notification_user' THEN
         RAISE EXCEPTION 'Run this script as notification_user';

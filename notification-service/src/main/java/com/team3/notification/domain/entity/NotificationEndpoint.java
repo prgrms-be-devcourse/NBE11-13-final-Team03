@@ -3,6 +3,7 @@ package com.team3.notification.domain.entity;
 import jakarta.persistence.*;
 import java.time.Instant;
 
+/** Schema validation mapping; registration/deactivation use atomic JDBC statements in NotificationUserService. */
 @Entity
 @Table(name = "notification_endpoints", uniqueConstraints = @UniqueConstraint(
         name = "uk_notification_endpoints_fcm_token", columnNames = "fcm_token"))
