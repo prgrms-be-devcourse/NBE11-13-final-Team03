@@ -24,6 +24,9 @@ ext {
 
 
 dependencies {
+    implementation platform('software.amazon.awssdk:bom:2.57.2')
+    implementation 'software.amazon.awssdk:sqs'
+    implementation 'software.amazon.awssdk:url-connection-client'
     // 내부 API 호출(DataService 수집 관리, Notification 메시지 전달)에 쓰는 OpenFeign
     implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
     // PATCH support for NotificationUserClient only (its child-context Client bean).

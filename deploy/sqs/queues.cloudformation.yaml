@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Y notification Standard queue and Standard DLQ (manual deployment only)
+
+Parameters:
+  QueueName:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9_-]{1,76}'
+    Description: Standard source queue name; DLQ uses the -dlq suffix
+  VisibilityTimeoutSeconds:
+    Type: Number
+    MinValue: 30
+    MaxValue: 43200
+    Description: Must equal the Notification consumer visibility-timeout-seconds
+  MaxReceiveCount:
+    Type: Number
+    MinValue: 1
+    MaxValue: 1000
+    Description: Explicit operational choice; not an application policy default
+  SourceRetentionSeconds:
+    Type: Number
+    MinValue: 60
+    MaxValue: 1209599
+  DlqRetentionSeconds:
+    Type: Number
+    MinValue: 61
+    MaxValue: 1209600
+    Description: Must exceed SourceRetentionSeconds; consumer checks this before polling
+
+Resources:
+  NotificationDlq:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: !Sub '${QueueName}-dlq'
+      FifoQueue: false
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: !Ref DlqRetentionSeconds
+      RedriveAllowPolicy:
+        redrivePermission: byQueue
+        sourceQueueArns:
+          # Construct ARN without referring to source resource: avoid a circular dependency.
+          - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${QueueName}'
+  NotificationQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: !Ref QueueName
+      FifoQueue: false
+      SqsManagedSseEnabled: true
+      VisibilityTimeout: !Ref VisibilityTimeoutSeconds
+      ReceiveMessageWaitTimeSeconds: 10
+      MessageRetentionPeriod: !Ref SourceRetentionSeconds
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt NotificationDlq.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+  RequireTls:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref NotificationQueue
+        - !Ref NotificationDlq
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 'sqs:*'
+            Resource:
+              - !GetAtt NotificationQueue.Arn
+              - !GetAtt NotificationDlq.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+Outputs:
+  SourceQueueUrl:
+    Value: !Ref NotificationQueue
+  SourceQueueArn:
+    Value: !GetAtt NotificationQueue.Arn
+  DlqUrl:
+    Value: !Ref NotificationDlq
+  DlqArn:
+    Value: !GetAtt NotificationDlq.Arn
