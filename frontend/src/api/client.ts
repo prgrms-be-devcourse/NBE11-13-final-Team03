@@ -4,7 +4,11 @@ import { ApiError, toApiError } from './ApiError.ts'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
-    /** 인증 API에서만 true로 지정한다. 공개 API의 401은 자동 재발급하지 않는다. */
+    /**
+     * 미지정/false는 401 자동 재발급을 하지 않는다. 인증 API 호출에만 true로 지정해
+     * 401 + AUTH_006/AUTH_007 응답의 재발급·1회 재전송을 허용한다.
+     * 쿠키 전송 여부나 서버의 인증·권한 검사를 켜고 끄는 옵션이 아니다.
+     */
     requiresAuth?: boolean
   }
 }
@@ -71,6 +75,7 @@ async function csrfToken(): Promise<string> {
 
   if (!csrfBootstrap) {
     // 전용 CSRF endpoint는 없다. 확인된 공개 GET으로 쿠키 발급을 유도한다.
+    // 이 흐름은 GET /api/interests/options가 비로그인 공개 API로 유지되는 데 의존한다.
     csrfBootstrap = sessionClient.get('/interests/options')
       .then(() => undefined)
       .finally(() => { csrfBootstrap = undefined })
