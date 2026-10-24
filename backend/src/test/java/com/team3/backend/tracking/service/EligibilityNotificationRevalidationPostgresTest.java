@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.*;
 
 /** Real repositories and evaluator. Fixtures use domain rows, not collection/normalization implementation classes. */
 @Testcontainers
-@DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "app.tracking.eligibility-outbox-enabled=true"})
+@DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "yon.tracking.eligibility-outbox.enabled=true"})
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)

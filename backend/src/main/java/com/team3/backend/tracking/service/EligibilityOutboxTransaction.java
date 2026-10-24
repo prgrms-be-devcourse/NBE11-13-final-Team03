@@ -22,7 +22,7 @@ import static com.team3.backend.opportunity.domain.status.ApplicationStatus.*;
 
 /** Explicit per-user path only. No event producer or Worker is connected; disabled unless deliberately opted in. */
 @Service
-@ConditionalOnProperty(name = "app.tracking.eligibility-outbox-enabled", havingValue = "true")
+@ConditionalOnProperty(name = "yon.tracking.eligibility-outbox.enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class EligibilityOutboxTransaction {
     private final OpportunityEventRepository events;

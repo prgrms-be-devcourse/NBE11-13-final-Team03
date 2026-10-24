@@ -15,7 +15,7 @@ class EligibilityOutboxConfigurationTest {
 
     @Test
     void explicitFalseAlsoKeepsTheWritePathDisabled() {
-        context.withPropertyValues("app.tracking.eligibility-outbox-enabled=false")
+        context.withPropertyValues("yon.tracking.eligibility-outbox.enabled=false")
                 .run(result -> assertThat(result).hasNotFailed().doesNotHaveBean(EligibilityOutboxTransaction.class));
     }
 }
