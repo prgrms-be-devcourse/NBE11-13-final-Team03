@@ -14,21 +14,30 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.function.Predicate;
 
 /** Created only inside the Security chain, not registered again as a servlet filter. */
 public class NotificationInternalKeyFilter extends OncePerRequestFilter {
     public static final String PATH = "/internal/notification-messages";
     public static final String AUTHORITY = "NOTIFICATION_PUBLISH";
     private final byte[] expected;
+    private final Predicate<HttpServletRequest> matches;
+    private final String authority;
 
     public NotificationInternalKeyFilter(NotificationReceiverProperties properties) {
-        expected = digest(properties.apiKey());
+        this(properties.apiKey(), request -> "POST".equals(request.getMethod())
+                && (request.getContextPath() + PATH).equals(request.getRequestURI()), AUTHORITY);
+    }
+
+    public NotificationInternalKeyFilter(String key, Predicate<HttpServletRequest> matches, String authority) {
+        expected = digest(key);
+        this.matches = matches;
+        this.authority = authority;
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !"POST".equals(request.getMethod())
-                || !(request.getContextPath() + PATH).equals(request.getRequestURI());
+        return !matches.test(request);
     }
 
     @Override
@@ -42,7 +51,7 @@ public class NotificationInternalKeyFilter extends OncePerRequestFilter {
         }
         var context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new UsernamePasswordAuthenticationToken("application-service", null,
-                List.of(new SimpleGrantedAuthority(AUTHORITY))));
+                List.of(new SimpleGrantedAuthority(authority))));
         SecurityContextHolder.setContext(context);
         chain.doFilter(request, response);
     }
