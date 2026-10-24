@@ -145,7 +145,7 @@ class RecommendationPostgresIntegrationTest {
         preference(owner, hidden, true, true);
         flushAndClear();
 
-        mockMvc.perform(get("/api/opportunities/recommendations"))
+        mockMvc.perform(get("/api/users/me/recommendations"))
                 .andExpect(status().isUnauthorized());
         List<Map<String, Object>> items = recommendations(owner);
         assertEquals(List.of(high.getId(), medium.getId(), training.getId(), possible.getId()), ids(items));
@@ -213,7 +213,7 @@ class RecommendationPostgresIntegrationTest {
 
         assertEquals(List.of(), ids(recommendations(owner)));
         assertEquals(List.of(), ids(recommendations(other)));
-        mockMvc.perform(get("/api/opportunities/recommendations")
+        mockMvc.perform(get("/api/users/me/recommendations")
                         .with(user(principal(noProfile))))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ELIGIBILITY_001"));
@@ -359,7 +359,7 @@ class RecommendationPostgresIntegrationTest {
     }
 
     private List<Map<String, Object>> recommendations(User owner) throws Exception {
-        MvcResult response = mockMvc.perform(get("/api/opportunities/recommendations")
+        MvcResult response = mockMvc.perform(get("/api/users/me/recommendations")
                         .with(user(principal(owner))))
                 .andExpect(status().isOk()).andReturn();
         return JsonPath.read(response.getResponse().getContentAsString(), "$");

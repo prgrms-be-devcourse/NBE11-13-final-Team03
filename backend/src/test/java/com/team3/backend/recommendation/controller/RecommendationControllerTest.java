@@ -45,9 +45,16 @@ class RecommendationControllerTest {
 
     @Test
     void anonymousRecommendationIsUnauthorizedButPublicDetailRemainsPublic() throws Exception {
-        mockMvc.perform(get("/api/opportunities/recommendations"))
+        mockMvc.perform(get("/api/users/me/recommendations"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/opportunities/not-a-number"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(recommendationService);
+    }
+
+    @Test
+    void oldPathDoesNotInvokeRecommendation() throws Exception {
+        mockMvc.perform(get("/api/opportunities/recommendations").with(user(USER)))
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(recommendationService);
     }
@@ -56,7 +63,7 @@ class RecommendationControllerTest {
     void authenticatedUserReceivesSelectionOrderAndReasons() throws Exception {
         when(recommendationService.recommend(7L)).thenReturn(List.of(item(9L, true), item(2L, false)));
 
-        mockMvc.perform(get("/api/opportunities/recommendations").with(user(USER)))
+        mockMvc.perform(get("/api/users/me/recommendations").with(user(USER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].opportunityId").value(9))
                 .andExpect(jsonPath("$[0].saved").value(true))
@@ -75,7 +82,7 @@ class RecommendationControllerTest {
         when(recommendationService.recommend(7L))
                 .thenThrow(new BusinessException(EligibilityErrorCode.PROFILE_NOT_FOUND));
 
-        mockMvc.perform(get("/api/opportunities/recommendations").with(user(USER)))
+        mockMvc.perform(get("/api/users/me/recommendations").with(user(USER)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ELIGIBILITY_001"));
     }
@@ -84,7 +91,7 @@ class RecommendationControllerTest {
     void noRecommendationsReturnAnEmptyArray() throws Exception {
         when(recommendationService.recommend(7L)).thenReturn(List.of());
 
-        mockMvc.perform(get("/api/opportunities/recommendations").with(user(USER)))
+        mockMvc.perform(get("/api/users/me/recommendations").with(user(USER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isEmpty());
     }

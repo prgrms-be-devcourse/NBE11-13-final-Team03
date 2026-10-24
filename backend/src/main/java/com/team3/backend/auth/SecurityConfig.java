@@ -67,8 +67,8 @@ public class SecurityConfig {
 
                         ).permitAll()
 
-                        // 상세 조회의 경로 변수 매처보다 먼저 적용하여 추천 조회에 인증을 요구한다.
-                        .requestMatchers(HttpMethod.GET, "/api/opportunities/recommendations")
+                        // 개인화 추천 조회에는 인증을 요구한다.
+                        .requestMatchers(HttpMethod.GET, "/api/users/me/recommendations")
                         .hasAnyAuthority("USER", "ADMIN")
 
                         // 비회원도 조회 가능한 기회 API
