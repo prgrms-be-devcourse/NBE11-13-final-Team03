@@ -28,4 +28,19 @@ public class NotificationMessageDecoder {
         }
         return reader.readValue(json);
     }
+
+    public boolean isWithdrawal(String json) {
+        var root = mapper.readTree(json);
+        return root != null && root.isObject() && "USER_WITHDRAWN".equals(root.path("eventType").asText());
+    }
+
+    public UserWithdrawnMessage decodeWithdrawal(String json) {
+        var root = mapper.readTree(json);
+        if (root == null || !root.isObject()) throw new IllegalArgumentException("Message must be an object");
+        for (String field : new String[]{"schemaVersion", "userId"}) {
+            if (!root.path(field).isIntegralNumber()) throw new IllegalArgumentException("Integer field required");
+        }
+        return mapper.readerFor(UserWithdrawnMessage.class).without(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readValue(json);
+    }
 }

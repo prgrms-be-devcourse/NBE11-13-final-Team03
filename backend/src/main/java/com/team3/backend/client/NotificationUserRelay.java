@@ -27,6 +27,7 @@ public class NotificationUserRelay {
 
     /** Remote statuses a specific call may surface to the user; every other non-success status is an outage. */
     public enum ContractError {
+        USER_WITHDRAWN(410, "USER_WITHDRAWN"),
         NOT_FOUND(404, "NOTIFICATION_RESOURCE_NOT_FOUND"),
         ENDPOINT_CONFLICT(409, "NOTIFICATION_ENDPOINT_CONFLICT");
         private final int status;

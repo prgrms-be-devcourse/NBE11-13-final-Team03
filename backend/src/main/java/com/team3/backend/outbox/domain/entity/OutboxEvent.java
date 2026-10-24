@@ -64,6 +64,24 @@ public class OutboxEvent {
         return "NOTIFICATION_REQUESTED:" + Objects.requireNonNull(eventId) + ":" + Objects.requireNonNull(userId);
     }
 
+    /** No User FK and no expiry: this control message must survive account deletion. */
+    public static OutboxEvent userWithdrawn(Long userId, Instant now) {
+        var event = new OutboxEvent();
+        event.messageId = UUID.randomUUID();
+        event.sourceEventId = UUID.randomUUID();
+        event.userId = Objects.requireNonNull(userId);
+        event.eventType = "USER_WITHDRAWN";
+        event.dedupKey = "USER_WITHDRAWN:" + userId;
+        event.payload = Map.of("schemaVersion", 1, "messageId", event.messageId.toString(),
+                "eventType", event.eventType, "sourceEventId", event.sourceEventId.toString(),
+                "correlationId", UUID.randomUUID().toString(), "causationId", event.sourceEventId.toString(),
+                "userId", userId, "occurredAt", Objects.requireNonNull(now).toString());
+        event.status = OutboxStatus.PENDING;
+        event.nextRetryAt = now;
+        event.createdAt = now;
+        return event;
+    }
+
     public static OutboxEvent notification(UUID messageId, UUID sourceEventId, Long userId, Long opportunityId,
             String notificationType, Map<String, Object> envelope, Instant now) {
         var event = new OutboxEvent();

@@ -24,6 +24,12 @@ public class NotificationMessageController {
             produces = MediaType.APPLICATION_JSON_VALUE)
     public NotificationReceptionResult receive(@RequestBody String json) {
         // receive() commits before this method can return an HTTP receipt.
+        if (decoder.isWithdrawal(json)) {
+            var receipt = handler.handle(json);
+            log.info("Withdrawal consumed: messageId={}, result={}, duplicate={}",
+                    receipt.messageId(), receipt.status(), receipt.duplicateMessage());
+            return receipt;
+        }
         var message = decoder.decode(json);
         var receipt = handler.handle(message);
         log.info("Notification consumed: correlationId={}, messageId={}, sourceEventId={}, result={}, duplicate={}",

@@ -23,38 +23,38 @@ public class UserNotificationFacadeController {
     @GetMapping("/notifications")
     public ResponseEntity<?> list(@AuthenticationPrincipal CustomUserDetails user,
             @RequestParam(required = false) @Positive Long beforeId, @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return relay.call(() -> client.list(user.getUserId(), beforeId, size), 200, false);
+        return relay.call(() -> client.list(user.getUserId(), beforeId, size), 200, false, USER_WITHDRAWN);
     }
     @GetMapping("/notifications/unread-count")
     public ResponseEntity<?> unread(@AuthenticationPrincipal CustomUserDetails user) {
-        return relay.call(() -> client.unread(user.getUserId()), 200, true);
+        return relay.call(() -> client.unread(user.getUserId()), 200, true, USER_WITHDRAWN);
     }
     @PatchMapping("/notifications/{id}/read")
     public ResponseEntity<?> read(@AuthenticationPrincipal CustomUserDetails user, @PathVariable @Positive long id) {
-        return relay.call(() -> client.read(user.getUserId(), id), 204, false, NOT_FOUND);
+        return relay.call(() -> client.read(user.getUserId(), id), 204, false, NOT_FOUND, USER_WITHDRAWN);
     }
     @PatchMapping("/notifications/read-all")
     public ResponseEntity<?> readAll(@AuthenticationPrincipal CustomUserDetails user) {
-        return relay.call(() -> client.readAll(user.getUserId()), 204, false);
+        return relay.call(() -> client.readAll(user.getUserId()), 204, false, USER_WITHDRAWN);
     }
     @PostMapping("/notifications/{id}/click")
     public ResponseEntity<?> click(@AuthenticationPrincipal CustomUserDetails user, @PathVariable @Positive long id) {
-        return relay.call(() -> client.click(user.getUserId(), id), 204, false, NOT_FOUND);
+        return relay.call(() -> client.click(user.getUserId(), id), 204, false, NOT_FOUND, USER_WITHDRAWN);
     }
     @GetMapping("/users/me/notification-settings")
     public ResponseEntity<?> settings(@AuthenticationPrincipal CustomUserDetails user) {
-        return relay.call(() -> client.settings(user.getUserId()), 200, false);
+        return relay.call(() -> client.settings(user.getUserId()), 200, false, USER_WITHDRAWN);
     }
     @PutMapping("/users/me/notification-settings")
     public ResponseEntity<?> settings(@AuthenticationPrincipal CustomUserDetails user, @Valid @RequestBody Settings body) {
-        return relay.call(() -> client.settings(user.getUserId(), body), 200, false);
+        return relay.call(() -> client.settings(user.getUserId(), body), 200, false, USER_WITHDRAWN);
     }
     @PostMapping("/users/me/notification-endpoints")
     public ResponseEntity<?> endpoint(@AuthenticationPrincipal CustomUserDetails user, @Valid @RequestBody Endpoint body) {
-        return relay.call(() -> client.endpoint(user.getUserId(), body), 200, false, ENDPOINT_CONFLICT);
+        return relay.call(() -> client.endpoint(user.getUserId(), body), 200, false, ENDPOINT_CONFLICT, USER_WITHDRAWN);
     }
     @DeleteMapping("/users/me/notification-endpoints/{id}")
     public ResponseEntity<?> remove(@AuthenticationPrincipal CustomUserDetails user, @PathVariable @Positive long id) {
-        return relay.call(() -> client.removeEndpoint(user.getUserId(), id), 204, false, NOT_FOUND);
+        return relay.call(() -> client.removeEndpoint(user.getUserId(), id), 204, false, NOT_FOUND, USER_WITHDRAWN);
     }
 }

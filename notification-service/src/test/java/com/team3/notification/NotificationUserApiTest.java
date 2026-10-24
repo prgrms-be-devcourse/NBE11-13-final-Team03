@@ -93,4 +93,11 @@ class NotificationUserApiTest {
         assertThatThrownBy(() -> new NotificationUserApiProperties(true, " ")).isInstanceOf(IllegalArgumentException.class);
         assertThat(new NotificationUserApiProperties(true, "secret").toString()).doesNotContain("secret");
     }
+
+    @Test
+    void tombstoneRejectionIsAnExplicit410WithoutPrivateDetails() throws Exception {
+        when(service.settings(7)).thenThrow(new NotificationUserApiException(410, "USER_WITHDRAWN"));
+        mvc.perform(get(ROOT + "/notification-settings").header("X-INTERNAL-KEY", "test-user-api-key"))
+                .andExpect(status().isGone()).andExpect(content().json("{\"code\":\"USER_WITHDRAWN\"}"));
+    }
 }
