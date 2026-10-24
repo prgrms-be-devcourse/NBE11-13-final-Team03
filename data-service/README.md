@@ -95,9 +95,47 @@ protobuf Gradle 플러그인 0.9.6을 사용하고 생성기는 런타임과 같
 설정 키도 Boot 4.1의 `inbound.message.max-size`를 사용한다.
 [공식 Boot gRPC 문서](https://docs.spring.io/spring-boot/4.1/reference/io/grpc.html)
 
-backend의 gRPC 주소 환경변수 예시는 준비만 추가하며 실제 호출 전환은 후속 PR B에서 한다.
-gRPC 포트는 내부 네트워크에서만 허용하고 호스트 공개 포트에 추가하지 않는다.
-서로 다른 호스트로 분리할 때 TLS를 적용한다.
+backend의 gRPC 주소 환경변수 예시는 준비만 추가하며 실제 호출 전환은 PR B(#54)에서 한다.
+EC2 3대 구성(#56)에서는 backend와 data-service가 별도 서버이므로,
+backend의 주소는 `DATA_SERVICE_GRPC_ADDRESS=static://<데이터 서버 사설 IP>:9092`로 둔다.
+서버 간에는 compose 서비스명 `data-service`가 해석되지 않으므로 운영 주소에 사용하지 않는다.
+로컬 실행만 `static://localhost:9092`를 쓴다.
+환경변수 예시는 `deploy/main/.env.example`, `deploy/data/.env.example`에 있다.
+
+### 내부 네트워크와 평문 통신
+
+현재 배포는 신뢰하는 사설 VPC 내부의 서버 간 통신으로 한정하고,
+데이터 서버의 사설 IP에 포트를 바인딩하며 보안 그룹에서 TCP 9092의 송신원을
+메인 서버 보안 그룹(`yon-main`)으로 제한하는 전제로 평문 gRPC와 전용 내부 키를 사용한다.
+공개 IP·전체 인터넷에 9092를 허용하지 않으며, `DATA_SERVICE_BIND_IP`에 데이터 서버 사설 IP를 넣는다.
+내부 키는 호출 인증용이고 전송 암호화를 제공하지 않는다.
+이 접근 제한을 유지할 수 없는 네트워크나 전송 암호화가 필요한 환경에서는 서버·클라이언트에 TLS를 설정한다.
+
+이 PR A는 REST 8082와 gRPC 9092를 공존시킨다.
+현재 운영 compose·Dockerfile·기동 확인은 아직 8082 기준이며, 9092 포트 매핑·Dockerfile EXPOSE·
+배포 기동 확인과 보안 그룹 안내는 배포 담당자의 별도 PR에서 맞춘다.
+PR C(#55)의 REST 제거와 함께 반영해야 하며, 그 전에 HTTP 8082 규칙을 제거하지 않는다.
+
+### 포트 바인딩과 기동 완료
+
+Spring gRPC 1.1.1의 `GrpcServerLifecycle`은 `SmartLifecycle`이다.
+일반 singleton 빈 초기화 뒤, 컨텍스트 refresh의 마지막 lifecycle 시작 단계에서 Netty 서버를 바인딩한다.
+`ContextRefreshedEvent`와 `ApplicationRunner`·`ApplicationReadyEvent`보다 먼저 포트를 열 수 있으므로,
+**9092 TCP 연결 성공은 listener 생존 확인이며 전체 기동 완료나 업무 준비 완료를 보장하지 않는다.**
+DB 경계 검사는 DataSource 초기화 중 수행되지만, 기동 후 지역 코드 동기화(`RegionSyncRunner`),
+중단된 수집 복구(`SyncJobService.recoverInterrupted`), 조건 묶음 백필은 포트가 열린 뒤에도 실행될 수 있다.
+배포의 TCP 점검을 이 범위의 생존 확인으로 사용하고,
+업무 확인은 기동 작업 종료를 확인한 후 인증된 `ListSyncJobsByDate`를 유효한 한국 날짜로 호출해
+내부 키와 DB 조회를 검증한다. 목록이 비어 있는 정상 응답도 성공이다.
+조회 성공은 복구·백필 완료 자체를 증명하지 않으므로 해당 작업 완료 여부는 별도로 확인한다.
+`StartSync`는 수집을 생성하는 명령이므로 단순 기동 점검에는 사용하지 않는다.
+
+확인 근거:
+
+- [Spring gRPC 1.1.1 GrpcServerLifecycle](https://github.com/spring-projects/spring-grpc/blob/v1.1.1/spring-grpc-core/src/main/java/org/springframework/grpc/server/lifecycle/GrpcServerLifecycle.java)
+- [Spring 컨텍스트 refresh 순서](https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java)
+- [Boot 애플리케이션 이벤트 순서](https://docs.spring.io/spring-boot/reference/features/spring-application.html#features.spring-application.application-events-and-listeners)
+
 배포 순서는 data-service(서버 추가) → backend(클라이언트 전환) → data-service(REST 제거)다.
 현재 backend-image 워크플로는 모든 main push에서 실행하므로 proto 변경도 이미 포함한다.
 data-service 및 backend PostgreSQL PR 워크플로는 `contracts/proto/**`도 검사한다.
