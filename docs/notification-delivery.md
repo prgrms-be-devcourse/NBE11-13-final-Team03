@@ -64,8 +64,8 @@ Webpush tag(notification-ID)는 브라우저의 같은 알림 갱신에 도움�
 
 ## 탈퇴와 정리
 
-탈퇴는 같은 사용자 잠금 아래 대기/SENDING Delivery를 SKIPPED로 중단한 뒤 알림·Endpoint·설정을 삭제한다.
-Delivery는 Notification 내부 두 FK의 ON DELETE CASCADE로 함께 삭제한다.
+탈퇴는 같은 사용자 잠금 아래 알림·Endpoint·설정을 삭제한다.
+대기/SENDING을 포함한 Delivery는 알림·Endpoint 삭제 시 Notification 내부 두 FK의 ON DELETE CASCADE로 함께 삭제한다.
 최종 데이터 삭제를 선택한 것이므로 탈퇴 사용자의 Delivery 발송 감사 행도 보존하지 않는다.
 Tombstone과 소비 기록은 남고, 정리 후 지연 메시지/토큰/설정 재생성을 막는다.
 
