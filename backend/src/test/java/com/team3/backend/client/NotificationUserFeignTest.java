@@ -121,7 +121,8 @@ class NotificationUserFeignTest {
         assertThat(relay.call(() -> client.read(7, 9), 204, false).getStatusCode().value()).isEqualTo(503);
         assertThat(calls).hasValue(1);
         status.set(404);
-        assertThat(relay.call(() -> client.read(7, 9), 204, false).getStatusCode().value()).isEqualTo(404);
+        assertThat(relay.call(() -> client.read(7, 9), 204, false, NotificationUserRelay.ContractError.NOT_FOUND)
+                .getStatusCode().value()).isEqualTo(404);
     }
 
     @Test

@@ -87,6 +87,39 @@ class UserNotificationFacadeControllerTest {
     }
 
     @Test
+    void contractErrorsAreRelayedOnlyForCallsThatCanProduceThem() throws Exception {
+        // A remote 404 on settings/list/count can only come from a routing or deployment error.
+        when(client.settings(7)).thenReturn(response(404, "private diagnostics"));
+        when(client.list(7, null, 20)).thenReturn(response(404, "private diagnostics"));
+        when(client.unread(7)).thenReturn(response(404, "private diagnostics"));
+        when(client.readAll(7)).thenReturn(response(404, "private diagnostics"));
+        mvc.perform(get("/api/users/me/notification-settings").with(user(principal)))
+                .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("NOTIFICATION_UNAVAILABLE"));
+        mvc.perform(get("/api/notifications").with(user(principal)))
+                .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("NOTIFICATION_UNAVAILABLE"));
+        mvc.perform(get("/api/notifications/unread-count").with(user(principal)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.available").value(false))
+                .andExpect(jsonPath("$.unreadCount").doesNotExist());
+        mvc.perform(patch("/api/notifications/read-all").with(user(principal)).with(csrf()))
+                .andExpect(status().isServiceUnavailable());
+        // Ownership 404 and Endpoint 409 stay, but not the other way round.
+        when(client.click(7, 99)).thenReturn(response(404, "private diagnostics"));
+        when(client.removeEndpoint(7, 99)).thenReturn(response(404, "private diagnostics"));
+        when(client.endpoint(7, new NotificationUserRequests.Endpoint("other-owner")))
+                .thenReturn(response(409, "private diagnostics"));
+        when(client.read(7, 9)).thenReturn(response(409, "private diagnostics"));
+        mvc.perform(post("/api/notifications/99/click").with(user(principal)).with(csrf()))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("NOTIFICATION_RESOURCE_NOT_FOUND"));
+        mvc.perform(delete("/api/users/me/notification-endpoints/99").with(user(principal)).with(csrf()))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/users/me/notification-endpoints").with(user(principal)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"fcmToken\":\"other-owner\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("NOTIFICATION_ENDPOINT_CONFLICT"));
+        mvc.perform(patch("/api/notifications/9/read").with(user(principal)).with(csrf()))
+                .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
     void invalidPaginationAndMissingSettingsAre400Not500() throws Exception {
         mvc.perform(get("/api/notifications").with(user(principal)).param("size", "101")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/notifications").with(user(principal)).param("beforeId", "0")).andExpect(status().isBadRequest());

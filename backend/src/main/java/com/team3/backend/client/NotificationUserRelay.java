@@ -25,19 +25,25 @@ public class NotificationUserRelay {
         this.slots = new Semaphore(properties.maxConcurrentRequests());
     }
 
-    public ResponseEntity<?> call(Supplier<Response> call, int successStatus, boolean unread) {
+    /** Remote statuses a specific call may surface to the user; every other non-success status is an outage. */
+    public enum ContractError {
+        NOT_FOUND(404, "NOTIFICATION_RESOURCE_NOT_FOUND"),
+        ENDPOINT_CONFLICT(409, "NOTIFICATION_ENDPOINT_CONFLICT");
+        private final int status;
+        private final String code;
+        ContractError(int status, String code) { this.status = status; this.code = code; }
+    }
+
+    public ResponseEntity<?> call(Supplier<Response> call, int successStatus, boolean unread, ContractError... allowed) {
         if (!properties.enabled() || !slots.tryAcquire()) return unavailable(unread);
         try (var response = call.get()) {
             int status = response.status();
-            // These statuses are explicit user API contract errors; never relay remote diagnostics.
-            if (status == 400 || status == 404 || status == 409) {
-                return ResponseEntity.status(status).body(Map.of("code", switch (status) {
-                    case 400 -> "INVALID_NOTIFICATION_REQUEST";
-                    case 404 -> "NOTIFICATION_RESOURCE_NOT_FOUND";
-                    default -> "NOTIFICATION_ENDPOINT_CONFLICT";
-                }));
+            // Only the contract errors this call can legitimately produce are relayed (fixed code, no remote diagnostics).
+            // A 404 on a call without owned resources (settings, list, counts) means a routing/deployment error, not "not found".
+            for (var error : allowed) {
+                if (error.status == status) return ResponseEntity.status(status).body(Map.of("code", error.code));
             }
-            // Remote 401/403 indicate service authentication misconfiguration, not browser authentication.
+            // Remote 400/401/403 indicate facade/contract/key misconfiguration, not a browser request error.
             if (status != successStatus) return unavailable(unread);
             if (successStatus == 204) return ResponseEntity.noContent().build();
             if (response.body() == null) return unavailable(unread);

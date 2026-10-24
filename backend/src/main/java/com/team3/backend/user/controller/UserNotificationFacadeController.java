@@ -3,6 +3,7 @@ package com.team3.backend.user.controller;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.client.NotificationUserClient;
 import com.team3.backend.client.NotificationUserRelay;
+import static com.team3.backend.client.NotificationUserRelay.ContractError.*;
 import com.team3.backend.client.dto.NotificationUserRequests.*;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
@@ -30,7 +31,7 @@ public class UserNotificationFacadeController {
     }
     @PatchMapping("/notifications/{id}/read")
     public ResponseEntity<?> read(@AuthenticationPrincipal CustomUserDetails user, @PathVariable @Positive long id) {
-        return relay.call(() -> client.read(user.getUserId(), id), 204, false);
+        return relay.call(() -> client.read(user.getUserId(), id), 204, false, NOT_FOUND);
     }
     @PatchMapping("/notifications/read-all")
     public ResponseEntity<?> readAll(@AuthenticationPrincipal CustomUserDetails user) {
@@ -38,7 +39,7 @@ public class UserNotificationFacadeController {
     }
     @PostMapping("/notifications/{id}/click")
     public ResponseEntity<?> click(@AuthenticationPrincipal CustomUserDetails user, @PathVariable @Positive long id) {
-        return relay.call(() -> client.click(user.getUserId(), id), 204, false);
+        return relay.call(() -> client.click(user.getUserId(), id), 204, false, NOT_FOUND);
     }
     @GetMapping("/users/me/notification-settings")
     public ResponseEntity<?> settings(@AuthenticationPrincipal CustomUserDetails user) {
@@ -50,10 +51,10 @@ public class UserNotificationFacadeController {
     }
     @PostMapping("/users/me/notification-endpoints")
     public ResponseEntity<?> endpoint(@AuthenticationPrincipal CustomUserDetails user, @Valid @RequestBody Endpoint body) {
-        return relay.call(() -> client.endpoint(user.getUserId(), body), 200, false);
+        return relay.call(() -> client.endpoint(user.getUserId(), body), 200, false, ENDPOINT_CONFLICT);
     }
     @DeleteMapping("/users/me/notification-endpoints/{id}")
     public ResponseEntity<?> remove(@AuthenticationPrincipal CustomUserDetails user, @PathVariable @Positive long id) {
-        return relay.call(() -> client.removeEndpoint(user.getUserId(), id), 204, false);
+        return relay.call(() -> client.removeEndpoint(user.getUserId(), id), 204, false, NOT_FOUND);
     }
 }

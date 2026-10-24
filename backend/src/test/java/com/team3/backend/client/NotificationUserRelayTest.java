@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import static com.team3.backend.client.NotificationUserRelay.ContractError.*;
 import static org.assertj.core.api.Assertions.*;
 
 class NotificationUserRelayTest {
@@ -26,8 +27,15 @@ class NotificationUserRelayTest {
     @Test
     void preservesContractErrorsButRejectsRedirectAuthenticationAndMalformedResponses() {
         var relay = relay(true);
+        assertThat(relay.call(() -> response(404, "secret"), 204, false, NOT_FOUND).getStatusCode().value()).isEqualTo(404);
+        assertThat(relay.call(() -> response(409, "secret"), 200, false, ENDPOINT_CONFLICT).getStatusCode().value()).isEqualTo(409);
+        // A contract error the call cannot produce is a deployment/contract failure, not a user-facing status.
+        assertThat(relay.call(() -> response(409, "secret"), 204, false, NOT_FOUND).getStatusCode().value()).isEqualTo(503);
+        assertThat(relay.call(() -> response(404, "secret"), 200, false, ENDPOINT_CONFLICT).getStatusCode().value()).isEqualTo(503);
         for (int status : new int[]{400, 404, 409}) {
-            assertThat(relay.call(() -> response(status, "secret"), 200, false).getStatusCode().value()).isEqualTo(status);
+            assertThat(relay.call(() -> response(status, "secret"), 200, false).getStatusCode().value()).isEqualTo(503);
+            assertThat(relay.call(() -> response(status, "secret"), 200, true).getBody())
+                    .isEqualTo(new NotificationUserRelay.UnreadUnavailable(false, null));
         }
         for (int status : new int[]{201, 302, 401, 403, 429, 500, 503}) {
             assertThat(relay.call(() -> response(status, "secret"), 200, false).getStatusCode().value()).isEqualTo(503);
