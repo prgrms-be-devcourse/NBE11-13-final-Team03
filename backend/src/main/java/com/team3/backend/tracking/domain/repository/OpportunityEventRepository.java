@@ -2,6 +2,7 @@ package com.team3.backend.tracking.domain.repository;
 
 import com.team3.backend.tracking.domain.entity.OpportunityEvent;
 import com.team3.backend.tracking.domain.entity.OpportunityEventProcessingStatus;
+import com.team3.backend.tracking.domain.entity.OpportunityEventType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 import jakarta.persistence.LockModeType;
@@ -29,14 +31,15 @@ public interface OpportunityEventRepository
 
     @Query("""
             select e.id from OpportunityEvent e
-            where e.retryCount < :maxAttempts
+            where e.eventType in :eventTypes and e.retryCount < :maxAttempts
               and ((e.processingStatus = :pending and e.nextRetryAt <= :now)
                 or (e.processingStatus = :processing and e.processingStartedAt <= :staleBefore))
             order by e.nextRetryAt, e.id
             """)
     List<Long> findFanoutCandidates(@Param("now") Instant now, @Param("staleBefore") Instant staleBefore,
             @Param("maxAttempts") int maxAttempts, @Param("pending") OpportunityEventProcessingStatus pending,
-            @Param("processing") OpportunityEventProcessingStatus processing, Pageable pageable);
+            @Param("processing") OpportunityEventProcessingStatus processing,
+            @Param("eventTypes") Collection<OpportunityEventType> eventTypes, Pageable pageable);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
@@ -44,27 +47,29 @@ public interface OpportunityEventRepository
                 e.processingStartedAt = :now, e.leaseToken = :token,
                 e.retryCount = e.retryCount + 1, e.lastError = null,
                 e.fanoutSkipReason = null, e.processedAt = null
-            where e.id = :id and e.retryCount < :maxAttempts
+            where e.id = :id and e.eventType in :eventTypes and e.retryCount < :maxAttempts
               and ((e.processingStatus = :pending and e.nextRetryAt <= :now)
                 or (e.processingStatus = :processing and e.processingStartedAt <= :staleBefore))
             """)
     int claimFanout(@Param("id") Long id, @Param("token") UUID token, @Param("now") Instant now,
             @Param("staleBefore") Instant staleBefore, @Param("maxAttempts") int maxAttempts,
             @Param("pending") OpportunityEventProcessingStatus pending,
-            @Param("processing") OpportunityEventProcessingStatus processing);
+            @Param("processing") OpportunityEventProcessingStatus processing,
+            @Param("eventTypes") Collection<OpportunityEventType> eventTypes);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             update OpportunityEvent e set e.processingStatus = :failed, e.processedAt = :now,
                 e.processingStartedAt = null, e.leaseToken = null, e.lastError = 'FANOUT_ATTEMPTS_EXHAUSTED'
-            where e.retryCount >= :maxAttempts
+            where e.eventType in :eventTypes and e.retryCount >= :maxAttempts
               and ((e.processingStatus = :pending and e.nextRetryAt <= :now)
                 or (e.processingStatus = :processing and e.processingStartedAt <= :staleBefore))
             """)
     int failExhaustedFanouts(@Param("now") Instant now, @Param("staleBefore") Instant staleBefore,
             @Param("maxAttempts") int maxAttempts, @Param("pending") OpportunityEventProcessingStatus pending,
             @Param("processing") OpportunityEventProcessingStatus processing,
-            @Param("failed") OpportunityEventProcessingStatus failed);
+            @Param("failed") OpportunityEventProcessingStatus failed,
+            @Param("eventTypes") Collection<OpportunityEventType> eventTypes);
 
     /**
      * 현재 처리 가능한 이벤트 ID를 조회한다.

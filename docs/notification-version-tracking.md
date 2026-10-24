@@ -3,10 +3,11 @@
 ## 현재 범위
 
 10단계는 PARTIAL이다. 구조적 snapshot 비교기와 Application 소유의 버전 처리 기록/변경 이력 모델을 구현했다.
-자동 스캔·기준선 초기화·신청 가능성 변화의 알림 매핑/Outbox 연결은 아직 구현하지 않았다.
+기준선 초기화·자동 스케줄러는 아직 연결하지 않았다. 사용자별 순회는 별도 옵션을 요구하는 명시적 경로로 연결했다.
+잠정 알림 매핑·명시적 사용자별 Outbox 경로와 순차 비교 실행 경로는 아래 범위를 따른다.
 버전 비교 기록과 마감 연장 이벤트·기존 Outbox 취소는 아래 명시적 호출 트랜잭션으로 연결했다.
 새 테이블은 backend의 기존 ddl-auto:update 정책을 따른다. 실제 운영 DB 적용은 미검증이다.
-실제 `.env`·전달·Consumer·푸시 플래그는 변경하지 않았다. Notification은 DEADLINE_EXTENDED 타입 지원만 확장했다.
+실제 `.env`·전달·Consumer·푸시 플래그는 변경하지 않았다. Notification의 지원 타입은 아래 계약 절을 따른다.
 
 ## 비교 계약
 
@@ -30,11 +31,11 @@
 | NO_CHANGE | 같은 정규화 규칙에서 구조 차이 없음 |
 | NORMALIZATION_VERSION_CHANGED | 정규화 규칙 변경으로 이벤트 분석 억제 |
 | READY_FOR_EVENT_ANALYSIS | 차이 발견, 이벤트 분석 미완료 |
-| PROCESSED | 이벤트 판단/필요 이벤트 저장까지 완료 |
+| PROCESSED | 버전 단위 이벤트 판단/필요 후속 작업 저장까지 완료. 사용자별 판정·발송 완료와 별개 |
 
 변경 발견만으로 버전을 처리 완료로 간주하지 않는다. READY_FOR_EVENT_ANALYSIS는 processed_at이 없고,
 이벤트 판단과 필요한 이벤트 저장이 커밋되는 트랜잭션에서만 PROCESSED로 바꾼다.
-현재 명시적 비교 서비스는 연결했지만, 이 완료 전환을 자동 실행하는 Worker는 연결하지 않았다.
+명시적 분석 트랜잭션에서 근거·후속 이벤트와 완료 전환을 함께 저장한다. 이를 자동 실행하는 스케줄러는 연결하지 않았다.
 
 `opportunity_changes`는 (from_version_id, to_version_id) UNIQUE이며 실제 구조 차이가 있을 때만 저장한다.
 서로 다른 정책·역순/동일 버전 비교를 거부한다. 정규화 규칙 변경과 실제 정책 변경이 동시에 발생하면
@@ -48,7 +49,7 @@
 - 최초 출처의 정규화 실패/재시도에 대한 기준선 완료 조건과 판정 상태 쌍별 알림 매핑은 확정 전 자동 구현하지 않는다.
 - 훈련 시작일·사업기간을 신청기간으로 취급하지 않고 복수 기간의 연장 여부가 불명확하면 임의 확정하지 않는다.
 
-## 검증 — 최종 로컬 상태 (2026-10-25)
+## 기존 병합 범위 검증 (2026-10-25)
 
 | 테스트 | 건수 | 결과 |
 | --- | --- | --- |
@@ -126,7 +127,8 @@ DB 컬럼·수동 DDL·실제 환경변수·전달/푸시 플래그는 변경하
 ## 버전 비교 기록과 마감 연장 처리의 원자적 연결
 
 OpportunityVersionComparisonTransaction.compare(toVersionId)는 기존 기준선/완료된 직전 버전이 있는
-현재 YOUTH_POLICY 버전을 명시적으로 비교한다. 첫 버전의 초기 적재 여부를 추측하거나 기준선을 자동 생성하지 않는다.
+YOUTH_POLICY 버전을 명시적으로 비교한다. 현재 포인터까지의 과거 버전도 허용하며 현재 포인터 뒤의 버전은 처리하지 않는다.
+첫 버전의 초기 적재 여부를 추측하거나 기준선을 자동 생성하지 않는다.
 
 - 정책 행 잠금 후 대상 버전의 기존 처리 기록이 있으면 그 기록을 그대로 반환한다. 재실행으로 기준선이나 분석 대기를 완료로 바꾸지 않는다.
 - 구조 차이가 있으면 OpportunityChange를 저장하고, 무변경이어도 OpportunityVersionTracking을 저장한다.
@@ -136,7 +138,7 @@ OpportunityVersionComparisonTransaction.compare(toVersionId)는 기존 기준선
 - 무변경/규칙 변경 억제는 종료 상태다. 실제 변경은 자격조건 분석이 끝난 것이 아니므로 READY_FOR_EVENT_ANALYSIS로 남긴다.
   직전 버전이 아직 분석 대기이면 다음 버전 비교는 거부하며 건너뛰지 않는다.
 
-자동 Worker·신규 출처 초기 적재 계약·사용자별 판정 상태 매핑은 여전히 미연결이다.
+순차 비교와 명시적 이벤트 분석 완료 경로는 아래 절을 따른다. 자동 스케줄러·신규 출처 초기 적재 계약은 미연결이다.
 
 ## 결정·협의 체크리스트 (2026-10-25)
 
@@ -148,15 +150,15 @@ OpportunityVersionComparisonTransaction.compare(toVersionId)는 기존 기준선
 예: 마감이 10/25 → 10/30 → 10/27로 바뀌면 두 변경 이력을 모두 남기되, 최신 마감과 맞지 않는
 “10/30까지 연장” 요청은 만들지 않는다. 이미 발행된 요청의 회수는 기존 MVP 범위 밖이다.
 
-이 방향은 다음 Worker/처리 체인 PR의 목표다. 현재 코드의 “현재 버전만 비교” 조건은 아직 그대로이며,
-READY_FOR_EVENT_ANALYSIS를 완료로 바꾸는 자동 호출자도 없다. 따라서 현 코드가 순차 분석을 구현한 것은 아니다.
-중간 버전 누락 또는 분석 대기로 정책 체인이 멈출 수 있으므로 자동 Worker 연결 전에 해결해야 한다.
+현재 포인터까지의 과거 버전을 순서대로 찾는 명시적 Worker 경로를 추가했다.
+분석·완료는 별도의 명시적 트랜잭션으로 연결했지만 자동 호출자는 없으므로 전체 자동 처리 체인 완료와는 구분한다.
+모호한 신청기간은 분석 대기를 유지하며 사용자별 판정·순회/복구와 초기 적재 계약을 자동 활성화 전에 연결해야 한다.
 
 ### 추적 담당 결정·확인 사항
 
 | 항목 | 현재 결정 | 남은 구현/확인 |
 | --- | --- | --- |
-| 버전 처리 방향 | 모든 버전을 순차 비교·기록 | 과거 버전 분석 허용, 진행 커서·복구·완료 조건 설계 |
+| 버전 처리 방향 | 모든 버전을 순차 비교·기록 | 과거 버전의 순차 비교 경로 추가, 이벤트 분석·완료/자동 복구 연결 필요 |
 | 오래된 변경의 알림 | 최신 정책에서도 의미가 유효할 때만 요청 | 사용자별 판정 변화의 최신 프로필·정책 재검증 연결 |
 | 초기 적재의 변경 알림 | 최초 적재분은 늦게 정제되어도 기준선으로 처리하는 방향 | 수집·정제 담당자와 구분 정보·초기화 완료 조건 협의 |
 | 미확정 정책 | 초기 적재 계약·판정 상태별 매핑은 미확정으로 유지 | 확정 전 자동 연결하지 않음 |
@@ -207,7 +209,7 @@ DEFERRED는 정책 미확정에 따른 보류이며, NO_CHANGE나 버전 분석 
 
 ProvisionalEligibilityTransitionClassifier는 상태 쌍만 받는 순수 분류기다. 입력은 같은 프로필·판정 규칙·기준일의
 버전 비교 결과여야 하며, 실제 요청 생성 전 최신 프로필·정책에서 의미를 재검증해야 한다.
-명시적 Outbox 저장 경로에서 이 분류기를 사용한다. 자동 이벤트 생성·Fan-out·Worker는 아직 미연결이며,
+명시적 Outbox와 아래 사용자별 Fan-out 경로에서 이 분류기를 사용한다. 자동 실행 스케줄러는 미연결이며,
 분류 결과에 요청 채널이 있어도 분류기 자체가 발송을 수행하지 않는다.
 실제 채널은 기존 계약대로 사용자 수신 설정과의 교집합을 적용한다.
 
@@ -248,7 +250,7 @@ EligibilityNotificationRevalidationService는 기존 비교 근거와 명시적�
 - 프로필 없음·정책/버전 없음·판정 규칙 변경·정규화 규칙 변경·변화 의미 소멸을 구분해서 반환한다.
 - 원본 비교와 최신 프로필로 재평가한 비교, 재검증 정책 버전 ID·판정 근거·잠정 매핑 정책 버전을 결과로 보존한다.
 - 읽기 재검증 서비스 자체는 EligibilityResult 캐시의 조회/갱신이나 이벤트·Outbox 저장을 하지 않는다.
-  명시적 Outbox 트랜잭션이 이 서비스를 호출하며 자동 Worker는 아직 연결하지 않았다.
+  명시적 Outbox 트랜잭션과 이를 재사용하는 사용자별 Worker가 호출하며 자동 스케줄러는 연결하지 않았다.
 
 이 결과는 읽은 시점의 후보 근거이지 저장 시점까지 유효한 발송 승인이 아니다.
 아래 명시적 Outbox 경로가 저장 여부·탈퇴·정책/프로필 동시 변경, 신청 상태·만료를 검사하고 근거를 함께 저장한다.
@@ -273,7 +275,7 @@ EligibilityNotificationRevalidationPostgresTest는 일회용 Testcontainers Post
 
 EligibilityOutboxTransaction은 `yon.tracking.eligibility-outbox.enabled=true`인 경우에만 등록된다.
 기본값/실제 설정은 비활성 상태이며, 통합 테스트에서만 속성을 지정한다. 이 옵션은 Publisher/Consumer/Push 플래그와 별개다.
-자동 이벤트 생성·순차 Worker에 연결하지 않았고 기존 날짜 Fan-out의 ELIGIBILITY_CHANGED 미지원 동작도 바꾸지 않았다.
+자동 스케줄러에는 연결하지 않았다. 아래 명시적 소비 경로가 Outbox 트랜잭션을 재사용하며 날짜 Fan-out은 ELIGIBILITY_CHANGED를 점유하지 않는다.
 새 경로는 올바른 버전 쌍을 가진 영속 ELIGIBILITY_CHANGED 이벤트를 명시적으로 전달해야만 실행된다.
 
 - 이벤트 → 현재 정책 → 사용자 → 저장 상태 → 프로필 순서로 잠근다. 사용자 행은 탈퇴/저장 변경과 같은 FOR UPDATE,
@@ -296,9 +298,90 @@ Outbox 생성과 근거 보존은 같은 행의 원자적 INSERT다. profile/정
 
 ### 다음 Worker PR의 선행 조건과 팀 협의
 
-- **claim 타입 처리 선행:** 현재 Fan-out claim은 이벤트 타입을 제한하지 않아 ELIGIBILITY_CHANGED를 날짜 Worker가
-  점유하면 UNSUPPORTED_EVENT_TYPE으로 FAILED 처리한다. 현재 자동 생산자는 없지만, 생산자 추가 전에
-  타입별 라우팅 또는 claim 제외를 적용하고 타입 간 점유 경쟁을 검증해야 한다. 이번 PR에서는 claim 동작을 변경하지 않았다.
+- **날짜 Fan-out 타입 분리:** APPLICATION_OPENED / APPLICATION_CLOSED / DEADLINE_SOON / DEADLINE_EXTENDED만
+  후보 조회·claim·시도 소진 복구 대상으로 삼으며, 재시도도 같은 허용 목록으로 제한한다.
+  ELIGIBILITY_CHANGED / OPPORTUNITY_CREATED는 PENDING 또는 오래된 PROCESSING 상태여도 이 Worker가 변경하지 않는다.
+  메시지 생성기의 지원 목록을 공유하며, 지원 목록 고정·직접 점유 방어·외부 유형의 행 보존을 검증하는 테스트를 추가했다.
+  관련 테스트 26개에서 skip/failure/error 0을 확인했다. 아래 명시적 분석 경로의 이벤트 생산과 별개이며 날짜 Worker는 이 이벤트를 소비하지 않는다.
 - **잠정 상태 쌍:** POSSIBLY_ELIGIBLE → ELIGIBLE, NOT_ELIGIBLE → POSSIBLY_ELIGIBLE을 포함한 DEFERRED 쌍의 의미·채널을 팀과 합의한다.
 - **신청 상태 가드:** CLOSED/UNKNOWN 차단 및 UPCOMING 통과 여부를 검토한다. 현재 허용 범위를 확정 정책으로 승격하지 않는다.
-- **나머지:** 순차 Worker·분석 완료/복구·초기 적재 계약은 미연결이며 새 저장 경로와 실제 발송은 비활성 상태를 유지한다.
+- **나머지:** 아래 명시적 비교·분석·사용자별 순회/lease 복구 외에 자동 스케줄러·초기 적재 계약·정책 보류 재개는 미연결이며 새 경로와 실제 발송은 비활성 상태를 유지한다.
+
+## 순차 버전 비교 실행 경로
+
+`OpportunityVersionWorker.runOnce(afterOpportunityId, maxPolicies)`는 자동 스케줄러 없는 명시적 실행 경로다.
+정책 ID 키셋 페이지(최대 500개)와 정책별 한 버전 처리로 실행량을 제한한다. 반환한 커서로 다음 페이지를 이어가며,
+한 순회가 끝나면 다음 순회는 0부터 시작한다. 커서는 버전 처리 완료 기록을 대신하지 않는다.
+
+- 정책별 별도 트랜잭션에서 정책 행을 잠그고 현재 버전 포인터를 다시 확인한다.
+- 현재 포인터까지 `processedAt`이 없는 가장 이른 버전을 선택한다. 누락 기록과 READY 상태 모두 포함하므로 중간 버전을 건너뛰지 않는다.
+- 첫 버전의 기록이 없으면 WAITING_FOR_BASELINE, 이전 완료 근거가 없으면 WAITING_FOR_PREDECESSOR로 대기한다.
+  새 기준선을 자동 추론하거나 수집·정제의 실패 복구를 대신하지 않는다.
+- 기존 READY는 WAITING_FOR_EVENT_ANALYSIS로 반환한다. 이를 PROCESSED로 덮어쓰거나 다음 버전으로 넘어가지 않는다.
+- NO_CHANGE / NORMALIZATION_VERSION_CHANGED는 기존 종료 규칙에 따라 다음 호출에서 후속 버전으로 진행한다.
+- 과거 버전의 구조 변경도 이력을 남긴다. 기존 마감 연장 경로의 현재 버전 검증은 유지하므로 과거 연장을 새 알림으로 만들지 않는다.
+- 비교 중 실패하면 그 정책 트랜잭션만 롤백한다. 다음 정책은 계속 처리하고 다음 순회에서 실패 버전을 다시 찾는다.
+  별도 RUNNING 점유 행이 없어 비교 트랜잭션 중단 후 해제해야 할 lease도 없다. 자동 재시도 스케줄·Backoff는 아직 연결하지 않았다.
+- 기준선 대기 정책도 커서를 전진시켜 다른 정책의 처리를 막지 않는다. 여러 실행자는 정책 행 잠금과 기존 UNIQUE로 직렬화한다.
+
+날짜 Worker 타입 분리 테스트 26개는 skip/failure/error 0으로 확인했다.
+순차 비교 경로는 OpportunityVersionWorkerTest 4개·DeadlineExtensionPostgresTest 23개·IngestBoundaryTest 3개에서 skip/failure/error 0을 확인했다.
+그 이후 추가한 아래 분석 완료 경로의 테스트 결과와는 구분한다.
+실제 DB DDL·환경변수·발송 플래그·스케줄 설정은 변경하지 않았다.
+
+## 버전 분석 근거·후속 작업과 완료의 원자적 저장
+
+`OpportunityVersionAnalysisTransaction.analyze(toVersionId)`는
+`yon.tracking.version-analysis.enabled=true`일 때만 등록되는 명시적 개발 경로다. 속성이 없거나 false이면 등록하지 않는다.
+실제 환경에 이 옵션을 추가하지 않았고 자동 Worker에서도 호출하지 않는다. 사용자별 Outbox 옵션·전달·푸시 옵션과 별개다.
+
+- 정책 행을 잠근 뒤 현재 포인터·직전 완료 버전·같은 정규화 규칙·READY 상태와 변경 이력을 확인한다.
+- `opportunity_version_analysis`에 tracking ID UNIQUE, 분석 규칙 버전, 분석 당시 현재 버전 ID, 변경 경로,
+  마감 분석 결과, 후속 이벤트 참조와 기록/완료 시각을 저장한다. backend의 기존 update 정책을 따르며 실제 DB 반영은 미검증이다.
+- 신청기간은 행 ID·원문 표현을 제외하되 기간 유형·시작/종료일·검증 상태·scope·중복 개수를 보존해 비교한다.
+  동일한 기간은 UNCHANGED다. 달라진 scope/복수·불명확 기간은 DEFERRED_SCOPED 또는 DEFERRED_PERIOD로 기록하고 READY를 유지한다.
+- 명확한 연장은 기존 마감 연장 경로를 사용한다. 과거 버전의 연장 근거는 남기지만 오래된 연장 알림은 새로 생성하지 않는다.
+- 명확한 구조 변경에는 버전 쌍 단위 `ELIGIBILITY_CHANGED:{policyId}:{fromId}:{toId}` 후속 작업을 저장한다.
+  이는 사용자별 판정을 비교하라는 요청이지 실제 신청 가능성 변화나 알림 발송의 확정이 아니다.
+  제목 등 판정과 무관한 변경도 후속 판정에서 NO_CHANGE가 될 수 있다. 사용자별 DEFERRED를 완료로 바꾸는 규칙을 추가한 것은 아니다.
+- 후속 작업의 occurredAt/eventDate는 비교 기록 시점을 보존한다. 늦은 분석이나 재실행으로 만료 기점을 새로 갱신하지 않는다.
+- 분석 근거·필요 이벤트·PROCESSED 전환은 같은 트랜잭션에서 커밋/롤백한다. 저장 또는 완료 갱신 실패 시 READY가 남아 재시도할 수 있다.
+  재실행/동시 호출은 같은 분석 기록·이벤트를 반환하며 기존 이벤트의 버전 쌍이 충돌하면 완료를 거부한다.
+- **완료 경계:** 버전 분석 완료는 후속 작업의 영속화까지다. 이벤트의 사용자별 순회·Outbox 완료는 별도 상태다.
+  이번 경로에서 사용자를 평가하거나 Outbox를 만들지 않으며 이벤트는 PENDING으로 남는다.
+- 기존 DEFERRED 버전 분석을 자동 승격하지 않는다. 미확정 기간 대응/재분석 규칙은 후속이며 사용자별 순회는 아래 별도 경로다.
+
+버전 분석 경로는 DeadlineExtensionPostgresTest 34개·OpportunityVersionAnalysisConfigurationTest 2개·
+OpportunityVersionWorkerTest 4개·IngestBoundaryTest 3개에서 skip/failure/error 0을 확인했다.
+아래 사용자 순회 경로의 신규 테스트 결과와는 구분한다. 실제 활성화 전 팀 계약과 운영 조건을 확인해야 한다.
+
+## 저장 사용자별 판정·Outbox·중단 복구
+
+EligibilityFanoutCoordinator / Batch / Worker는 `yon.tracking.eligibility-fanout.enabled`와
+`yon.tracking.eligibility-outbox.enabled`가 **모두 true**일 때만 등록한다. 기본값은 비활성이며 실제 환경에는 추가하지 않았다.
+`runOnce()` 명시 호출만 있고 자동 스케줄러는 없다. 페이지 크기·lease·재시도·이벤트 예산은 기존 `yon.tracking.fanout.*` 수치 설정을 재사용한다.
+기존 날짜 스케줄러의 enabled 옵션으로 새 Worker가 실행되지는 않는다.
+
+- 전용 Coordinator는 ELIGIBILITY_CHANGED만 후보 조회·claim·소진 복구·재시도한다. 날짜 Worker와 서로의 이벤트를 점유하지 않는다.
+  잘못 전달된 다른 타입의 lease도 Batch에서 예외로 거부하며 이벤트를 FAILED로 변경하지 않는다.
+- 이벤트 → 현재 정책 → ID 오름차순 사용자 → 저장 상태 → 프로필 순서로 잠근다. 숨김 여부와 관계없이 저장 사용자 ID 키셋을 읽는다.
+  사용자 mutex를 잡은 뒤 저장·프로필을 확인하고 동일 프로필/규칙/기준일의 이전/변경 버전을 판정한다.
+- 후보이면 기존 EligibilityOutboxTransaction을 같은 페이지 트랜잭션에서 호출해 최신 프로필·현재 정책·신청 상태·만료를 재검증한다.
+  최신 정규화 규칙이 달라진 이벤트는 NORMALIZATION_RULE_CHANGED로 억제한다. EligibilityResult 캐시는 읽거나 덮어쓰지 않는다.
+- `eligibility_event_assessments`는 `(event_id, user_id)` UNIQUE다. 원본/최신 판정 상태·설명, 프로필/규칙/정책 버전·기준일,
+  매핑 버전·처리 사유·Outbox ID를 기록한다. 무변경·건너뜀·보류도 저장하며 원본 프로필 필드는 복제하지 않는다.
+  사용자 FK ON DELETE CASCADE로 탈퇴 시 이 근거도 삭제한다. 실제 DB 적용과 보관 기간은 별도 검증/협의 대상이다.
+- 근거·Outbox·커서·heartbeat는 페이지 단위로 함께 커밋/롤백한다. 실패한 페이지가 앞 페이지의 커밋을 취소하지 않는다.
+  오래된 PROCESSING은 새 lease로 이어받아 마지막 커서 다음부터 재개하며 과거 lease의 저장/재시도는 거부한다.
+- `(userId, sourceEventId)` Outbox 멱등성을 유지한다. 이미 생성한 명시적 Outbox도 재사용하며 재실행으로 근거를 덮어쓰지 않는다.
+- 잠정 매핑 DEFERRED, 프로필 없음, 최신 판정 불명 등은 사용자별 DEFERRED로 남긴다.
+  페이지 커서는 전진시켜 나머지 사용자를 처리하되, 마지막 페이지 뒤 보류가 남으면 이벤트를 **WAITING_POLICY**로 둔다.
+  이 상태는 processedAt/lease가 없으며 COMPLETED·FAILED가 아니다. 자동 후보/소진 복구 대상에서 제외한다.
+  팀 정책 확정 후 보류 재평가·재개 절차는 아직 구현하지 않았다. 입력/매핑 불명을 전송 오류처럼 반복하거나 성공으로 승격하지 않는다.
+- 보류 없이 순회가 끝나면 이벤트 COMPLETED다. 이벤트 만료(발생 후 7일)는 EXPIRED로 종료하고 만료를 연장하지 않는다.
+  순회 중 새로 저장한 사용자 포함은 기존 키셋 정책처럼 보장하지 않는다.
+
+신규 사용자 순회 검증 대상은 EligibilityNotificationRevalidationPostgresTest(기존 17개 포함),
+EligibilityFanoutConfigurationTest, 날짜 Batch의 잘못된 타입 방어 테스트다. 아직 신규 테스트를 실행하지 않았다.
+버전 비교 → 명시적 분석 → 명시적 사용자 Worker는 각각 호출 가능하지만 자동 주기 실행·초기 적재 분류는 미연결이다.
+플래그·실제 DB·AWS/FCM·Notification 프로젝트 코드는 변경하지 않았다.

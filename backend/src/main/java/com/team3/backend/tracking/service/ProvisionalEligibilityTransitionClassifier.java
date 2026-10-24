@@ -10,7 +10,7 @@ import static com.team3.backend.eligibility.domain.entity.EligibilityStatus.*;
 import static com.team3.backend.tracking.domain.model.EligibilityTransitionDecision.*;
 
 /**
- * Development-only policy selection, pending team agreement. No Worker/Fan-out caller is connected.
+ * Development-only policy selection, pending team agreement. The opted-in eligibility consumer preserves deferred results.
  * Same-profile/same-rule/same-date comparison and latest-policy revalidation are caller responsibilities.
  */
 @Component

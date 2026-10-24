@@ -27,12 +27,13 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.*;
 
 @Testcontainers
-@DataJpaTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
+@DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "yon.tracking.version-analysis.enabled=true"})
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import({DeadlineExtensionTransaction.class, DeadlineExtensionDetector.class, OpportunityVersionComparisonTransaction.class,
-        OpportunitySnapshotComparator.class, DeadlineExtensionPostgresTest.TimeConfig.class})
+        OpportunitySnapshotComparator.class, OpportunityVersionWorker.class, OpportunityVersionAnalysisTransaction.class,
+        DeadlineExtensionPostgresTest.TimeConfig.class})
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class DeadlineExtensionPostgresTest {
     static final Instant NOW = Instant.parse("2026-10-25T00:00:00Z");
@@ -54,6 +55,9 @@ class DeadlineExtensionPostgresTest {
     }
     @Autowired DeadlineExtensionTransaction service;
     @Autowired OpportunityVersionComparisonTransaction comparisons;
+    @Autowired OpportunityVersionWorker worker;
+    @Autowired OpportunityVersionAnalysisTransaction analysis;
+    @Autowired OpportunityVersionAnalysisRepository analyses;
     @Autowired OpportunityChangeRepository changes;
     @Autowired OpportunityEventRepository events;
     @Autowired OpportunityVersionTrackingRepository tracking;
@@ -234,13 +238,14 @@ class DeadlineExtensionPostgresTest {
     }
 
     @Test
-    void comparisonPreservesExplicitTargetBaselineAndIgnoresSupersededTargets() {
+    void comparisonPreservesExplicitBaselinesIncludingHistoricalTargets() {
         var pair = seed(true, "v1", null);
         Long baselineId = tx(() -> tracking.saveAndFlush(OpportunityVersionTracking.baseline(
                 em.find(OpportunityVersion.class, pair.toId()), NOW)).getId());
         assertThat(comparisons.compare(pair.toId())).contains(baselineId);
         assertThat(tracking.findById(baselineId).orElseThrow().getStatus()).isEqualTo(OpportunityVersionTrackingStatus.BASELINE_SKIPPED);
-        assertThat(comparisons.compare(pair.fromId())).isEmpty();
+        assertThat(comparisons.compare(pair.fromId())).contains(
+                tracking.findByOpportunityVersionId(pair.fromId()).orElseThrow().getId());
         assertThat(changes.count()).isZero(); assertThat(events.count()).isZero();
     }
 
@@ -263,6 +268,285 @@ class DeadlineExtensionPostgresTest {
         var id = comparisons.compare(pair.toId()).orElseThrow();
         assertThat(tracking.findById(id).orElseThrow().getStatus()).isEqualTo(OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS);
         assertThat(changes.count()).isEqualTo(1); assertThat(events.count()).isZero();
+    }
+
+    @Test
+    void sequentialStepWaitsForExplicitBaselineAndNeverCreatesOne() {
+        var pair = seed(false, "v1", null);
+        var result = comparisons.compareNext(pair.policyId());
+        assertThat(result.outcome()).isEqualTo(OpportunityVersionComparisonTransaction.Outcome.WAITING_FOR_BASELINE);
+        assertThat(result.versionId()).isEqualTo(pair.fromId());
+        assertThat(tracking.count()).isZero(); assertThat(events.count()).isZero();
+    }
+
+    @Test
+    void sequentialStepRecordsHistoricalChangeAndWaitsBeforeNextVersion() {
+        var pair = seed(true, "v1", null);
+        var third = appendThird(pair, "v1");
+        var first = comparisons.compareNext(pair.policyId());
+        assertThat(first.outcome()).isEqualTo(OpportunityVersionComparisonTransaction.Outcome.COMPARED);
+        assertThat(first.versionId()).isEqualTo(pair.toId());
+        var record = tracking.findById(first.trackingId()).orElseThrow();
+        assertThat(record.getStatus()).isEqualTo(OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS);
+        assertThat(record.getProcessedAt()).isNull();
+        var replay = comparisons.compareNext(pair.policyId());
+        assertThat(replay.outcome()).isEqualTo(OpportunityVersionComparisonTransaction.Outcome.WAITING_FOR_EVENT_ANALYSIS);
+        assertThat(replay.trackingId()).isEqualTo(first.trackingId());
+        assertThat(tracking.findByOpportunityVersionId(third)).isEmpty();
+        assertThat(changes.count()).isEqualTo(1);
+        // Historical comparison preserves evidence but does not publish an obsolete extension.
+        assertThat(events.count()).isZero(); assertThat(outboxes.count()).isZero();
+    }
+
+    @Test
+    void sequentialStepAdvancesThroughRuleSuppressionThenNoChangeWithoutSkippingVersions() {
+        var pair = seed(true, "v2", null);
+        var third = appendThird(pair, "v2");
+        var secondStep = comparisons.compareNext(pair.policyId());
+        assertThat(secondStep.versionId()).isEqualTo(pair.toId());
+        assertThat(tracking.findById(secondStep.trackingId()).orElseThrow().getStatus())
+                .isEqualTo(OpportunityVersionTrackingStatus.NORMALIZATION_VERSION_CHANGED);
+        var thirdStep = comparisons.compareNext(pair.policyId());
+        assertThat(thirdStep.versionId()).isEqualTo(third);
+        assertThat(tracking.findById(thirdStep.trackingId()).orElseThrow().getStatus())
+                .isEqualTo(OpportunityVersionTrackingStatus.NO_CHANGE);
+        assertThat(comparisons.compareNext(pair.policyId()).outcome())
+                .isEqualTo(OpportunityVersionComparisonTransaction.Outcome.UP_TO_DATE);
+        assertThat(tracking.count()).isEqualTo(3); assertThat(events.count()).isZero();
+    }
+
+    @Test
+    void sequentialFailureRollsBackAndNextInvocationRediscoversSameVersion() {
+        var pair = seed(true, "v1", null);
+        appendThird(pair, "v1");
+        jdbc.execute("ALTER TABLE opportunity_version_tracking ADD CONSTRAINT reject_sequential_step CHECK (status <> 'READY_FOR_EVENT_ANALYSIS')");
+        try {
+            assertThatThrownBy(() -> comparisons.compareNext(pair.policyId())).isInstanceOf(RuntimeException.class);
+        } finally {
+            jdbc.execute("ALTER TABLE opportunity_version_tracking DROP CONSTRAINT reject_sequential_step");
+        }
+        assertThat(changes.count()).isZero(); assertThat(events.count()).isZero();
+        assertThat(tracking.count()).isEqualTo(1);
+        var recovered = comparisons.compareNext(pair.policyId());
+        assertThat(recovered.versionId()).isEqualTo(pair.toId());
+        assertThat(recovered.outcome()).isEqualTo(OpportunityVersionComparisonTransaction.Outcome.COMPARED);
+        assertThat(changes.count()).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentSequentialStepsDoNotDuplicateOrAdvancePastPendingAnalysis() throws Exception {
+        var pair = seed(true, "v1", null); var third = appendThird(pair, "v1");
+        var start = new CountDownLatch(1);
+        Callable<OpportunityVersionComparisonTransaction.Step> call = () -> {
+            if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Test start timeout");
+            return comparisons.compareNext(pair.policyId());
+        };
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = pool.submit(call); var second = pool.submit(call); start.countDown();
+            var results = List.of(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS));
+            assertThat(results).extracting(OpportunityVersionComparisonTransaction.Step::outcome)
+                    .containsExactlyInAnyOrder(OpportunityVersionComparisonTransaction.Outcome.COMPARED,
+                            OpportunityVersionComparisonTransaction.Outcome.WAITING_FOR_EVENT_ANALYSIS);
+            assertThat(results).extracting(OpportunityVersionComparisonTransaction.Step::versionId)
+                    .containsOnly(pair.toId());
+        }
+        assertThat(tracking.count()).isEqualTo(2); assertThat(changes.count()).isEqualTo(1);
+        assertThat(tracking.findByOpportunityVersionId(third)).isEmpty();
+    }
+
+    @Test
+    void unfinishedVersionsBeyondCurrentPointerAreNotAnalyzed() {
+        var pair = seed(true, "v2", null); var third = appendThird(pair, "v2");
+        tx(() -> {
+            em.find(Opportunity.class, pair.policyId()).changeCurrentVersion(em.find(OpportunityVersion.class, pair.toId()));
+            return null;
+        });
+        comparisons.compareNext(pair.policyId());
+        assertThat(comparisons.compareNext(pair.policyId()).outcome())
+                .isEqualTo(OpportunityVersionComparisonTransaction.Outcome.UP_TO_DATE);
+        assertThat(comparisons.compare(third)).isEmpty();
+        assertThat(tracking.findByOpportunityVersionId(third)).isEmpty();
+    }
+
+    private Long appendThird(Pair pair, String rule) {
+        return tx(() -> {
+            var policy = em.find(Opportunity.class, pair.policyId());
+            var third = version(policy, 3, rule); em.persist(third); policy.changeCurrentVersion(third); em.flush();
+            return third.getId();
+        });
+    }
+
+    @Test
+    void realKeysetDiscoveryDoesNotLetBaselineWaitStarveFollowingPolicies() {
+        var waiting = seed(false, "v1", null);
+        var ready = seed(true, "v2", null);
+        var firstPage = worker.runOnce(0, 1);
+        assertThat(firstPage.hasNext()).isTrue();
+        assertThat(firstPage.lastOpportunityId()).isEqualTo(waiting.policyId());
+        assertThat(firstPage.attempts().getFirst().step().orElseThrow().outcome())
+                .isEqualTo(OpportunityVersionComparisonTransaction.Outcome.WAITING_FOR_BASELINE);
+        var nextPage = worker.runOnce(firstPage.lastOpportunityId(), 1);
+        assertThat(nextPage.hasNext()).isFalse();
+        assertThat(nextPage.attempts().getFirst().step().orElseThrow().versionId()).isEqualTo(ready.toId());
+        assertThat(tracking.findByOpportunityVersionId(waiting.fromId())).isEmpty();
+        assertThat(tracking.findByOpportunityVersionId(ready.toId())).isPresent();
+    }
+
+    @Test
+    void nonexistentPolicyIsReportedWithoutCreatingRecords() {
+        assertThat(comparisons.compareNext(Long.MAX_VALUE).outcome())
+                .isEqualTo(OpportunityVersionComparisonTransaction.Outcome.POLICY_UNAVAILABLE);
+        assertThat(tracking.count()).isZero();
+    }
+
+    @Test
+    void analysisStoresEvidenceAndUserAssessmentEventBeforeCompletingVersion() {
+        var pair = seed(true, "v1", null);
+        comparisons.compare(pair.toId());
+        var result = analysis.analyze(pair.toId());
+        assertThat(result.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.COMPLETED);
+        var stored = analyses.findById(result.analysisId()).orElseThrow();
+        assertThat(stored.getDeadlineOutcome()).isEqualTo(OpportunityVersionAnalysis.DeadlineOutcome.EXTENDED);
+        assertThat(stored.getChangedPaths()).containsExactly("/applicationEndDate");
+        assertThat(stored.getAnalysisVersion()).isEqualTo(OpportunityVersionAnalysisTransaction.ANALYSIS_VERSION);
+        assertThat(stored.getCurrentVersionId()).isEqualTo(pair.toId());
+        assertThat(stored.getCompletedAt()).isEqualTo(NOW);
+        var task = events.findByDedupKey("ELIGIBILITY_CHANGED:" + pair.policyId() + ":" + pair.fromId() + ":" + pair.toId()).orElseThrow();
+        assertThat(task.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+        assertThat(task.getPayload()).containsEntry("analysisVersion", OpportunityVersionAnalysisTransaction.ANALYSIS_VERSION);
+        assertThat(task.getOccurredAt()).isEqualTo(NOW);
+        assertThat(tracking.findByOpportunityVersionId(pair.toId()).orElseThrow().getStatus())
+                .isEqualTo(OpportunityVersionTrackingStatus.PROCESSED);
+        assertThat(events.count()).isEqualTo(2); assertThat(outboxes.count()).isZero();
+    }
+
+    @Test
+    void analysisReplayPreservesOriginalEvidenceAndEventIdentity() {
+        var pair = seed(true, "v1", null); comparisons.compare(pair.toId());
+        var first = analysis.analyze(pair.toId());
+        var original = jdbc.queryForList("SELECT event_id FROM opportunity_events ORDER BY id");
+        assertThat(analysis.analyze(pair.toId())).isEqualTo(first);
+        assertThat(analyses.count()).isEqualTo(1);
+        assertThat(jdbc.queryForList("SELECT event_id FROM opportunity_events ORDER BY id")).isEqualTo(original);
+    }
+
+    @Test
+    void scopedPeriodAssessmentPersistsDeferralWithoutCompletingOrQueuingUserWork() {
+        var pair = seed(true, "v1", Map.of("round", "not-matched")); comparisons.compare(pair.toId());
+        var result = analysis.analyze(pair.toId());
+        assertThat(result.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.DEFERRED);
+        var saved = analyses.findById(result.analysisId()).orElseThrow();
+        assertThat(saved.getDeadlineOutcome()).isEqualTo(OpportunityVersionAnalysis.DeadlineOutcome.DEFERRED_SCOPED);
+        assertThat(saved.getCompletedAt()).isNull();
+        assertThat(analysis.analyze(pair.toId())).isEqualTo(result);
+        assertThat(tracking.findByOpportunityVersionId(pair.toId()).orElseThrow().getStatus())
+                .isEqualTo(OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS);
+        assertThat(events.count()).isZero();
+    }
+
+    @Test
+    void invalidChangedPeriodIsDeferredInsteadOfGuessed() {
+        var pair = seed(true, "v1", null);
+        jdbc.update("UPDATE application_windows SET validation_status='INVALID' WHERE version_id=?", pair.toId());
+        comparisons.compare(pair.toId());
+        var result = analysis.analyze(pair.toId());
+        assertThat(result.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.DEFERRED);
+        assertThat(analyses.findById(result.analysisId()).orElseThrow().getDeadlineOutcome())
+                .isEqualTo(OpportunityVersionAnalysis.DeadlineOutcome.DEFERRED_PERIOD);
+        assertThat(events.count()).isZero();
+    }
+
+    @Test
+    void historicalAnalysisCompletesAndUnblocksNextVersionWithoutObsoleteExtensionAlert() {
+        var pair = seed(true, "v1", null); var third = appendThird(pair, "v1");
+        comparisons.compareNext(pair.policyId());
+        var result = analysis.analyze(pair.toId());
+        assertThat(result.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.COMPLETED);
+        assertThat(analyses.findById(result.analysisId()).orElseThrow().getCurrentVersionId()).isEqualTo(third);
+        assertThat(events.findAll()).extracting(OpportunityEvent::getEventType).containsExactly(OpportunityEventType.ELIGIBILITY_CHANGED);
+        assertThat(comparisons.compareNext(pair.policyId()).versionId()).isEqualTo(third);
+        assertThat(tracking.findByOpportunityVersionId(third).orElseThrow().getStatus()).isEqualTo(OpportunityVersionTrackingStatus.NO_CHANGE);
+        assertThat(events.findAll().getFirst().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+    }
+
+    @Test
+    void analysisInsertFailureRollsBackNewEventAndCompletionThenRetrySucceeds() {
+        var pair = seed(true, "v1", null); appendThird(pair, "v1"); comparisons.compareNext(pair.policyId());
+        jdbc.execute("ALTER TABLE opportunity_version_analysis ADD CONSTRAINT reject_analysis CHECK (completed_at IS NULL)");
+        try {
+            assertThatThrownBy(() -> analysis.analyze(pair.toId())).isInstanceOf(RuntimeException.class);
+        } finally {
+            jdbc.execute("ALTER TABLE opportunity_version_analysis DROP CONSTRAINT reject_analysis");
+        }
+        assertThat(analyses.count()).isZero(); assertThat(events.count()).isZero();
+        assertThat(tracking.findByOpportunityVersionId(pair.toId()).orElseThrow().getProcessedAt()).isNull();
+        assertThat(analysis.analyze(pair.toId()).outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.COMPLETED);
+        assertThat(events.count()).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentAnalysesKeepOneAssessmentAndOneUserAssessmentEvent() throws Exception {
+        var pair = seed(true, "v1", null); appendThird(pair, "v1"); comparisons.compareNext(pair.policyId());
+        var start = new CountDownLatch(1);
+        Callable<OpportunityVersionAnalysisTransaction.Result> call = () -> {
+            if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Test start timeout");
+            return analysis.analyze(pair.toId());
+        };
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = pool.submit(call); var second = pool.submit(call); start.countDown();
+            assertThat(first.get(20, TimeUnit.SECONDS)).isEqualTo(second.get(20, TimeUnit.SECONDS));
+        }
+        assertThat(analyses.count()).isEqualTo(1); assertThat(events.count()).isEqualTo(1);
+    }
+
+    @Test
+    void analysisDoesNotOverwriteBaselineOrCreateComparisonImplicitly() {
+        var pair = seed(true, "v1", null);
+        assertThat(analysis.analyze(pair.fromId()).outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.NOT_READY);
+        assertThat(analysis.analyze(pair.toId()).outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.NOT_READY);
+        assertThat(analyses.count()).isZero(); assertThat(events.count()).isZero();
+        assertThat(tracking.count()).isEqualTo(1);
+    }
+
+    @Test
+    void unchangedScopedPeriodsDoNotCreateAFalsePeriodDeferral() {
+        var pair = seed(true, "v1", Map.of("round", "same"));
+        jdbc.update("UPDATE application_windows SET end_date=? WHERE version_id=?", java.sql.Date.valueOf(OLD_END), pair.toId());
+        jdbc.update("UPDATE opportunity_versions SET normalized_snapshot=?::jsonb WHERE id=?", "{\"title\":\"before\"}", pair.fromId());
+        jdbc.update("UPDATE opportunity_versions SET normalized_snapshot=?::jsonb WHERE id=?", "{\"title\":\"after\"}", pair.toId());
+        comparisons.compare(pair.toId());
+        var result = analysis.analyze(pair.toId());
+        assertThat(result.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.COMPLETED);
+        assertThat(analyses.findById(result.analysisId()).orElseThrow().getDeadlineOutcome())
+                .isEqualTo(OpportunityVersionAnalysis.DeadlineOutcome.UNCHANGED);
+        assertThat(events.findAll()).extracting(OpportunityEvent::getEventType).containsExactly(OpportunityEventType.ELIGIBILITY_CHANGED);
+    }
+
+    @Test
+    void completionFailureRollsBackAssessmentAndNewEventTogether() {
+        var pair = seed(true, "v1", null); appendThird(pair, "v1"); comparisons.compareNext(pair.policyId());
+        jdbc.execute("ALTER TABLE opportunity_version_tracking ADD CONSTRAINT reject_analysis_completion CHECK (status <> 'PROCESSED')");
+        try {
+            assertThatThrownBy(() -> analysis.analyze(pair.toId())).isInstanceOf(RuntimeException.class);
+        } finally {
+            jdbc.execute("ALTER TABLE opportunity_version_tracking DROP CONSTRAINT reject_analysis_completion");
+        }
+        assertThat(analyses.count()).isZero(); assertThat(events.count()).isZero();
+        assertThat(tracking.findByOpportunityVersionId(pair.toId()).orElseThrow().getStatus())
+                .isEqualTo(OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS);
+        assertThat(analysis.analyze(pair.toId()).outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.COMPLETED);
+    }
+
+    @Test
+    void conflictingExistingEventDoesNotAllowVersionCompletion() {
+        var pair = seed(true, "v1", null); appendThird(pair, "v1"); comparisons.compareNext(pair.policyId());
+        tx(() -> events.saveAndFlush(OpportunityEvent.create(em.find(Opportunity.class, pair.policyId()),
+                em.find(OpportunityVersion.class, pair.toId()), OpportunityEventType.ELIGIBILITY_CHANGED,
+                LocalDate.of(2026, 10, 25), "ELIGIBILITY_CHANGED:" + pair.policyId() + ":" + pair.fromId() + ":" + pair.toId(),
+                Map.of("fromVersionId", 999L, "toVersionId", pair.toId()), true, null, NOW)));
+        assertThatThrownBy(() -> analysis.analyze(pair.toId())).isInstanceOf(IllegalStateException.class);
+        assertThat(analyses.count()).isZero(); assertThat(events.count()).isEqualTo(1);
+        assertThat(tracking.findByOpportunityVersionId(pair.toId()).orElseThrow().getProcessedAt()).isNull();
     }
 
     private Pair seed(boolean baseline, String toRule, Map<String, Object> scope) {

@@ -38,8 +38,7 @@ public class EventFanoutBatch {
         var event = events.lockForFanout(execution.eventId()).orElseThrow();
         if (!event.ownedBy(execution.leaseToken())) throw new IllegalStateException("Event fanout ownership lost");
         if (!messages.supports(event.getEventType())) {
-            event.fail(clock.instant(), "UNSUPPORTED_EVENT_TYPE");
-            return true;
+            throw new IllegalArgumentException("Event type belongs to another fanout worker");
         }
         if (!event.isNotificationEligible()) {
             event.skipFanout(clock.instant(), "EVENT_SUPPRESSED");

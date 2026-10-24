@@ -16,7 +16,7 @@ import java.time.LocalDate;
 import java.util.*;
 import static com.team3.backend.tracking.domain.model.EligibilityNotificationRevalidation.Outcome.*;
 
-/** No cache/result writes, events or Outbox. Freshness must be coordinated with the future Outbox transaction. */
+/** No cache/result writes, events or Outbox. The calling Outbox transaction protects freshness with locks. */
 @Service
 @RequiredArgsConstructor
 public class EligibilityNotificationRevalidationService {

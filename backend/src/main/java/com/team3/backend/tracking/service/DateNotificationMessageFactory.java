@@ -23,12 +23,19 @@ import static com.team3.backend.tracking.config.DateTrackingConfig.KST;
 @Component
 @RequiredArgsConstructor
 public class DateNotificationMessageFactory {
+    private static final Set<OpportunityEventType> SUPPORTED_TYPES = Set.of(
+            OpportunityEventType.APPLICATION_OPENED, OpportunityEventType.APPLICATION_CLOSED,
+            OpportunityEventType.DEADLINE_SOON, OpportunityEventType.DEADLINE_EXTENDED);
     private final ApplicationStatusCalculator statusCalculator;
     private final DeadlineSoonDetector deadlines;
 
+    /** Shared by candidate selection, claim/recovery and message preparation. */
+    public static Set<OpportunityEventType> supportedTypes() {
+        return SUPPORTED_TYPES;
+    }
+
     public boolean supports(OpportunityEventType type) {
-        return type == OpportunityEventType.APPLICATION_OPENED || type == OpportunityEventType.APPLICATION_CLOSED
-                || type == OpportunityEventType.DEADLINE_SOON || type == OpportunityEventType.DEADLINE_EXTENDED;
+        return type != null && SUPPORTED_TYPES.contains(type);
     }
 
     public Optional<Prepared> prepare(OpportunityEvent event, Opportunity current,

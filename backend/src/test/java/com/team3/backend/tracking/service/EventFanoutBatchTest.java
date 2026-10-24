@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -45,6 +46,18 @@ class EventFanoutBatchTest {
     private final EventFanoutBatch batch = new EventFanoutBatch(events, opportunities, windows, preferences, outboxes,
             messages, new EventFanoutProperties(true, 500, 10, Duration.ofMinutes(30), Duration.ofMinutes(1), 5),
             clock, users);
+
+    @Test
+    void wronglyRoutedEligibilityLeaseIsRejectedWithoutFailingTheEvent() {
+        var token = UUID.randomUUID(); var event = mock(OpportunityEvent.class);
+        when(events.lockForFanout(1L)).thenReturn(Optional.of(event));
+        when(event.ownedBy(token)).thenReturn(true);
+        when(event.getEventType()).thenReturn(OpportunityEventType.ELIGIBILITY_CHANGED);
+        assertThatThrownBy(() -> batch.process(new EventFanoutExecution(1L, token))).isInstanceOf(IllegalArgumentException.class);
+        verify(event, never()).fail(any(), any());
+        verify(event, never()).complete(any());
+        verifyNoInteractions(opportunities, preferences, outboxes, users);
+    }
 
     @Test
     void expiryInsideAPageEndsTheFanoutInsteadOfSkippingTheRestSilently() {
