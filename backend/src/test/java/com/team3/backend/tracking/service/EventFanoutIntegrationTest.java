@@ -1,7 +1,7 @@
 package com.team3.backend.tracking.service;
 
 import com.team3.backend.opportunity.domain.entity.*;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.outbox.domain.entity.*;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
@@ -214,6 +214,7 @@ class EventFanoutIntegrationTest {
         jdbc.update("UPDATE opportunity_events SET retry_count=3 WHERE id=?", fixture.eventId());
         assertThat(coordinator.candidates()).doesNotContain(fixture.eventId());
         clock.set(NOW.plus(Duration.ofMinutes(30)));
+        assertThat(coordinator.recoverExhausted()).isEqualTo(1);
         assertThat(coordinator.candidates()).doesNotContain(fixture.eventId());
         assertThat(events.findById(fixture.eventId()).orElseThrow().getProcessingStatus())
                 .isEqualTo(OpportunityEventProcessingStatus.FAILED);

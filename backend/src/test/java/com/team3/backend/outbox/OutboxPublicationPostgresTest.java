@@ -86,6 +86,18 @@ class OutboxPublicationPostgresTest {
     }
 
     @Test
+    void configurationErrorReturnsToPendingWithoutSpendingAnAttempt() {
+        save();
+        doThrow(NotificationPublicationException.configuration("HTTP_401")).when(publisher).publish(any());
+        worker.runOnce();
+        assertThat(state()).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT retry_count FROM outbox_events", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT last_error FROM outbox_events", String.class)).isEqualTo("HTTP_401");
+        assertThat(jdbc.queryForObject("SELECT lease_token IS NULL AND next_retry_at > ? FROM outbox_events",
+                Boolean.class, java.sql.Timestamp.from(NOW))).isTrue();
+    }
+
+    @Test
     void transientFailureWaitsForRetryAndKeepsSameMessageId() {
         save();
         UUID identity = outboxes.findAll().getFirst().getMessageId();

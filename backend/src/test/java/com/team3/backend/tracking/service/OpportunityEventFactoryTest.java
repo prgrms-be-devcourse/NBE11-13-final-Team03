@@ -3,7 +3,7 @@ package com.team3.backend.tracking.service;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.tracking.domain.entity.OpportunityEvent;
 import com.team3.backend.tracking.domain.entity.OpportunityEventSuppressionReason;
 import com.team3.backend.tracking.domain.entity.OpportunityEventType;

@@ -2,8 +2,8 @@ package com.team3.backend.tracking.service;
 
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.tracking.domain.model.DeadlineSoonCandidate;
 import com.team3.backend.tracking.domain.model.DeadlineThreshold;
 import org.junit.jupiter.api.BeforeEach;

@@ -64,6 +64,17 @@ class NotificationMessageContractTest {
     }
 
     @Test
+    void rejectsNulInTextAndNestedPayloadBecausePostgresCannotStoreIt() {
+        for (var override : List.<Map<String, ?>>of(Map.of("title", "a\u0000b"), Map.of("content", "a\u0000b"),
+                Map.of("payload", Map.of("threshold", "D-\u00007")),
+                Map.of("payload", Map.of("nested", Map.of("k\u0000", "v"))),
+                Map.of("payload", Map.of("list", List.of("ok", "x\u0000"))))) {
+            assertThatThrownBy(() -> validator.validate(NotificationMessages.message(override)))
+                    .as("override: %s", override.keySet()).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void fingerprintIgnoresObjectAndChannelOrderAndUnknownOptionalFieldsButNotKnownValues() {
         var original = NotificationMessages.message(Map.of());
         var payload = new LinkedHashMap<String, Object>();

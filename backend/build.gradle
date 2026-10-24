@@ -22,7 +22,9 @@ ext {
     set('springCloudVersion', "2025.1.3")
 }
 
+
 dependencies {
+    // 내부 API 호출(DataService 수집 관리, Notification 메시지 전달)에 쓰는 OpenFeign
     implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-security'

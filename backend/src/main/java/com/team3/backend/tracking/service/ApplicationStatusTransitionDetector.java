@@ -1,8 +1,8 @@
 package com.team3.backend.tracking.service;
 
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.tracking.domain.entity.OpportunityEventType;
 import com.team3.backend.tracking.domain.model.ApplicationStatusTransition;
 import lombok.RequiredArgsConstructor;

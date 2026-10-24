@@ -38,8 +38,7 @@ public class HttpNotificationPublisher implements NotificationMessagePublisher {
         }
         try (var response = client.send(properties.apiKey(), correlationId, publication.json())) {
             int status = response.status();
-            if (status != 200) throw new NotificationPublicationException("HTTP_" + status,
-                    status == 408 || status == 429 || status >= 500);
+            if (status != 200) throw httpFailure(status);
             if (response.body() == null) throw new NotificationPublicationException("INVALID_RECEIPT", true);
             var bytes = response.body().asInputStream().readNBytes(16385);
             if (bytes.length > 16384) throw new NotificationPublicationException("INVALID_RECEIPT", true);
@@ -57,10 +56,17 @@ public class HttpNotificationPublisher implements NotificationMessagePublisher {
             }
         } catch (FeignException failure) {
             int status = failure.status();
-            throw new NotificationPublicationException(status < 0 ? "HTTP_IO_FAILURE" : "HTTP_" + status,
-                    status < 0 || status == 408 || status == 429 || status >= 500);
+            throw status < 0 ? new NotificationPublicationException("HTTP_IO_FAILURE", true) : httpFailure(status);
         } catch (IOException failure) {
             throw new NotificationPublicationException("HTTP_IO_FAILURE", true);
         }
+    }
+
+    private static NotificationPublicationException httpFailure(int status) {
+        String code = "HTTP_" + status;
+        if (status == 401 || status == 403 || status == 404 || (status >= 300 && status < 400)) {
+            return NotificationPublicationException.configuration(code);
+        }
+        return new NotificationPublicationException(code, status == 408 || status == 429 || status >= 500);
     }
 }

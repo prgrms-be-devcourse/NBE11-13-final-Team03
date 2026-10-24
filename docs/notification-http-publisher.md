@@ -12,10 +12,14 @@
 
 두 서버는 계속 독립 Spring Boot 프로젝트다. 공유 Java 타입이나 프로젝트 의존성은 없다.
 강사 예제와 같은 Spring Cloud OpenFeign starter와 BOM 2025.1.3을 사용한다.
+Spring 내장 RestClient/HTTP Interface로도 구현할 수 있지만, 팀 학습 기준(강사 예제)과 DataService 호출(#45)이
+같은 Feign을 쓰므로 맞췄다. Boot 4.1.1과의 호환은 이 저장소 CI의 실제 HTTP 테스트로 확인한다.
 BackendApplication의 `@EnableFeignClients`가 `client/NotificationClient`의 `@FeignClient`를 등록한다.
 직접 `Feign.builder()`를 호출하거나 feign-core 버전을 별도로 고정하지 않는다.
 인터페이스는 `@PostMapping`, `@RequestHeader`, `@RequestBody`로 요청을 선언한다.
 기존 Jackson 3·저장된 JSON 계약과 Publisher의 소비 응답 검증을 그대로 사용한다.
+본문은 Outbox의 jsonb를 `payload::text`로 읽어 보내므로 저장 당시 문자열이 아니라 jsonb 정규화 형태(키 순서·공백)다.
+Publisher는 messageId를 파싱해 비교하고 Notification은 지문을 정규화하므로 계약에는 영향이 없다.
 서비스 디스커버리·Gateway·로드밸런싱은 이번 범위에 추가하지 않는다.
 
 ### 강사 예제와 대응하는 파일 배치
@@ -39,7 +43,7 @@ backend/src/main/java/com/team3/backend/
 
 NotificationFeignConfig는 이 클라이언트의 자식 컨텍스트에서만 로드한다.
 일반 `@Configuration`/`@Component`로 스캔시켜 다른 클라이언트의 기본 설정을 덮어쓰지 않는다.
-Outbox는 이미 완성된 JSON을 보관하므로 송신 시 새 Entity나 상대 프로젝트 DTO로 변환하지 않는다.
+Outbox는 이미 완성된 JSON을 보관하므로 송신 시 새 Entity나 상대 프로젝트 DTO로 변환하지 않는다(jsonb 정규화 형태로 보낸다).
 응답도 Publisher가 원문을 제한된 크기로 읽어 소비 계약을 확인하며 기존 동작을 유지한다.
 
 Publisher 비활성 상태에서도 Spring의 Feign 프록시 정의는 등록될 수 있으나,
@@ -73,8 +77,8 @@ HTTP 연결/읽기 제한은 기본 1초/2초다. 리다이렉트와 Feign 내�
 | 상황 | 처리 |
 | --- | --- |
 | 연결 실패·타임아웃, HTTP 408/429/5xx | Backoff 후 PENDING 재시도, 한도 도달 시 FAILED |
-| HTTP 400/401/403/409 등 요청·인증 오류 | FAILED, 원인 수정 후 운영자가 별도 재처리 판단 |
-| 리다이렉트 등 예상하지 않은 HTTP 응답 | FAILED, 키를 다른 주소로 전달하지 않음 |
+| HTTP 400/409 등 메시지 자체 오류 | FAILED, 원인 수정 후 운영자가 별도 재처리 판단 |
+| HTTP 401/403/404/3xx (키·주소·경로 설정 오류) | 시도 횟수를 쓰지 않고 PENDING으로 되돌린 뒤 이번 배치를 멈추고 ERROR 로그. 리다이렉트는 따라가지 않아 키를 다른 주소로 보내지 않음 |
 | 200이지만 소비 기록 응답이 잘못됨 | 재시도, 한도 도달 시 FAILED |
 | PUBLISHING 중 프로세스 종료 | lease 만료 후 복구, 한도 도달 시 FAILED |
 | 수신 커밋 후 응답 유실·Application 완료 기록 실패 | 같은 messageId 재전송, Notification 소비 기록으로 중복 처리 |
@@ -93,13 +97,16 @@ lease는 연결+읽기 제한에 5초를 더한 값보다 길어야 한다.
 FAILED 자동 재개·관리 API는 추가하지 않았다.
 
 알림 본문·사용자 키·Feign 예외 전문은 Outbox lastError나 로그에 저장하지 않는다.
-lastError는 HTTP_503 등 안전한 코드만 사용한다. 성공 흐름의 correlationId·messageId를
+lastError는 HTTP_503 등 안전한 코드만 사용한다.
+설정 오류는 모든 메시지에 똑같이 일어나므로, 메시지별 실패로 세면 고치기 전에 Outbox 전체가 FAILED가 된다.
+그래서 시도 횟수를 늘리지 않고 retry-delay 뒤 다시 시도하며, 설정을 고치면 그대로 발행된다. 성공 흐름의 correlationId·messageId를
 Application HTTP 응답 확인과 Notification 소비 로그에 남긴다.
 
 ## 로컬 활성화
 
 5단계까지 적용한 DB 테이블을 그대로 사용한다. 추가 DDL은 없다.
 두 프로젝트의 `.env`에 아래 항목을 **추가**하고 기존 DB·인증 설정을 유지한다.
+NOTIFICATION_BASE_URL에는 기본값이 없다. Publisher를 켰는데 비어 있으면 기동하지 않는다(설정 누락 시 localhost를 조용히 호출하지 않기 위함).
 기존 backend INTERNAL_API_KEY는 바꾸거나 삭제하지 않는다.
 
 backend/.env:

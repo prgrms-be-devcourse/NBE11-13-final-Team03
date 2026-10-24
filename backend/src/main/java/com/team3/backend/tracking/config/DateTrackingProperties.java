@@ -14,11 +14,12 @@ public record DateTrackingProperties(
         @DefaultValue("PT30M") Duration leaseTimeout,
         @DefaultValue("100") int batchSize,
         @DefaultValue("7") int maxDatesPerRun,
-        LocalDate startDate
+        LocalDate startDate,
+        @DefaultValue("3") int recoveryDays
 ) {
     public DateTrackingProperties {
         if (cutoff == null || leaseTimeout == null || leaseTimeout.isZero() || leaseTimeout.isNegative()
-                || batchSize < 1 || maxDatesPerRun < 1) {
+                || batchSize < 1 || maxDatesPerRun < 1 || recoveryDays < 0) {
             throw new IllegalArgumentException("Invalid date tracking configuration");
         }
         if (enabled && startDate == null) {

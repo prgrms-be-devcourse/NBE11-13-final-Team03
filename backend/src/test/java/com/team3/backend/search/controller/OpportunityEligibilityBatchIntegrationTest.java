@@ -5,10 +5,16 @@ import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.service.EligibilityBatchRefresher;
+import com.team3.backend.opportunity.conditionset.ConditionSetBackfill;
 import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.OpportunitySourceRepository;
 import com.team3.backend.opportunity.dto.*;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.TrainingNormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.TrainingCourseRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
 import com.team3.backend.opportunity.service.TrainingCourseNormalizationService;
 import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
@@ -83,6 +89,7 @@ class OpportunityEligibilityBatchIntegrationTest {
     @Autowired private TrainingCourseNormalizationService trainingNormalization;
     @Autowired private OpportunitySourceRepository sourceRepository;
     @Autowired private EligibilityBatchRefresher batchRefresher;
+    @Autowired private ConditionSetBackfill conditionSetBackfill;
     @Autowired private EligibilityResultRepository resultRepository;
     @MockitoSpyBean private EligibilityResultService resultService;
 
@@ -102,6 +109,8 @@ class OpportunityEligibilityBatchIntegrationTest {
         NormalizationResult third = normalizePolicy("BATCH-3", "통합 배치 정책 C", "34", null, today);
         Long trainingId = normalizeTraining(today);
         Long unknownId = createIncompleteNormalizedOpportunity();
+        // 정규화를 거치지 않은 버전은 조건 묶음이 비어 있다. 판정 배치는 묶음을 채우지 않으므로, 수집·정규화 쪽 백필이 채운 상황을 만든다
+        conditionSetBackfill.run();
         save(ownerId, first.opportunityId());
 
         assertThat(item(first.opportunityId(), ownerId).get("eligibilityStatus")).isNull();

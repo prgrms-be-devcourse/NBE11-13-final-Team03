@@ -4,9 +4,9 @@ import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationPeriod;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.outbox.domain.entity.OutboxEvent;
 import com.team3.backend.tracking.domain.entity.OpportunityEvent;
 import com.team3.backend.tracking.domain.entity.OpportunityEventType;
@@ -69,7 +69,8 @@ public class DateNotificationMessageFactory {
                 var matching = fixed.stream().filter(p -> start.equals(p.startDate())
                         && !today.isBefore(start) && (p.endDate() == null || !today.isAfter(p.endDate()))).toList();
                 if (status != ApplicationStatus.OPEN || matching.isEmpty()) return Optional.empty();
-                expiresAt = event.getOccurredAt().plus(Duration.ofDays(3));
+                // Counted from creation, not the scanned date, so dates recovered within recovery-days still notify.
+                expiresAt = event.getCreatedAt().plus(Duration.ofDays(3));
                 // One earlier period ending does not close the whole policy.
                 var end = matching.stream().anyMatch(p -> p.endDate() == null) ? Optional.<LocalDate>empty()
                         : matching.stream().map(ApplicationPeriod::endDate).max(Comparator.naturalOrder());
@@ -85,7 +86,7 @@ public class DateNotificationMessageFactory {
                 var end = LocalDate.parse(required(event, "endDate"));
                 if (status != ApplicationStatus.CLOSED
                         || fixed.stream().noneMatch(p -> end.equals(p.endDate()))) return Optional.empty();
-                expiresAt = event.getOccurredAt().plus(Duration.ofDays(3));
+                expiresAt = event.getCreatedAt().plus(Duration.ofDays(3));
                 payload.put("applicationEndDate", end.toString());
                 title = "저장한 정책의 신청이 마감되었습니다.";
                 channels = List.of("IN_APP");

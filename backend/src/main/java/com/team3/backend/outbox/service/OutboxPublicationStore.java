@@ -59,6 +59,18 @@ public class OutboxPublicationStore {
                 safeCode, publication.id(), publication.leaseToken()) == 1;
     }
 
+    /** Configuration failures return the message to PENDING without spending an attempt. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean deferred(OutboxPublication publication, String safeCode) {
+        return jdbc.update("""
+                UPDATE outbox_events SET status = 'PENDING',
+                    next_retry_at = ?::timestamptz + ? * interval '1 millisecond',
+                    processing_started_at = NULL, lease_token = NULL, last_error = ?
+                WHERE id = ? AND status = 'PUBLISHING' AND lease_token = ?
+                """, Timestamp.from(clock.instant()), properties.retryDelay().toMillis(), safeCode,
+                publication.id(), publication.leaseToken()) == 1;
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public int recoverStale() {
         return jdbc.update("""
