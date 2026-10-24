@@ -36,12 +36,7 @@ public class NotificationWithdrawalTransaction {
             withdrawn.saveAndFlush(new WithdrawnUser(message.userId(), message.occurredAt(), now));
         }
         // No Application DB access. Keep consumption receipts for replay detection; their FK is ON DELETE SET NULL.
-        jdbc.update("""
-                UPDATE notification_deliveries SET status = 'SKIPPED', last_error = 'USER_WITHDRAWN',
-                    processing_started_at = NULL, lease_token = NULL
-                WHERE user_id = ? AND status IN ('PENDING', 'SENDING')
-                """, message.userId());
-        // Delivery rows are then removed by the internal ON DELETE CASCADE FKs.
+        // Delivery rows are removed by ON DELETE CASCADE; stale lease callbacks cannot update deleted rows.
         jdbc.update("DELETE FROM notification_endpoints WHERE user_id = ?", message.userId());
         jdbc.update("DELETE FROM notification_settings WHERE user_id = ?", message.userId());
         jdbc.update("DELETE FROM notifications WHERE user_id = ?", message.userId());

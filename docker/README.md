@@ -66,7 +66,8 @@ application 스키마 테이블은 data-service(수집·정규화 테이블)와 
 - 두 구성 모두 호스트 5432를 쓰므로, 먼저 `backend/`에서 `docker compose down`으로 예전 DB를 내린다.
 - 예전 데이터를 계속 쓰려면 `docker/.env`에 `YON_DB_VOLUME=backend_postgres_data`를 넣는다.
   예전 구성은 3번(Notification 테이블)을 자동으로 실행하지 않았으므로, 기동 전에 `notification_user`로
-  `database/scripts/notification-inbox.sql` → `database/scripts/notification-user-api.sql` 순서로 한 번씩 적용해야
+  `database/scripts/notification-inbox.sql` → `database/scripts/notification-user-api.sql` →
+  `database/scripts/notification-withdrawal.sql` → `database/scripts/notification-delivery.sql` 순서로 한 번씩 적용해야
   notification-service가 뜬다(`ddl-auto: validate`). 이미 적용된 SQL은 재실행하지 않고 미적용분만 순서대로 적용한다.
 
 ## 알림 전달
