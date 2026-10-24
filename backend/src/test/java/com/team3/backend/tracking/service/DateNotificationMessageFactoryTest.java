@@ -139,6 +139,50 @@ class DateNotificationMessageFactoryTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void extensionProducerMatchesSharedContract() throws Exception {
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var resource = new org.springframework.core.io.ClassPathResource("contracts/notification-deadline-extended-v1.json");
+        var expected = mapper.readTree(resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+        var event = extension();
+        ReflectionTestUtils.setField(event, "eventId", UUID.fromString(expected.get("sourceEventId").asText()));
+        ReflectionTestUtils.setField(event, "correlationId", UUID.fromString(expected.get("correlationId").asText()));
+        var prepared = factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(3))), NOW).orElseThrow();
+        var actual = new LinkedHashMap<>(factory.create(event, 7L, prepared, NOW).getPayload());
+        actual.put("messageId", expected.get("messageId").asText());
+        assertThat(mapper.readTree(mapper.writeValueAsString(actual))).isEqualTo(expected);
+        assertThat(prepared.channels()).containsExactly("IN_APP", "PUSH");
+    }
+
+    @Test
+    void extensionExpiresAtEarlierOfSevenDaysAfterOccurrenceAndNewDeadline() {
+        var event = extension();
+        var far = TODAY.plusDays(20);
+        var payload = new HashMap<>(event.getPayload()); payload.put("applicationEndDate", far.toString());
+        var distant = event(OpportunityEventType.DEADLINE_EXTENDED, payload, true);
+        assertThat(factory.prepare(distant, policy, List.of(period(TODAY.minusDays(7), far)), NOW).orElseThrow().expiresAt())
+                .isEqualTo(NOW.plus(Duration.ofDays(7)));
+        assertThat(factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(3))),
+                Instant.parse("2026-10-26T15:00:00Z"))).isEmpty();
+    }
+
+    @Test
+    void extensionRevalidatesCurrentPeriodWithoutMatchingAnUnrelatedRound() {
+        var event = extension();
+        var valid = period(TODAY.minusDays(7), TODAY.plusDays(3));
+        assertThat(factory.prepare(event, policy, List.of(period(valid.startDate(), TODAY.plusDays(4))), NOW)).isEmpty();
+        assertThat(factory.prepare(event, policy, List.of(period(TODAY, valid.endDate())), NOW)).isEmpty();
+        assertThat(factory.prepare(event, policy, List.of(valid, valid), NOW)).isEmpty();
+        assertThat(factory.prepare(event, policy, List.of(), NOW)).isEmpty();
+    }
+
+    private OpportunityEvent extension() {
+        return event(OpportunityEventType.DEADLINE_EXTENDED, Map.of("fromVersionId", 19L, "toVersionId", 20L,
+                "applicationStartDate", TODAY.minusDays(7).toString(),
+                "previousApplicationEndDate", TODAY.plusDays(2).toString(),
+                "applicationEndDate", TODAY.plusDays(3).toString()), true);
+    }
+
     private OpportunityEvent deadline() {
         return event(OpportunityEventType.DEADLINE_SOON,
                 Map.of("threshold", "D-3", "applicationEndDate", TODAY.plusDays(3).toString()), true);

@@ -21,6 +21,8 @@ public interface OpportunityEventRepository
 
     boolean existsByDedupKey(String dedupKey);
 
+    Optional<OpportunityEvent> findByDedupKey(String dedupKey);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select e from OpportunityEvent e where e.id = :id")
     Optional<OpportunityEvent> lockForFanout(@Param("id") Long id);

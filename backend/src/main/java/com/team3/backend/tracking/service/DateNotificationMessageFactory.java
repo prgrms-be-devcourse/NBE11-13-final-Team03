@@ -28,7 +28,7 @@ public class DateNotificationMessageFactory {
 
     public boolean supports(OpportunityEventType type) {
         return type == OpportunityEventType.APPLICATION_OPENED || type == OpportunityEventType.APPLICATION_CLOSED
-                || type == OpportunityEventType.DEADLINE_SOON;
+                || type == OpportunityEventType.DEADLINE_SOON || type == OpportunityEventType.DEADLINE_EXTENDED;
     }
 
     public Optional<Prepared> prepare(OpportunityEvent event, Opportunity current,
@@ -46,6 +46,24 @@ public class DateNotificationMessageFactory {
         String title;
         List<String> channels;
         switch (event.getEventType()) {
+            case DEADLINE_EXTENDED -> {
+                var start = LocalDate.parse(required(event, "applicationStartDate"));
+                var previousEnd = LocalDate.parse(required(event, "previousApplicationEndDate"));
+                var end = LocalDate.parse(required(event, "applicationEndDate"));
+                if (!end.isAfter(previousEnd) || start.isAfter(previousEnd)) {
+                    throw new IllegalArgumentException("Invalid deadline extension payload");
+                }
+                // Do not reuse an old extension if the latest policy no longer has the same single window.
+                if (periods.size() != 1 || fixed.size() != 1
+                        || !start.equals(fixed.getFirst().startDate()) || !end.equals(fixed.getFirst().endDate())) {
+                    return Optional.empty();
+                }
+                var deadline = end.plusDays(1).atStartOfDay(KST).toInstant();
+                expiresAt = event.getOccurredAt().plus(Duration.ofDays(7));
+                if (deadline.isBefore(expiresAt)) expiresAt = deadline;
+                title = "저장한 정책의 신청 마감이 연장되었습니다.";
+                channels = List.of("IN_APP", "PUSH");
+            }
             case DEADLINE_SOON -> {
                 var end = LocalDate.parse(required(event, "applicationEndDate"));
                 String threshold = required(event, "threshold");

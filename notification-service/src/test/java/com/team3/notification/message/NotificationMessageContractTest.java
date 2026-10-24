@@ -33,6 +33,17 @@ class NotificationMessageContractTest {
     }
 
     @Test
+    void readsDeadlineExtensionContractWithoutApplicationClasses() throws Exception {
+        var resource = new org.springframework.core.io.ClassPathResource("contracts/notification-deadline-extended-v1.json");
+        var message = decoder.decode(resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+        assertThatCode(() -> validator.validate(message)).doesNotThrowAnyException();
+        assertThat(message.type()).isEqualTo(NotificationType.DEADLINE_EXTENDED);
+        assertThat(message.channels()).containsExactly(NotificationChannel.IN_APP, NotificationChannel.PUSH);
+        assertThat(message.payload()).containsEntry("previousApplicationEndDate", "2026-10-25")
+                .containsEntry("applicationEndDate", "2026-10-26");
+    }
+
+    @Test
     void rejectsInvalidAndUnsupportedEnvelopesBeforePersistence() {
         var missing = new HashMap<String, Object>();
         missing.put("messageId", null);

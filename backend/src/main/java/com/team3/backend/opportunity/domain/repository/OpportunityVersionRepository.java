@@ -12,6 +12,9 @@ import java.util.List;
 
 public interface OpportunityVersionRepository extends JpaRepository<OpportunityVersion, Long> {
 
+    java.util.Optional<OpportunityVersion> findFirstByOpportunityIdAndVersionNoLessThanOrderByVersionNoDesc(
+            Long opportunityId, Integer versionNo);
+
     List<OpportunityVersion> findByOpportunityIdOrderByVersionNoAsc(Long opportunityId);
 
     /** 조건 묶음이 비어 있는 버전 ID (ConditionSetBackfill용, afterId보다 큰 ID 순서로 pageable 크기만큼) */
