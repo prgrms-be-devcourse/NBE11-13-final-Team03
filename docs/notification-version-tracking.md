@@ -2,11 +2,11 @@
 
 ## 현재 범위
 
-첫 검증 단위는 구조적 snapshot 비교기와 Application 소유의 버전 처리 기록/변경 이력 모델이다.
+10단계는 PARTIAL이다. 구조적 snapshot 비교기와 Application 소유의 버전 처리 기록/변경 이력 모델을 구현했다.
 자동 스캔·기준선 초기화·신청 가능성 변화의 알림 매핑/Outbox 연결은 아직 구현하지 않았다.
 버전 비교 기록과 마감 연장 이벤트·기존 Outbox 취소는 아래 명시적 호출 트랜잭션으로 연결했다.
-새 테이블은 backend의 기존 ddl-auto:update 정책을 따르며 기존 운영 DB 적용·테스트 성공을 뜻하지 않는다.
-실제 `.env`·전달·Consumer·푸시 플래그와 Notification 서버의 실행 코드는 변경하지 않는다.
+새 테이블은 backend의 기존 ddl-auto:update 정책을 따른다. 실제 운영 DB 적용은 미검증이다.
+실제 `.env`·전달·Consumer·푸시 플래그는 변경하지 않았다. Notification은 DEADLINE_EXTENDED 타입 지원만 확장했다.
 
 ## 비교 계약
 
@@ -42,28 +42,29 @@
 
 ## 재사용·미확정 범위
 
-- 기존 EligibilityEvaluator.judge는 동일 프로필·기준일로 여러 버전을 판정할 수 있어 재사용 후보이다.
+- 기존 EligibilityEvaluator.judge를 동일 프로필·기준일의 버전 비교에 재사용한다.
 - 비교에 저장된 과거 EligibilityResult를 쓰거나 비교 결과로 최신 결과를 덮어쓰지 않는다.
 - 기존 EventFanout/Outbox와 날짜 이벤트는 유지하며 새 이벤트 타입 지원·계약 표본을 먼저 확장한 뒤 생성한다.
 - 최초 출처의 정규화 실패/재시도에 대한 기준선 완료 조건과 판정 상태 쌍별 알림 매핑은 확정 전 자동 구현하지 않는다.
 - 훈련 시작일·사업기간을 신청기간으로 취급하지 않고 복수 기간의 연장 여부가 불명확하면 임의 확정하지 않는다.
 
-## 검증
+## 검증 — 최종 로컬 상태 (2026-10-25)
 
-- OpportunitySnapshotComparatorTest: 키 순서·숫자 표현·null/누락·배열·규칙 변경·불변 복사·입력 검증
-- OpportunityVersionTrackingTest: 기준선/무변경 기록, 분석 대기/완료 구분, 규칙 변경 억제와 버전 소유권 검증
+| 테스트 | 건수 | 결과 |
+| --- | --- | --- |
+| OpportunitySnapshotComparatorTest | 10 | skip/failure/error 0 |
+| OpportunityVersionTrackingTest | 6 | skip/failure/error 0 |
+| OpportunityVersionTrackingPostgresTest | 8 | skip/failure/error 0 |
+| EligibilityVersionComparisonServiceTest | 6 | skip/failure/error 0 |
+| DeadlineExtensionDetectorTest | 14 | skip/failure/error 0 |
+| DeadlineExtensionPostgresTest | 15 | skip/failure/error 0 |
 
-위 단위 테스트 16개는 로컬 실행 성공이 확인됐다.
-
-OpportunityVersionTrackingPostgresTest 8개도 로컬 실행 성공이 확인됐다. 일회용 PostgreSQL에서 다음을 검사한다.
-
-- JSONB 저장/재조회 시 구조 차이·null/누락·배열·숫자 의미 보존
-- 버전별 처리 기록 및 버전 쌍별 변경 이력 UNIQUE
-- 한 트랜잭션의 후속 INSERT 실패 시 변경 이력/처리 기록 롤백
-- 분석 완료 상태 변경의 커밋/롤백
-- 동시 중복 트랜잭션의 단일 이력·기록 보장
-
-현재 통합 테스트는 모델과 스키마 제약을 검증한다. 자동 비교 서비스/Worker의 중복 복구나 이벤트 생성·완료의 원자성을 검증했다는 뜻은 아니다.
+- 기존 마감 임박·Fan-out·의존성 경계 및 양쪽 메시지 계약 테스트 통과.
+- Notification의 계약/HTTP 수신 테스트 33개는 skip/failure/error 0. 새 타입 저장과 재전달 멱등성 포함.
+- backend 전체 테스트·bootJar 성공. 기존 조건부 PostgreSQL 테스트 19개는 별도 실행하여 skip/failure/error 0 확인.
+- notification-service 전체 테스트·bootJar 성공, 전체 skip/failure/error 0 확인.
+- PostgreSQL에서 JSONB 보존·UNIQUE·동시 중복 실행·변경 이력/처리 기록/연장 이벤트/취소의 원자적 롤백을 검증했다.
+- 자동 Worker, 연속 버전의 전체 처리 체인, 실제 운영 DB·AWS 전달·FCM 발송은 이번 검증 대상이 아니다.
 
 ## 동일 입력 신청 가능성 비교
 
@@ -74,10 +75,6 @@ EligibilityResult 캐시를 조회하거나 갱신하지 않는다. 프로필이
 서로 다른 정책·역순/동일 버전·정규화 규칙이 다른 비교는 거부한다.
 
 이 비교 결과는 발송 승인이 아니다. 상태 쌍별 알림 매핑, 최신 프로필·정책 재검증 및 근거 영속화는 후속 연결 대상이다.
-EligibilityVersionComparisonServiceTest 6개는 로컬 실행 성공이 확인됐다.
-이전 비교/모델 테스트와 합계 30개가 skipped/failures/errors 0이며 backend 전체 테스트,
-기존 조건부 PostgreSQL 테스트 19개(skip 0), bootJar도 로컬 실행 성공이 확인됐다.
-아래 마감 연장 감지 추가 전의 검증 결과다.
 
 ## 초기 적재 연동 경계
 
@@ -102,8 +99,6 @@ DeadlineExtensionDetector는 이전/변경 버전의 ApplicationPeriod 목록만
 
 동일 시작일의 단일 기간만 다루는 보수적인 첫 구현이며, 복수 기간이나 시작일이 없는 기간의 대응 규칙은 후속이다.
 이 컴포넌트는 Worker에 연결하지 않았고 이벤트 생성·PENDING Outbox 취소·발송도 수행하지 않는다.
-DeadlineExtensionDetectorTest 14개는 로컬 실행에서 skipped/failures/errors 0을 확인했다.
-기존 DeadlineSoonDetectorTest 10개와 IngestBoundaryTest 2개도 함께 통과했다.
 
 ## 마감 연장 이벤트·Outbox 취소 연결
 
@@ -127,11 +122,6 @@ DeadlineExtensionTransaction.process(fromVersionId, toVersionId)는 명시적 �
 새 타입을 모르는 구 Notification은 거부하므로 운영 활성화 전 Notification 타입 지원을 먼저 배포해야 한다.
 DB 컬럼·수동 DDL·실제 환경변수·전달/푸시 플래그는 변경하지 않았다.
 
-DeadlineExtensionPostgresTest의 기존 7개는 로컬 실행에서 skipped/failures/errors 0을 확인했다.
-양쪽 메시지 계약 표본, 기존 Fan-out의 연장/숨김 사용자 및 scope 재검증, Notification HTTP 저장·재전달 멱등성도 통과했다.
-양쪽 전체 테스트·bootJar가 성공했고 Notification 전체 skip/failure/error 0,
-backend의 기존 조건부 PostgreSQL 테스트 19개도 별도 실행에서 skip/failure/error 0을 확인했다.
-다음 버전 비교 트랜잭션 추가 전의 결과다.
 
 ## 버전 비교 기록과 마감 연장 처리의 원자적 연결
 
@@ -147,4 +137,51 @@ OpportunityVersionComparisonTransaction.compare(toVersionId)는 기존 기준선
   직전 버전이 아직 분석 대기이면 다음 버전 비교는 거부하며 건너뛰지 않는다.
 
 자동 Worker·신규 출처 초기 적재 계약·사용자별 판정 상태 매핑은 여전히 미연결이다.
-추가 PostgreSQL 테스트 8개(기존 클래스 총 15개)는 아직 실행 전이며 원자적 저장/롤백·무변경·규칙 변경·기준선 보호·동시성·분석 대기를 검사한다.
+
+## 결정·협의 체크리스트 (2026-10-25)
+
+### 선택한 방향 — 구현 완료와 구분
+
+추적 담당 결정: 모든 정책 버전을 버전 번호 순서로 비교·기록하고, 실제 사용자 알림은 최신 정책에서도
+의미가 유지되는지 재검증한다. 중간 버전을 단순히 버려 이력을 생략하는 방식을 기본값으로 삼지 않는다.
+
+예: 마감이 10/25 → 10/30 → 10/27로 바뀌면 두 변경 이력을 모두 남기되, 최신 마감과 맞지 않는
+“10/30까지 연장” 요청은 만들지 않는다. 이미 발행된 요청의 회수는 기존 MVP 범위 밖이다.
+
+이 방향은 다음 Worker/처리 체인 PR의 목표다. 현재 코드의 “현재 버전만 비교” 조건은 아직 그대로이며,
+READY_FOR_EVENT_ANALYSIS를 완료로 바꾸는 자동 호출자도 없다. 따라서 현 코드가 순차 분석을 구현한 것은 아니다.
+중간 버전 누락 또는 분석 대기로 정책 체인이 멈출 수 있으므로 자동 Worker 연결 전에 해결해야 한다.
+
+### 추적 담당 결정·확인 사항
+
+| 항목 | 현재 결정 | 남은 구현/확인 |
+| --- | --- | --- |
+| 버전 처리 방향 | 모든 버전을 순차 비교·기록 | 과거 버전 분석 허용, 진행 커서·복구·완료 조건 설계 |
+| 오래된 변경의 알림 | 최신 정책에서도 의미가 유효할 때만 요청 | 사용자별 판정 변화의 최신 프로필·정책 재검증 연결 |
+| 초기 적재의 변경 알림 | 최초 적재분은 늦게 정제되어도 기준선으로 처리하는 방향 | 수집·정제 담당자와 구분 정보·초기화 완료 조건 협의 |
+| 미확정 정책 | 초기 적재 계약·판정 상태별 매핑은 미확정으로 유지 | 확정 전 자동 연결하지 않음 |
+
+### 팀원과 협의할 항목 — 아직 합의되지 않음
+
+| 협의 대상 | 확인할 질문 | 확인이 필요한 이유 |
+| --- | --- | --- |
+| 수집·정제 담당 | 과거 버전과 각 버전의 조건·신청기간이 보존되는가? 보관/정리 제한은? | 순차 비교와 과거 버전 판정의 전제 확인 |
+| 수집·정제 담당 | 초기 적재분·일반 갱신분을 정책 버전에 어떻게 연결할 것인가? | 원본/요청/수집 실행과 버전의 정확한 연결 확보 |
+| 수집·정제 담당 + 추적 담당 | 실패·재처리 중인 최초 적재분의 초기화 완료를 무엇으로 판단할 것인가? | 복구된 최초 적재분의 오발송 방지. 실패 복구 책임 자체는 data-service 유지 |
+| 판정 정책 담당 + 추적 담당 | ELIGIBLE/NOT_ELIGIBLE/POSSIBLY_ELIGIBLE/UNKNOWN의 각 상태 쌍을 어떤 알림 유형에 대응할 것인가? | 가능해짐·자격 상실·추가 확인 필요의 의미와 채널 결정 |
+
+### 추적 담당의 후속 설계 — 임의 완료 처리 금지
+
+- 실제 변경 분석에서 어떤 단계까지 끝나야 PROCESSED로 전환하는가?
+- 판정 정책이 미확정이거나 기간 대응이 불명확할 때 대기·재검토를 어떻게 관리하는가?
+- 순차 분석 진행 상태와 사용자별 이벤트/Fan-out 진행 상태를 어떻게 구분하는가?
+- 연속 버전 생성·재시작·실패 복구 시 이력 누락과 중복 알림을 어떻게 방지하는가?
+
+SUPERSEDED 종료 상태 도입은 이번에 확정하지 않았다. 모든 버전을 기록한다는 선택과 처리 완료 상태의
+세부 규칙은 별개이며, 기존 READY 상태를 편의상 PROCESSED로 바꾸거나 직전 기록 검사를 삭제하지 않는다.
+
+### 운영 활성화 전 별도 재검토
+
+버전 추적 외에도 기존 미확정 항목인 푸시 슬롯·묶음/빈도 제한, Tombstone 보관 기간·비활성 Endpoint 정리,
+SQS Visibility/재전달 횟수/보존 기간·DLQ 복구, 배포/IAM·FCM 자격증명 및 실제 발송 검증은 별도로 남아 있다.
+이 목록에 적었다는 이유만으로 운영값이나 발송 활성화가 승인된 것은 아니다.
