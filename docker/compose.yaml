@@ -1,4 +1,4 @@
-# Local stack: PostgreSQL, backend, notification-service, nginx.
+# Local stack: PostgreSQL, data-service, backend, notification-service, nginx.
 #   docker compose up -d postgres-db          DB only (IDE/bootRun development)
 #   docker compose up -d --build backend      rebuild/restart one service; the DB keeps running
 #   ./start.sh                                build JARs, then start everything
@@ -41,6 +41,7 @@ services:
     environment:
       DB_URL: jdbc:postgresql://postgres-db:5432/${DB_NAME:-yon}
       NOTIFICATION_BASE_URL: http://notification-service:8081
+      DATA_SERVICE_BASE_URL: http://data-service:8082
       # Trust X-Forwarded-* from nginx so OAuth redirect URIs use the browser's host:port.
       SERVER_FORWARD_HEADERS_STRATEGY: framework
       TZ: Asia/Seoul
@@ -53,6 +54,29 @@ services:
     healthcheck:
       # eclipse-temurin JRE has no curl; check the TCP port with bash.
       test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 20s
+    restart: unless-stopped
+
+  data-service:
+    # Collection and normalization. Writes the shared application schema as application_user.
+    build: ../data-service
+    image: yon-data-service:local
+    env_file: .env
+    environment:
+      DB_URL: jdbc:postgresql://postgres-db:5432/${DB_NAME:-yon}
+      # data-service reads its key from the property internal.api-key. The shared .env also holds backend's
+      # INTERNAL_API_KEY, which Spring would bind to that same property and override the intended key.
+      INTERNAL_API_KEY: ${DATA_SERVICE_INTERNAL_API_KEY:?Set DATA_SERVICE_INTERNAL_API_KEY in docker/.env}
+      TZ: Asia/Seoul
+    # No host port: internal API only; backend relays /api/admin/collection/** to it.
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8082"]
       interval: 5s
       timeout: 3s
       retries: 40

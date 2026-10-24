@@ -1,11 +1,12 @@
 # 로컬 Docker 실행
 
-DB, backend, notification-service, nginx를 `docker/compose.yaml` 하나로 띄운다.
-기동 순서는 compose가 healthcheck로 맞춘다(DB → 두 서버 → nginx).
+DB, data-service, backend, notification-service, nginx를 `docker/compose.yaml` 하나로 띄운다.
+기동 순서는 compose가 healthcheck로 맞춘다(DB → 세 서버 → nginx).
 
 | 서비스 | 내용 | 호스트 포트 |
 | --- | --- | --- |
 | `postgres-db` | PostgreSQL 16, 첫 기동 시 DB 초기화 | 5432 |
+| `data-service` | 수집·정규화 서버 | 공개하지 않음 |
 | `backend` | Application 서버 | 8080 (디버깅용) |
 | `notification-service` | Notification 서버 | 공개하지 않음 |
 | `nginx` | 브라우저 진입점 | 80 |
@@ -40,6 +41,7 @@ Dockerfile이 빌드된 Boot JAR를 복사하므로, 서버 이미지를 다시 
 | 브라우저 진입점(nginx) | http://localhost |
 | backend 직접(디버깅, Swagger) | http://localhost:8080/swagger-ui.html |
 | PostgreSQL(호스트) | localhost:5432 |
+| data-service | 호스트에 공개하지 않음. backend가 `http://data-service:8082`로 호출(수집 관리자 API 전달) |
 | notification-service | 호스트에 공개하지 않음. 컨테이너끼리 `http://notification-service:8081`로 호출 |
 
 포트가 이미 쓰이고 있으면 `docker/.env`의 `DB_PORT`, `BACKEND_PORT`, `HTTP_PORT`를 바꾼다.
@@ -52,7 +54,8 @@ Dockerfile이 빌드된 Boot JAR를 복사하므로, 서버 이미지를 다시 
 2. 두 계정 비밀번호 설정(`database/local/02-set-local-passwords.sh`)
 3. Notification 테이블 생성(`database/local/03-apply-notification-ddl.sh`)
 
-application 스키마 테이블은 backend가 첫 기동에서 `ddl-auto: update`로 만든다.
+application 스키마 테이블은 data-service(수집·정규화 테이블)와 backend(그 밖의 테이블)가 첫 기동에서 `ddl-auto: update`로 만든다.
+정규화 요청 NOTIFY 트리거(`normalization-notifications.sql`)는 테이블이 생긴 뒤에만 설치할 수 있어 초기화에 넣지 않았다. 트리거가 없어도 data-service의 폴링으로 정규화는 진행된다.
 초기화 스크립트나 DDL을 바꿨다면 `docker compose down -v` 후 다시 기동해야 반영된다.
 
 ## 알림 전달
@@ -61,7 +64,13 @@ application 스키마 테이블은 backend가 첫 기동에서 `ddl-auto: update
 탈퇴 사용자 차단(Tombstone)이 구현되기 전까지 켜지 않는다.
 켤 때는 두 서버가 같은 `NOTIFICATION_INTERNAL_API_KEY`를 사용한다.
 
+## 수집·정규화
+
+`COLLECTION_SCHEDULE_ENABLED`는 예시에서 `false`다. 정기 수집은 외부 API를 호출하므로 키가 없으면 끄고,
+필요할 때 관리자 API(`/api/admin/collection/**`, backend가 data-service로 전달)로 수동 수집한다.
+`DATA_SERVICE_INTERNAL_API_KEY`는 backend와 data-service 둘 다 없으면 기동하지 않으므로 반드시 채운다.
+
 ## 운영 배포와의 관계
 
-이 구성은 로컬 개발용이다. 운영은 CI가 만든 GHCR 이미지를 쓰는 배포 compose(#33)를 사용하고,
-그쪽에도 notification-service와 같은 DB 초기화 단계를 추가해야 한다.
+이 구성은 로컬 개발용이다. 운영은 CI가 만든 GHCR 이미지와 서버별 배포 compose(`deploy/db`, `deploy/main`, `deploy/data`, #56)를 쓴다.
+운영 메인 서버에 notification-service와 Notification DDL 선적용을 넣는 작업은 별도 PR에서 진행한다.
