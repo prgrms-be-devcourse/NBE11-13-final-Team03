@@ -20,7 +20,11 @@ public record NotificationPublisherProperties(
 ) {
     public NotificationPublisherProperties {
         if (enabled) {
-            if (!"http".equals(transport)) throw new IllegalArgumentException("Only the HTTP publisher is implemented");
+            if (!"http".equals(transport) && !"sqs".equals(transport)) {
+                throw new IllegalArgumentException("Notification publisher transport must be http or sqs");
+            }
+        }
+        if (enabled && "http".equals(transport)) {
             if (baseUrl == null || baseUrl.isBlank() || UNSET_BASE_URL.equals(baseUrl)) {
                 throw new IllegalArgumentException("NOTIFICATION_BASE_URL is required when the publisher is enabled");
             }

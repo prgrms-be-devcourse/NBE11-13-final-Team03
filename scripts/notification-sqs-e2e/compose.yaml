@@ -1,0 +1,42 @@
+name: yon-sqs-e2e
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: yon_sqs_e2e
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: e2e-admin-only
+      APPLICATION_DB_PASSWORD: e2e-application-only
+      NOTIFICATION_DB_PASSWORD: e2e-notification-only
+    ports:
+      - '127.0.0.1:15432:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ../../database/scripts/database-boundaries.sql:/docker-entrypoint-initdb.d/01-boundaries.sql:ro
+      - ../../database/local/02-set-local-passwords.sh:/docker-entrypoint-initdb.d/02-passwords.sh:ro
+      - ../../database/local/03-apply-notification-ddl.sh:/docker-entrypoint-initdb.d/03-notification.sh:ro
+      - ../../database/scripts:/yon-scripts:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres -d yon_sqs_e2e']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  sqs:
+    image: localstack/localstack:4.12.0
+    environment:
+      SERVICES: sqs
+      SQS_ENDPOINT_STRATEGY: 'off'
+      AWS_DEFAULT_REGION: ap-northeast-2
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - '127.0.0.1:14566:4566'
+    volumes:
+      - ./source-attributes.json:/e2e/source-attributes.json:ro
+      - ./dlq-attributes.json:/e2e/dlq-attributes.json:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'awslocal sqs list-queues --region ap-northeast-2 >/dev/null']
+      interval: 5s
+      timeout: 10s
+      retries: 30
