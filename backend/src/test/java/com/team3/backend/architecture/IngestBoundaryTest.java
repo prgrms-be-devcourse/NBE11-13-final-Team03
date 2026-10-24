@@ -33,7 +33,7 @@ class IngestBoundaryTest {
 
     /** 메인 서버에 남는 패키지와 공용 패키지 */
     private static final List<String> MAIN_AND_SHARED = List.of(
-            "auth", "eligibility", "search", "interest", "preference", "user", "config", "global", "tracking",
+            "auth", "eligibility", "search", "interest", "preference", "user", "config", "global", "tracking", "behavior",
             "opportunity/domain", "opportunity/dto", "region/directory", "region/domain");
 
     @Test

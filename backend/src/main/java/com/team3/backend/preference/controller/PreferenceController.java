@@ -34,7 +34,7 @@ public class PreferenceController {
     private final PreferenceBehaviorRecorder behaviorRecorder;
 
     /** 공고를 저장하고 본문 없이 응답한다. */
-    @Operation(summary = "공고 저장", description = "이미 저장된 공고도 멱등하게 처리한다. 숨김 상태는 변경하지 않는다.")
+    @Operation(summary = "공고 저장", description = "이미 저장된 공고도 멱등하게 처리한다. 숨김 상태는 변경하지 않는다. 저장 상태가 false에서 true로 변경될 때만 SAVE 행동 이벤트를 기록한다.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "저장 성공, 응답 본문 없음", content = @Content),
             @ApiResponse(responseCode = "400", description = "공고 ID 형식 오류 (COMMON_002)"),
@@ -56,7 +56,7 @@ public class PreferenceController {
     }
 
     /** 공고 저장을 해제하고 본문 없이 응답한다. */
-    @Operation(summary = "공고 저장 해제", description = "저장하지 않은 공고도 멱등하게 처리한다. 숨김 상태는 변경하지 않는다.")
+    @Operation(summary = "공고 저장 해제", description = "저장하지 않은 공고도 멱등하게 처리한다. 숨김 상태는 변경하지 않는다. 저장 해제 행동 이벤트는 V1에서 기록하지 않는다.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "저장 해제 성공, 응답 본문 없음", content = @Content),
             @ApiResponse(responseCode = "400", description = "공고 ID 형식 오류 (COMMON_002)"),
@@ -73,7 +73,7 @@ public class PreferenceController {
     }
 
     /** 공고를 숨기고 본문 없이 응답한다. */
-    @Operation(summary = "공고 숨김", description = "이미 숨긴 공고도 멱등하게 처리한다. 저장 상태는 변경하지 않는다.")
+    @Operation(summary = "공고 숨김", description = "이미 숨긴 공고도 멱등하게 처리한다. 저장 상태는 변경하지 않는다. 숨김 상태가 false에서 true로 변경될 때만 HIDE 행동 이벤트를 기록한다.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "숨김 성공, 응답 본문 없음", content = @Content),
             @ApiResponse(responseCode = "400", description = "공고 ID 형식 오류 (COMMON_002)"),
@@ -95,7 +95,7 @@ public class PreferenceController {
     }
 
     /** 공고 숨김을 해제하고 본문 없이 응답한다. */
-    @Operation(summary = "공고 숨김 해제", description = "숨기지 않은 공고도 멱등하게 처리한다. 저장 상태는 변경하지 않는다.")
+    @Operation(summary = "공고 숨김 해제", description = "숨기지 않은 공고도 멱등하게 처리한다. 저장 상태는 변경하지 않는다. 숨김 해제 행동 이벤트는 V1에서 기록하지 않는다.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "숨김 해제 성공, 응답 본문 없음", content = @Content),
             @ApiResponse(responseCode = "400", description = "공고 ID 형식 오류 (COMMON_002)"),

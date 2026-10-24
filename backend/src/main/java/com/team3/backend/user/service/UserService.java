@@ -71,7 +71,7 @@ public class UserService {
         outboxRepository.saveAndFlush(OutboxEvent.userWithdrawn(userId, clock.instant()));
 
         // User를 직접 참조하는 데이터부터 삭제한다.
-        // user_interests와 user_opportunity_preferences는 DB ON DELETE CASCADE로 삭제된다.
+        // user_interests, user_opportunity_preferences, user_behavior_events는 DB ON DELETE CASCADE로 삭제된다.
         refreshTokenRepository.deleteAllByUserId(userId);
 
         // 사용자별 정책 판정 데이터 삭제
