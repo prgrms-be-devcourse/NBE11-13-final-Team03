@@ -1,0 +1,32 @@
+.badge {
+  display: inline-block;
+  max-inline-size: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+  line-height: var(--line-height-small);
+  overflow-wrap: anywhere;
+}
+
+.ELIGIBLE {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.POSSIBLY_ELIGIBLE {
+  background: var(--color-accent-yellow);
+  color: var(--color-text-primary);
+}
+
+.NOT_ELIGIBLE {
+  background: var(--color-surface-muted);
+  color: var(--color-text-primary);
+}
+
+.UNKNOWN {
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  border-style: dashed;
+}

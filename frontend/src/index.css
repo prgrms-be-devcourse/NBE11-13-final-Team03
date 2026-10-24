@@ -1,0 +1,104 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+#root {
+  min-inline-size: 0;
+  min-block-size: 100svh;
+}
+
+h1,
+h2,
+h3 {
+  line-height: var(--line-height-heading);
+}
+
+h1 {
+  font-size: var(--font-size-title);
+}
+
+h2,
+h3 {
+  font-size: var(--font-size-heading);
+}
+
+small {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+a {
+  color: var(--color-primary);
+  text-underline-offset: 0.2em;
+}
+
+button,
+input,
+select,
+textarea {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  font: inherit;
+  color: inherit;
+  accent-color: var(--color-primary);
+}
+
+button,
+input,
+select {
+  min-block-size: 2.75rem;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  min-block-size: auto;
+}
+
+textarea {
+  resize: vertical;
+}
+
+button:enabled,
+input[type='button']:enabled,
+input[type='submit']:enabled,
+input[type='reset']:enabled {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+
+img,
+video,
+svg {
+  max-inline-size: 100%;
+}
+
+img,
+video {
+  block-size: auto;
+}
