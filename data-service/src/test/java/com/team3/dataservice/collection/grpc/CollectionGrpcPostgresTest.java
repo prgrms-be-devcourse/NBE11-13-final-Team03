@@ -1,6 +1,12 @@
 package com.team3.dataservice.collection.grpc;
 
 import com.team3.contracts.collection.v1.*;
+import com.team3.dataservice.collection.domain.entity.ExternalSource;
+import com.team3.dataservice.collection.domain.entity.SyncHistory;
+import com.team3.dataservice.collection.domain.repository.ExternalSourceRepository;
+import com.team3.dataservice.collection.domain.repository.SyncHistoryRepository;
+import com.team3.dataservice.collection.domain.RecordResultType;
+import com.team3.dataservice.collection.dto.response.SyncPageFailureResponse;
 import com.team3.dataservice.collection.service.ManualSyncWorker;
 import com.team3.dataservice.collection.service.RawRecordFingerprint;
 import com.team3.dataservice.collection.service.SyncJobService;
@@ -43,8 +49,8 @@ class CollectionGrpcPostgresTest {
     }
     @Autowired GrpcServerLifecycle lifecycle;
     @Autowired JdbcTemplate db;
-    @Autowired com.team3.dataservice.collection.domain.repository.ExternalSourceRepository sources;
-    @Autowired com.team3.dataservice.collection.domain.repository.SyncHistoryRepository histories;
+    @Autowired ExternalSourceRepository sources;
+    @Autowired SyncHistoryRepository histories;
     @Autowired SyncJobService jobs;
     @Autowired CollectionProtoMapper mapper;
     @Autowired RawRecordFingerprint fingerprint;
@@ -139,18 +145,18 @@ class CollectionGrpcPostgresTest {
     void listsEveryStatusByKoreanDateWithStableNewestFirstOrder() {
         var from = OffsetDateTime.parse("2026-10-20T15:00:00Z");
         var until = from.plusDays(1);
-        var youth = sources.save(new com.team3.dataservice.collection.domain.entity.ExternalSource(
+        var youth = sources.save(new ExternalSource(
                 "YOUTH_POLICY", "youth", "https://example.test", true, from));
-        var employment = sources.save(new com.team3.dataservice.collection.domain.entity.ExternalSource(
+        var employment = sources.save(new ExternalSource(
                 "EMPLOYMENT24", "employment", "https://example.test", true, from));
-        history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.FAILED, from.minusNanos(1000));
-        var success = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.SUCCESS, from);
-        var pending = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.PENDING, from.plusHours(1));
-        var running = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.RUNNING, from.plusHours(2));
-        var partial = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.PARTIAL_SUCCESS, from.plusHours(3));
-        var failed = history(employment, com.team3.dataservice.collection.domain.SyncJobStatus.FAILED, until.minusNanos(1000));
-        var interrupted = history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.INTERRUPTED, until.minusNanos(1000));
-        history(youth, com.team3.dataservice.collection.domain.SyncJobStatus.SUCCESS, until);
+        history(youth, SyncJobStatus.FAILED, from.minusNanos(1000));
+        var success = history(youth, SyncJobStatus.SUCCESS, from);
+        var pending = history(youth, SyncJobStatus.PENDING, from.plusHours(1));
+        var running = history(youth, SyncJobStatus.RUNNING, from.plusHours(2));
+        var partial = history(youth, SyncJobStatus.PARTIAL_SUCCESS, from.plusHours(3));
+        var failed = history(employment, SyncJobStatus.FAILED, until.minusNanos(1000));
+        var interrupted = history(youth, SyncJobStatus.INTERRUPTED, until.minusNanos(1000));
+        history(youth, SyncJobStatus.SUCCESS, until);
         var result = client().listSyncJobsByDate(ListSyncJobsByDateRequest.newBuilder().setDate("2026-10-21").build());
         assertEquals(java.util.List.of(interrupted.getId(), failed.getId(), partial.getId(), running.getId(), pending.getId(), success.getId()),
                 result.getJobsList().stream().map(SyncJob::getJobId).toList());
@@ -163,23 +169,23 @@ class CollectionGrpcPostgresTest {
         assertFalse(result.getJobs(3).hasCompletedAt());
     }
 
-    private com.team3.dataservice.collection.domain.entity.SyncHistory history(
-            com.team3.dataservice.collection.domain.entity.ExternalSource source,
-            com.team3.dataservice.collection.domain.SyncJobStatus status, OffsetDateTime at) {
-        var value = com.team3.dataservice.collection.domain.entity.SyncHistory.pending(source, "SCHEDULED", at);
+    private SyncHistory history(
+            ExternalSource source,
+            SyncJobStatus status, OffsetDateTime at) {
+        var value = SyncHistory.pending(source, "SCHEDULED", at);
         switch (status) {
             case RUNNING -> value.start();
             case SUCCESS, PARTIAL_SUCCESS -> {
                 value.start();
-                if (status == com.team3.dataservice.collection.domain.SyncJobStatus.PARTIAL_SUCCESS) {
-                    value.recordSuccess(com.team3.dataservice.collection.domain.RecordResultType.CREATED);
-                    value.recordCollection(1, java.util.List.of(new com.team3.dataservice.collection.dto.response.SyncPageFailureResponse(
+                if (status == SyncJobStatus.PARTIAL_SUCCESS) {
+                    value.recordSuccess(RecordResultType.CREATED);
+                    value.recordCollection(1, java.util.List.of(new SyncPageFailureResponse(
                             2, "HTTP_500", "upstream error", true)), java.util.List.of(), java.util.List.of());
                 }
-                value.finish(status == com.team3.dataservice.collection.domain.SyncJobStatus.SUCCESS, at.plusMinutes(1));
+                value.finish(status == SyncJobStatus.SUCCESS, at.plusMinutes(1));
             }
             case FAILED, INTERRUPTED -> value.fail("test failure",
-                    status == com.team3.dataservice.collection.domain.SyncJobStatus.INTERRUPTED, at.plusMinutes(1));
+                    status == SyncJobStatus.INTERRUPTED, at.plusMinutes(1));
             default -> { }
         }
         return histories.save(value);
@@ -223,10 +229,10 @@ class CollectionGrpcPostgresTest {
     @Test
     void concurrentFirstObservationsAcrossExecutionsProduceOneSnapshot() throws Exception {
         var at = OffsetDateTime.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
-        var source = sources.save(new com.team3.dataservice.collection.domain.entity.ExternalSource(
+        var source = sources.save(new ExternalSource(
                 "YOUTH_POLICY", "youth", "https://example.test", true, at.minusSeconds(2)));
-        long firstId = histories.save(new com.team3.dataservice.collection.domain.entity.SyncHistory(source, "FULL", at.minusSeconds(1))).getId();
-        long secondId = histories.save(new com.team3.dataservice.collection.domain.entity.SyncHistory(source, "FULL", at.minusSeconds(1))).getId();
+        long firstId = histories.save(new SyncHistory(source, "FULL", at.minusSeconds(1))).getId();
+        long secondId = histories.save(new SyncHistory(source, "FULL", at.minusSeconds(1))).getId();
         var barrier = new java.util.concurrent.CyclicBarrier(2);
         try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
             var first = executor.submit(() -> { barrier.await(10, TimeUnit.SECONDS); return client().saveRawRecord(raw(firstId, "{\"value\":\"A\"}", at)).getRawRecordId(); });
