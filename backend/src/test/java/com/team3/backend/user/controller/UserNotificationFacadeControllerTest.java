@@ -129,6 +129,16 @@ class UserNotificationFacadeControllerTest {
         verifyNoInteractions(client);
     }
 
+    @Test
+    void tombstoneRejectionIs410AndNotAnOutageOrZeroCount() throws Exception {
+        when(client.unread(7)).thenReturn(response(410, "{\"code\":\"USER_WITHDRAWN\"}"));
+        when(client.settings(7)).thenReturn(response(410, "{\"code\":\"USER_WITHDRAWN\"}"));
+        mvc.perform(get("/api/notifications/unread-count").with(user(principal)))
+                .andExpect(status().isGone()).andExpect(jsonPath("$.code").value("USER_WITHDRAWN"));
+        mvc.perform(get("/api/users/me/notification-settings").with(user(principal)))
+                .andExpect(status().isGone()).andExpect(jsonPath("$.code").value("USER_WITHDRAWN"));
+    }
+
     private Response response(int status, String body) {
         return Response.builder().status(status).reason("test").headers(Map.of())
                 .request(Request.create(Request.HttpMethod.GET, "http://test", Map.of(), null, StandardCharsets.UTF_8, null))

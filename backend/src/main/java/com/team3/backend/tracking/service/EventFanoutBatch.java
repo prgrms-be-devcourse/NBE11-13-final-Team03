@@ -9,6 +9,8 @@ import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceR
 import com.team3.backend.tracking.config.EventFanoutProperties;
 import com.team3.backend.tracking.domain.model.EventFanoutExecution;
 import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
+import com.team3.backend.user.domain.repository.UserRepository;
+import com.team3.backend.user.domain.entity.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -28,6 +30,7 @@ public class EventFanoutBatch {
     private final DateNotificationMessageFactory messages;
     private final EventFanoutProperties properties;
     private final Clock clock;
+    private final UserRepository users;
 
     /** Cursor, Outbox inserts and heartbeat/finish commit or roll back together. */
     @Transactional
@@ -61,7 +64,10 @@ public class EventFanoutBatch {
             event.complete(clock.instant());
             return true;
         }
-        var saved = preferences.lockSavedForNotification(event.getOpportunity().getId(), userIds);
+        // Withdrawal locks the User before cancelling Outbox/deleting preferences. Keep that lock order here too.
+        var liveUsers = users.lockNotificationRecipients(userIds).stream().map(User::getId).toList();
+        var saved = liveUsers.isEmpty() ? java.util.List.<com.team3.backend.preference.domain.entity.UserOpportunityPreference>of()
+                : preferences.lockSavedForNotification(event.getOpportunity().getId(), liveUsers);
         // One lookup per page; the UNIQUE(dedup_key) constraint remains the actual guard.
         var existing = saved.isEmpty() ? java.util.Set.<String>of() : outboxes.findExistingDedupKeys(saved.stream()
                 .map(p -> OutboxEvent.notificationDedupKey(event.getEventId(), p.getUser().getId())).toList());

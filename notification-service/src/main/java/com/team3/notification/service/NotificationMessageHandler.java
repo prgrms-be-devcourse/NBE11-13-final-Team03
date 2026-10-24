@@ -7,10 +7,8 @@ import org.springframework.stereotype.Service;
 import java.util.Set;
 
 /**
- * 알림 요청 메시지를 검증하고 인앱 알림과 소비 기록을 저장한다.
- * 아직 사용자 수신 설정과 탈퇴(Tombstone) 차단이 없다. IN_APP은 기본 허용, PUSH는 CHANNEL_DISABLED로 기록만 한다.
- * 이 Handler를 운영 수신 경로(HTTP·SQS)에 연결해 실제 발송을 열기 전에 두 기능을 먼저 추가한다
- * (docs/notification-inbox.md).
+ * 알림 요청과 탈퇴 제어 메시지의 공통 진입점. 수신 설정·Tombstone 차단을 적용한다.
+ * PUSH Delivery는 수신 트랜잭션에 연결하며 FCM은 별도 Worker에서 처리한다. 실제 활성화는 별도 검증 후 진행한다.
  */
 @Service
 public class NotificationMessageHandler {
@@ -20,17 +18,20 @@ public class NotificationMessageHandler {
     private final NotificationMessageValidator validator;
     private final NotificationMessageFingerprint fingerprints;
     private final NotificationReceiveTransaction transaction;
+    private final UserWithdrawalHandler withdrawals;
 
     public NotificationMessageHandler(NotificationMessageDecoder decoder, NotificationMessageValidator validator,
                                       NotificationMessageFingerprint fingerprints,
-                                      NotificationReceiveTransaction transaction) {
+                                      NotificationReceiveTransaction transaction, UserWithdrawalHandler withdrawals) {
         this.decoder = decoder;
         this.validator = validator;
         this.fingerprints = fingerprints;
         this.transaction = transaction;
+        this.withdrawals = withdrawals;
     }
 
     public NotificationReceptionResult handle(String json) {
+        if (decoder.isWithdrawal(json)) return withdrawals.handle(decoder.decodeWithdrawal(json));
         return handle(decoder.decode(json));
     }
 

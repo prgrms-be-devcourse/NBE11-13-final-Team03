@@ -14,6 +14,7 @@ import com.team3.backend.tracking.domain.entity.OpportunityEventType;
 import com.team3.backend.tracking.domain.model.EventFanoutExecution;
 import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
 import com.team3.backend.user.domain.entity.User;
+import com.team3.backend.user.domain.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -40,9 +41,10 @@ class EventFanoutBatchTest {
     private final OutboxEventRepository outboxes = mock(OutboxEventRepository.class);
     private final DateNotificationMessageFactory messages = mock(DateNotificationMessageFactory.class);
     private final Clock clock = mock(Clock.class);
+    private final UserRepository users = mock(UserRepository.class);
     private final EventFanoutBatch batch = new EventFanoutBatch(events, opportunities, windows, preferences, outboxes,
             messages, new EventFanoutProperties(true, 500, 10, Duration.ofMinutes(30), Duration.ofMinutes(1), 5),
-            clock);
+            clock, users);
 
     @Test
     void expiryInsideAPageEndsTheFanoutInsteadOfSkippingTheRestSilently() {
@@ -66,6 +68,8 @@ class EventFanoutBatchTest {
         when(messages.prepare(eq(event), eq(opportunity), any(), any())).thenReturn(Optional.of(prepared));
         when(preferences.findSavedUserIdsAfter(eq(10L), anyLong(), any())).thenReturn(List.of(1L, 2L, 3L));
         var savedUsers = List.of(saved(1L), saved(2L), saved(3L));
+        var liveUsers = savedUsers.stream().map(UserOpportunityPreference::getUser).toList();
+        when(users.lockNotificationRecipients(List.of(1L, 2L, 3L))).thenReturn(liveUsers);
         when(preferences.lockSavedForNotification(eq(10L), any())).thenReturn(savedUsers);
         when(messages.create(eq(event), eq(1L), eq(prepared), any())).thenReturn(mock(OutboxEvent.class));
         // prepare() and the first user are before expiry; the clock passes it before the second user.

@@ -82,6 +82,21 @@ class HttpNotificationPublisherTest {
     }
 
     @Test
+    void withdrawalRequiresItsOwnDurableReceiptAndAcceptsWithdrawnSuppression() throws Exception {
+        String control = resource("user-withdrawn-v1.json");
+        var id = UUID.fromString("11111111-1111-4111-8111-111111111112");
+        var controlPublication = new OutboxPublication(2L, id, UUID.randomUUID(), control);
+        response.set("{\"messageId\":\"" + id + "\",\"status\":\"CREATED\",\"duplicateMessage\":false}");
+        withPublisher(publisher -> {
+            assertThatThrownBy(() -> publisher.publish(controlPublication)).isInstanceOf(NotificationPublicationException.class);
+            response.set("{\"messageId\":\"" + id + "\",\"status\":\"WITHDRAWN\",\"duplicateMessage\":false}");
+            assertThatCode(() -> publisher.publish(controlPublication)).doesNotThrowAnyException();
+        });
+        response.set(resource("notification-receipt-v1.json").replace("CREATED", "WITHDRAWN"));
+        withPublisher(publisher -> assertThatCode(() -> publisher.publish(publication())).doesNotThrowAnyException());
+    }
+
+    @Test
     void rejectsEmptyWrongOrMalformedSuccessReceipts() {
         withPublisher(publisher -> {
             for (String invalid : new String[]{"", "{}", "<html>OK</html>",

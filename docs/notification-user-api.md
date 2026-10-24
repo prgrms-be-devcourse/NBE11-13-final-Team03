@@ -1,5 +1,9 @@
 # 알림 사용자 API — 7단계
 
+> 8단계 탈퇴 연동의 Tombstone·410 계약과 추가 DDL은 [notification-withdrawal.md](notification-withdrawal.md)를 따른다.
+> 이 문서의 "Tombstone 미구현" 등 제외 범위는 7단계 시점의 이력이다.
+> 8단계 푸시 전용 알림의 인앱 비노출과 FCM/Delivery 설정은 [notification-delivery.md](notification-delivery.md)를 따른다.
+
 ## 경계
 
 사용자 → ALB/nginx → backend(쿠키 JWT 인증·기존 CSRF) → OpenFeign → notification-service.
