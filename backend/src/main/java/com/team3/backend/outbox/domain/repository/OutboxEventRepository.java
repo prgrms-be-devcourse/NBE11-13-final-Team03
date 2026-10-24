@@ -10,6 +10,8 @@ import java.util.Collection;
 import java.util.Set;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
+    java.util.Optional<OutboxEvent> findByDedupKey(String dedupKey);
+
     /** Payload is the complete envelope, so the business deadline is nested under payload. */
     @Modifying(flushAutomatically = true)
     @Query(value = """

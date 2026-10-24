@@ -44,6 +44,23 @@ class NotificationMessageContractTest {
     }
 
     @Test
+    void readsProvisionalEligibilityContractAndAllThreeSupportedTypes() throws Exception {
+        var json = new org.springframework.core.io.ClassPathResource("contracts/notification-eligibility-v1.json")
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        var message = decoder.decode(json);
+        assertThatCode(() -> validator.validate(message)).doesNotThrowAnyException();
+        assertThat(message.type()).isEqualTo(NotificationType.BECAME_ELIGIBLE);
+        assertThat(message.payload()).containsEntry("mappingPolicyVersion", "development-provisional-v1");
+        for (String type : List.of("ELIGIBILITY_DOWNGRADED", "ELIGIBILITY_REVIEW_REQUIRED")) {
+            var inAppOnly = decoder.decode(json.replace("BECAME_ELIGIBLE", type)
+                    .replace("[\"IN_APP\", \"PUSH\"]", "[\"IN_APP\"]"));
+            assertThatCode(() -> validator.validate(inAppOnly)).doesNotThrowAnyException();
+            assertThat(inAppOnly.type().name()).isEqualTo(type);
+            assertThat(inAppOnly.channels()).containsExactly(NotificationChannel.IN_APP);
+        }
+    }
+
+    @Test
     void rejectsInvalidAndUnsupportedEnvelopesBeforePersistence() {
         var missing = new HashMap<String, Object>();
         missing.put("messageId", null);

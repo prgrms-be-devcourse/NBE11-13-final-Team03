@@ -185,3 +185,104 @@ SUPERSEDED 종료 상태 도입은 이번에 확정하지 않았다. 모든 버�
 버전 추적 외에도 기존 미확정 항목인 푸시 슬롯·묶음/빈도 제한, Tombstone 보관 기간·비활성 Endpoint 정리,
 SQS Visibility/재전달 횟수/보존 기간·DLQ 복구, 배포/IAM·FCM 자격증명 및 실제 발송 검증은 별도로 남아 있다.
 이 목록에 적었다는 이유만으로 운영값이나 발송 활성화가 승인된 것은 아니다.
+
+## 10단계 후속 — 개발용 잠정 계약 (팀 협의 전)
+
+위 미확정 기록은 팀 합의 여부에 대한 것으로 유지한다. 후속 개발에서는 다음 잠정안을 사용하도록 추적 담당이 승인했다.
+이는 팀 정책 확정·운영 활성화 승인이 아니다. 월요일 팀 논의에서 항목별 확정/수정/보류를 검토한다.
+
+### 판정 상태 매핑: development-provisional-v1
+
+| 이전 상태 | 변경 상태 | 개발용 분류 | 요청 채널 |
+| --- | --- | --- | --- |
+| NOT_ELIGIBLE | ELIGIBLE | BECAME_ELIGIBLE | IN_APP, PUSH |
+| ELIGIBLE | NOT_ELIGIBLE | ELIGIBILITY_DOWNGRADED | IN_APP |
+| ELIGIBLE | POSSIBLY_ELIGIBLE | ELIGIBILITY_REVIEW_REQUIRED | IN_APP |
+| 동일 상태 | 동일 상태 | NO_CHANGE | 없음 |
+| 그 외 변화 | 그 외 변화 | DEFERRED | 없음 |
+
+POSSIBLY_ELIGIBLE과 UNKNOWN은 같은 의미가 아니다. 특히 ELIGIBLE → UNKNOWN을 자격 상실이나
+추가 확인 필요로 임의 변환하지 않는다. 프로필/판정이 없는 것도 UNKNOWN으로 대체하지 않는다.
+DEFERRED는 정책 미확정에 따른 보류이며, NO_CHANGE나 버전 분석 완료를 뜻하지 않는다.
+
+ProvisionalEligibilityTransitionClassifier는 상태 쌍만 받는 순수 분류기다. 입력은 같은 프로필·판정 규칙·기준일의
+버전 비교 결과여야 하며, 실제 요청 생성 전 최신 프로필·정책에서 의미를 재검증해야 한다.
+현재 이벤트 생성·Fan-out·Worker에 호출자를 연결하지 않았고, 요청 채널이 있어도 발송을 수행하지 않는다.
+실제 채널은 기존 계약대로 사용자 수신 설정과의 교집합을 적용한다.
+
+### 초기 적재와 개발 범위
+
+- 초기 적재분은 늦게 복구돼도 기준선으로 처리하고 초기 변경 알림을 생략하는 잠정 방향을 유지한다.
+- 초기 적재 여부가 불명확하면 임의로 일반 갱신으로 보지 않고 판단 대기로 둔다.
+- 구체 필드·저장 위치·초기화 완료 조건은 data-service 담당자와 협의 전이다. 실패 복구 코드는 변경하지 않는다.
+- 모든 버전의 순차 비교, 분석 완료·복구와 최신 재검증 연결은 여전히 후속 구현이다.
+- 이번 승인에 11단계 푸시 슬롯·묶음·횟수 정책은 포함하지 않는다.
+
+### 검증 상태
+
+새 분류기 테스트는 16개 상태 조합과 채널·보류/무변경 구분·null 거부·불변 채널 목록을 검증한다(총 20개, skip/failure/error 0 확인).
+기존 동일 입력 비교 테스트 6개·최신 의존성 경계 테스트 3개도 함께 통과했다.
+기존 10단계 검증 표는 PR #67 병합 코드에 대한 결과이며 이 후속 변경의 실행 결과가 아니다.
+
+### 최신 프로필·정책 재검증 — 읽기 근거 반환
+
+EligibilityNotificationRevalidationService는 기존 비교 근거와 명시적인 재검증 기준일을 받는다.
+최신 프로필을 한 번 조회하고 이전/변경/현재 버전을 한 번의 EligibilityEvaluator 호출로 판정한다.
+현재 버전과 변경 버전이 같으면 해당 버전 ID는 중복 평가하지 않는다.
+
+- 원래 비교가 지원된 잠정 후보이며, 최신 프로필로 다시 비교해도 같은 알림 유형이 나와야 한다.
+- 최신 정책의 판정 상태도 변경 버전의 재판정 상태와 같아야 후보 의미가 유지된다.
+- 프로필 변화로 이전 정책에서도 이미 가능해졌다면 현재 정책이 ELIGIBLE이어도 기존 “정책 변경으로 가능해짐” 후보는 유지하지 않는다.
+- 프로필 없음·정책/버전 없음·판정 규칙 변경·정규화 규칙 변경·변화 의미 소멸을 구분해서 반환한다.
+- 원본 비교와 최신 프로필로 재평가한 비교, 재검증 정책 버전 ID·판정 근거·잠정 매핑 정책 버전을 결과로 보존한다.
+- EligibilityResult 캐시의 조회/갱신, 이벤트·Outbox 저장은 하지 않는다. 새 서비스의 자동 호출자는 없다.
+
+이 결과는 읽은 시점의 후보 근거이지 저장 시점까지 유효한 발송 승인이 아니다.
+향후 Outbox 트랜잭션에서 저장 여부·탈퇴·정책/프로필 동시 변경, 신청기간/만료·수신 채널을 함께 검증하고
+근거 영속화를 연결해야 한다. 현재 코드는 이 경쟁 조건의 원자적 해결이나 순차 Worker 구현을 완료한 것이 아니다.
+재검증 단위 테스트 12개와 잠정 분류기 20개·의존성 경계 3개는 skip/failure/error 0을 확인했다.
+
+### 실제 PostgreSQL·판정기 통합 검증
+
+EligibilityNotificationRevalidationPostgresTest는 일회용 Testcontainers PostgreSQL과 실제 Repository·EligibilityEvaluator·EligibilityEngine을 사용한다.
+정규화/수집 서비스를 import하지 않고 도메인 행으로 버전별 자격조건·신청기간·프로필을 준비한다.
+
+- 실제 연령 조건의 NOT_ELIGIBLE → ELIGIBLE 변화와 근거 반환
+- 최신 커밋된 프로필 변경, 최신 정책의 불충족/판정 불명에 따른 후보 무효화
+- 비정형 조건의 추가 확인 필요, 정규화 규칙 변경 억제, 프로필 삭제 구분
+- 생일이 지나 재검증 기준일이 바뀌는 경우의 동일 날짜 적용
+- 일부러 다른 상태를 저장한 EligibilityResult 캐시가 비교를 지배하거나 덮어써지지 않음
+- Outbox·이벤트·변경 이력·버전 기록을 생성하지 않음
+
+이 절의 기존 통합 테스트 8개는 skip/failure/error 0을 확인했다. backend 전체 테스트·bootJar 성공,
+기존 조건부 PostgreSQL 19개도 별도 실행에서 skip/failure/error 0을 확인했다.
+아래 Outbox 연결 추가 전의 검증 결과이며 실제 업무 DB를 사용하지 않았다.
+
+### 사용자별 Outbox — 잠정 계약의 명시적 저장 경로
+
+EligibilityOutboxTransaction은 `app.tracking.eligibility-outbox-enabled=true`인 경우에만 등록된다.
+기본값/실제 설정은 비활성 상태이며, 통합 테스트에서만 속성을 지정한다. 이 옵션은 Publisher/Consumer/Push 플래그와 별개다.
+자동 이벤트 생성·순차 Worker에 연결하지 않았고 기존 날짜 Fan-out의 ELIGIBILITY_CHANGED 미지원 동작도 바꾸지 않았다.
+새 경로는 올바른 버전 쌍을 가진 영속 ELIGIBILITY_CHANGED 이벤트를 명시적으로 전달해야만 실행된다.
+
+- 이벤트 → 현재 정책 → 사용자 → 저장 상태 → 프로필 순서로 잠근다. 사용자 행은 탈퇴/저장 변경과 같은 FOR UPDATE,
+  정책·저장 상태·프로필은 공유 잠금으로 재검증부터 Outbox 커밋까지 변경을 막는다.
+- 저장·숨김을 함께 설정한 사용자도 대상이다. 사용자 없음·저장 해제·프로필 없음은 요청을 생성하지 않는다.
+- 원본 이벤트의 정책/변경 버전과 from/to payload를 검증하고 최신 재검증을 같은 트랜잭션에서 실행한다.
+- 보수적인 개발용 가드로 최신 신청 상태가 CLOSED/UNKNOWN이면 요청을 생성하지 않는다. OPEN/ALWAYS_OPEN/UPCOMING만 통과한다.
+  이 세부 가드도 팀 정책 검토 대상이며, 판정의 ELIGIBLE과 신청 상태 OPEN을 같은 개념으로 취급하지 않는다.
+- 같은 `(userId, sourceEventId)`의 재실행은 기존 Outbox ID를 반환한다. 수신 측 UNIQUE/소비 기록 계약은 그대로다.
+- CANDIDATE일 때 사용자별 메시지와 원본/최신 비교의 버전·프로필·규칙·기준일·상태·설명, 매핑 정책 버전을
+  Outbox envelope의 payload에 함께 저장한다. 원본 프로필 필드와 전체 EligibilityResult를 복제하지 않는다.
+- 만료는 source event의 occurredAt + 7일이다. 재실행으로 만료를 연장하지 않으며 기준일이 처리 도중 바뀌면 롤백/재시도한다.
+- 새 Notification 타입은 BECAME_ELIGIBLE / ELIGIBILITY_DOWNGRADED / ELIGIBILITY_REVIEW_REQUIRED이며,
+  앞의 잠정 채널 매핑을 사용한다. 공유 대표 표본은 contracts/notification-eligibility-v1.json이다.
+
+Outbox 생성과 근거 보존은 같은 행의 원자적 INSERT다. profile/정책/저장/탈퇴 경쟁은 이 명시적 트랜잭션 경로에서만
+잠금으로 보호되며, 독립적인 읽기 재검증 호출 자체가 저장까지의 신선도를 보장하는 것은 아니다.
+기존 Outbox Publisher와 Notification의 동의·Tombstone·Delivery 확인은 그대로 사용한다.
+운영 활성화 전 Notification의 새 타입 지원을 먼저 배포하고 팀 정책·초기 적재 계약을 확정해야 한다.
+
+추가 검증은 실행 전이다: 메시지 Factory 5개, 기본 비활성화 2개,
+확장된 EligibilityNotificationRevalidationPostgresTest 총 17개(기존 8개 + 저장/실패/중복/잠금 경쟁 9개),
+Notification 새 타입 계약·HTTP 저장/재전달 멱등성. 순차 Worker와 분석 완료/복구는 여전히 미연결이다.
