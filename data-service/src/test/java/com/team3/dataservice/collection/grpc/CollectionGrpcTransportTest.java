@@ -96,4 +96,25 @@ class CollectionGrpcTransportTest {
             channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
         }
     }
+    @Test
+    void configuredInboundLimitAcceptsRequestLargerThanDefaultFourMiB() throws Exception {
+        var now = OffsetDateTime.now();
+        when(records.save(any())).thenReturn(new RawRecordResponse(9L, "YOUTH_POLICY", "large", "hash",
+                now, now, json.readTree("{}")));
+        var channel = Grpc.newChannelBuilderForAddress("localhost", lifecycle.getPort(), InsecureChannelCredentials.create()).build();
+        try {
+            var headers = new Metadata();
+            headers.put(InternalKeyServerInterceptor.INTERNAL_KEY, "test-internal-api-key");
+            var stub = CollectionServiceGrpc.newBlockingStub(channel)
+                    .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers)).withDeadlineAfter(5, TimeUnit.SECONDS);
+            var payload = "{\"padding\":\"" + "x".repeat(5 * 1024 * 1024) + "\"}";
+            var response = stub.saveRawRecord(SaveRawRecordRequest.newBuilder().setSyncId(7).setExternalId("large")
+                    .setCollectedAt(mapper.timestamp(now)).setPayloadJson(payload).build());
+            assertEquals(9, response.getRawRecordId());
+            verify(records).save(argThat(request -> request.payload().path("padding").asString().length() == 5 * 1024 * 1024));
+        } finally {
+            channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
 }
