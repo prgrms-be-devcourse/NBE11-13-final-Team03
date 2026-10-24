@@ -41,14 +41,17 @@ endpoint override는 호스트 실행용 loopback으로 제한하며 운영에�
 - `NotificationSqsConfigTest`: 기본 비활성화·단일 Publisher·HTTP 설정 독립·필수 설정·Standard URL 검증
 - 기존 `NotificationPublisherConfigTest`, `HttpNotificationPublisherTest`, `OutboxPublicationWorkerTest` 회귀 검증
 
-Publisher 설정·발송 및 기존 HTTP/Outbox Worker 테스트는 사용자가 실행 후 성공을 전달했다.
-Consumer/Topology/설정 단위 테스트도 사용자가 실행 후 성공을 전달했다.
-Notification PostgreSQL/LocalStack 통합 테스트 7개도 사용자가 재실행 후 성공을 전달했다.
-Application Outbox/SQS 통합 테스트 6개도 사용자가 실행 후 성공을 전달했다.
-2026-10-25 사용자 검증: 두 프로젝트 전체 테스트와 Boot JAR 빌드 성공,
-Notification 전체 테스트의 스킵·실패·오류 0, Backend 조건부 PostgreSQL 테스트 19개 별도 재실행 성공 전달 및 스킵 0 확인,
-두 JAR의 개발·테스트용 파일 포함 검사에서 해당 파일 없음.
-이는 사용자 실행 결과에 근거하며 에이전트가 Gradle을 직접 실행한 결과가 아니다.
+2026-10-25 로컬 검증:
+
+- Publisher 설정·발송 및 기존 HTTP/Outbox Worker 회귀 테스트 통과
+- Consumer/Topology/설정 단위 테스트 통과
+- Notification PostgreSQL/LocalStack 통합 테스트 7개 통과
+- Application Outbox/SQS 통합 테스트 6개 통과
+- 두 프로젝트 전체 테스트와 Boot JAR 빌드 성공
+- Notification 전체 테스트의 스킵·실패·오류 0
+- Backend 조건부 PostgreSQL 테스트 19개 별도 실행 통과, 스킵 0
+- 두 JAR에 검사 대상 개발·테스트용 파일이 포함되지 않음
+
 AWS 실통신·운영 DLQ 이동은 검증하지 않았다. CloudFormation 템플릿은 YAML 문법만 확인했고 배포 검증은 하지 않았다.
 
 ## Consumer
@@ -97,7 +100,7 @@ LocalStack 이미지는 `localstack/localstack:4.12.0`으로 고정하고 SQS만
 테스트 안의 큐 생성·purge·visibility 단축은 폐기되는 테스트 컨테이너에만 적용하며 운영 Consumer에는 포함하지 않는다.
 실제 로컬 DB·`.env`·AWS 큐·Firebase에는 접근하지 않는다.
 
-Notification 검증 항목(사용자 실행 성공 전달):
+Notification 로컬 통합 검증 항목:
 
 - 삭제 직전 별도 PostgreSQL 연결에서 Notification·Delivery·소비 기록의 커밋 확인
 - 삭제 실패 후 새 receiptHandle 재전달과 중복 저장 방지
@@ -111,11 +114,11 @@ Notification 검증 항목(사용자 실행 성공 전달):
 두 독립 프로젝트를 함께 기동한 Publisher→Consumer 전체 흐름은 위 단일 Notification 통합 테스트와 별개의 검증이다.
 이를 위한 격리된 실행 구성과 순서는 [두 서버 로컬 E2E 안내](../scripts/notification-sqs-e2e/README.md)에 추가했다.
 기존 개발 DB/.env와 별도 포트의 일회용 DB/큐를 사용한다.
-2026-10-25 사용자가 두 독립 Boot JAR를 실행하여 Outbox PUBLISHED → 소비 기록 CREATED 1건 → 인앱 알림 1건 → 큐 Visible/NotVisible 0/0을 확인했다.
-동일 messageId 재발행 뒤 published_at 갱신, 저장 건수 1/1 유지, 큐 0/0과 Notification 로그 duplicateMessage=true를 전달했다.
-이는 사용자 실행 결과에 근거한 로컬 E2E 성공이며 실제 AWS 검증 또는 실제 FCM 발송 성공을 뜻하지 않는다.
+2026-10-25 로컬 E2E 검증: 두 독립 Boot JAR를 실행하여 Outbox PUBLISHED → 소비 기록 CREATED 1건 → 인앱 알림 1건 → 큐 Visible/NotVisible 0/0을 확인했다.
+동일 messageId 재발행 뒤 published_at 갱신, 저장 건수 1/1 유지, 큐 0/0과 Notification 로그 duplicateMessage=true를 확인했다.
+로컬 E2E 성공은 실제 AWS 검증 또는 실제 FCM 발송 성공을 뜻하지 않는다.
 
-`backend`의 `SqsOutboxPostgresTest`도 별도의 일회용 PostgreSQL/LocalStack을 사용한다(사용자 실행 성공 전달).
+`backend`의 `SqsOutboxPostgresTest`도 별도의 일회용 PostgreSQL/LocalStack을 사용한다.
 기존 JPA slice 방식과 Outbox Worker/Store를 재사용하며 Notification Java 클래스에는 의존하지 않는다.
 
 - Outbox 커밋 전 미발행·롤백 미발행과 DB 트랜잭션 밖 SDK 호출

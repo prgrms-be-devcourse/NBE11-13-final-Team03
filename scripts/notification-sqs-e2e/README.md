@@ -68,6 +68,6 @@ docker compose -f scripts/notification-sqs-e2e/compose.yaml -p yon-sqs-e2e down
 
 DB는 tmpfs, SQS는 메모리 저장이므로 종료 시 검증 데이터가 사라진다. 재실행 시 초기화부터 진행한다.
 기존 개발 DB 볼륨이나 AWS 큐는 삭제하지 않는다.
-2026-10-25 사용자 실행 결과: 두 Boot JAR 기동, Outbox PUBLISHED, 소비 기록 CREATED 1건·알림 1건 및 큐 0/0 확인.
+2026-10-25 로컬 검증: 두 Boot JAR 기동, Outbox PUBLISHED, 소비 기록 CREATED 1건·알림 1건 및 큐 0/0 확인.
 동일 메시지 재발행 후 published_at 갱신, 저장 건수 1/1·큐 0/0 유지 및 Notification 로그 duplicateMessage=true 확인.
 실제 AWS/IAM/운영 큐나 FCM 발송 검증과는 구분한다.
