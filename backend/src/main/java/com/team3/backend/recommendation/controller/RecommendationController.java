@@ -34,7 +34,7 @@ public class RecommendationController {
             @ApiResponse(responseCode = "401", description = "Access Token이 없거나 유효하지 않은 경우"),
             @ApiResponse(responseCode = "404", description = "판정 프로필이 없는 경우 (ELIGIBILITY_001)")
     })
-    @GetMapping("/api/opportunities/recommendations")
+    @GetMapping("/api/users/me/recommendations")
     public ResponseEntity<List<RecommendationItemDto>> recommendations(
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
