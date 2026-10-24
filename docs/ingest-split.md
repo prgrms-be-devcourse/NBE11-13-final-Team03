@@ -33,7 +33,7 @@
 
 ## 수집 내부 API gRPC 전환 — PR B
 
-- 작업 기준은 #45 브랜치다. #45·#53 및 #39의 선행 작업이 main에 반영되면 PR 기준을 main으로 변경하고 검증한다.
+- 최신 main으로 rebase했다. 서버 PR #53을 먼저 배포하고 backend를 전환한다.
 - #53의 `contracts/proto/collection/v1/collection.proto`를 동일한 내용으로 사용한다. 서버 구현은 #53 소유다.
 - backend의 `/api/admin/collection/**` 5개 경로와 ADMIN 권한, HTTP 응답 DTO는 유지하고 내부 Feign 호출만 gRPC로 바꾼다.
 - `totalCount`는 항상 null, `payloadHash`는 요청 호환용으로 받되 서버가 계산한다.
@@ -65,9 +65,10 @@ spring:
 `yon.data-service.internal-api-key`는 기존 DATA_SERVICE_INTERNAL_API_KEY를 사용한다.
 DATA_SERVICE_BASE_URL 및 data-service용 Feign timeout 설정은 제거한다.
 OpenFeign·Spring Cloud BOM·EnableFeignClients는 #39의 알림 호출을 위해 유지한다.
-운영 compose가 준비되면 DATA_SERVICE_GRPC_ADDRESS=static://data-service:9092를 backend에 전달한다.
-이 포트는 내부 네트워크에만 두고, 호스트를 분리할 때 TLS를 적용한다.
+로컬 compose는 DATA_SERVICE_GRPC_ADDRESS=static://data-service:9092를 주입한다.
+운영은 분리된 데이터 서버의 사설 IP(static://<데이터 서버 사설 IP>:9092)를 사용한다.
+평문은 기존 사설망·보안 그룹·내부 키 전제로 유지하며 TLS 필수 여부는 팀 논의가 필요한 미결정 사항이다.
 
 배포 순서는 data-service gRPC 서버(#53) → backend 클라이언트(이 단계) → REST 제거(PR C)다.
 PR B 배포·실제 수집 확인 전에는 REST를 제거하지 않는다.
-현재 분기에는 운영 compose가 없으므로 #49 병합 후 주소 환경변수와 배포 구성을 맞춰야 한다.
+운영 배포 구성은 #56의 deploy/main·deploy/data를 따른다. PR C에서 REST 8082 점검과 매핑을 제거한다.

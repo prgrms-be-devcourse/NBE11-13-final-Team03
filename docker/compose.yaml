@@ -41,7 +41,7 @@ services:
     environment:
       DB_URL: jdbc:postgresql://postgres-db:5432/${DB_NAME:-yon}
       NOTIFICATION_BASE_URL: http://notification-service:8081
-      DATA_SERVICE_BASE_URL: http://data-service:8082
+      DATA_SERVICE_GRPC_ADDRESS: static://data-service:9092
       # Trust X-Forwarded-* from nginx so OAuth redirect URIs use the browser's host:port.
       SERVER_FORWARD_HEADERS_STRATEGY: framework
       TZ: Asia/Seoul

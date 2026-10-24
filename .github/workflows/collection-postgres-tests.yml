@@ -2,7 +2,7 @@ name: Collection PostgreSQL tests
 
 on:
   pull_request:
-    branches: [main, feat/backend-collection-proxy]
+    branches: [main]
     paths:
       - 'contracts/proto/**'
       - 'backend/**'

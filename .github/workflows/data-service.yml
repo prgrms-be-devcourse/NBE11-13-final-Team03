@@ -2,7 +2,7 @@ name: Data service
 
 on:
   pull_request:
-    branches: [main, feat/backend-collection-proxy]
+    branches: [main]
     paths:
       - 'contracts/proto/**'
       - 'data-service/**'
