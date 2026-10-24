@@ -65,9 +65,13 @@ public class UserBehaviorEventService {
         UserBehaviorEventType eventType = request.eventType();
         UserBehaviorSource source = request.source();
         ExternalLinkType linkType = request.linkType();
-        if (eventType == UserBehaviorEventType.SAVE || eventType == UserBehaviorEventType.HIDE
-                || eventType == UserBehaviorEventType.IMPRESSION && source != UserBehaviorSource.RECOMMENDATION
-                || (eventType == UserBehaviorEventType.EXTERNAL_LINK_CLICK) != (linkType != null)) {
+        boolean isInternalOnly = eventType == UserBehaviorEventType.SAVE
+                || eventType == UserBehaviorEventType.HIDE;
+        boolean isInvalidImpression = eventType == UserBehaviorEventType.IMPRESSION
+                && source != UserBehaviorSource.RECOMMENDATION;
+        boolean isInvalidLinkType = (eventType == UserBehaviorEventType.EXTERNAL_LINK_CLICK)
+                != (linkType != null);
+        if (isInternalOnly || isInvalidImpression || isInvalidLinkType) {
             throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
         }
     }
