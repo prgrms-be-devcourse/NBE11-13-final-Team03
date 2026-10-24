@@ -9,6 +9,8 @@
   --color-text-secondary: #68746c;
   --color-border: #e3e8e1;
   --color-surface-muted: #f1f4ef;
+  --color-error: #a33434;
+  --color-input-border: #7d887f;
 
   --font-family-base: 'Pretendard', system-ui, -apple-system, BlinkMacSystemFont,
     'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;

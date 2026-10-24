@@ -1,0 +1,17 @@
+.card {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.default {
+  background: var(--color-surface);
+}
+
+.sage {
+  background: var(--color-primary-soft);
+}
