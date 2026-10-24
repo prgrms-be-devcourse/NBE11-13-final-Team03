@@ -1,6 +1,6 @@
 package com.team3.notification.message;
 
-/** Only the date-event contract implemented by Application phase 4 is accepted for now. */
+/** Application-defined notification types supported by the shared wire contracts. */
 public enum NotificationType {
-    APPLICATION_OPENED, APPLICATION_CLOSED, DEADLINE_SOON
+    APPLICATION_OPENED, APPLICATION_CLOSED, DEADLINE_SOON, DEADLINE_EXTENDED
 }

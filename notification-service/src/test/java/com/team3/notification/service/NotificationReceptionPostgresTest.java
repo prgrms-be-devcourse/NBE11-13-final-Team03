@@ -124,6 +124,19 @@ class NotificationReceptionPostgresTest {
     }
 
     @Test
+    void deadlineExtensionIsPersistedAndHttpReplayIsIdempotent() throws Exception {
+        String json = new ClassPathResource("contracts/notification-deadline-extended-v1.json")
+                .getContentAsString(StandardCharsets.UTF_8);
+        try (var client = HttpClient.newHttpClient()) {
+            assertThat(post(client, json).statusCode()).isEqualTo(200);
+            assertThat(post(client, json).statusCode()).isEqualTo(200);
+        }
+        assertThat(notifications.count()).isEqualTo(1);
+        assertThat(consumed.count()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT type FROM notification.notifications", String.class)).isEqualTo("DEADLINE_EXTENDED");
+    }
+
+    @Test
     void realHttpStorageFailureReturns503AfterAtomicRollbackAndCanBeRetried() throws Exception {
         try (var client = HttpClient.newHttpClient()) {
             jdbc.execute("ALTER TABLE notification.consumed_messages ADD CONSTRAINT reject_http_consume CHECK (user_id <> 7)");

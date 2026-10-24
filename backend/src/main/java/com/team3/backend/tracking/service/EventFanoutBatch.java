@@ -50,7 +50,13 @@ public class EventFanoutBatch {
             event.skipFanout(clock.instant(), "POLICY_UNAVAILABLE");
             return true;
         }
-        var periods = windows.findByVersionId(current.orElseThrow().getCurrentVersion().getId()).stream()
+        var currentWindows = windows.findByVersionId(current.orElseThrow().getCurrentVersion().getId());
+        if (event.getEventType() == com.team3.backend.tracking.domain.entity.OpportunityEventType.DEADLINE_EXTENDED
+                && currentWindows.stream().anyMatch(w -> w.getScope() != null && !w.getScope().isEmpty())) {
+            event.skipFanout(clock.instant(), "POLICY_NOT_RELEVANT_OR_EXPIRED");
+            return true;
+        }
+        var periods = currentWindows.stream()
                 .map(w -> new ApplicationPeriod(w.getPeriodType(), w.getStartDate(), w.getEndDate(),
                         w.getValidationStatus(), w.getPeriodText())).toList();
         var prepared = messages.prepare(event, current.orElseThrow(), periods, clock.instant());

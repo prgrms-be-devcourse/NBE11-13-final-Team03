@@ -10,6 +10,17 @@ import java.util.Collection;
 import java.util.Set;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
+    /** Payload is the complete envelope, so the business deadline is nested under payload. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            update outbox_events set status = 'SKIPPED', last_error = 'POLICY_DEADLINE_CHANGED'
+            where opportunity_id = :opportunityId and event_type = 'NOTIFICATION_REQUESTED'
+              and notification_type = 'DEADLINE_SOON' and status = 'PENDING'
+              and payload #>> '{payload,applicationEndDate}' = :previousEndDate
+            """, nativeQuery = true)
+    int cancelPendingDeadlineNotifications(@Param("opportunityId") Long opportunityId,
+                                          @Param("previousEndDate") String previousEndDate);
+
     @Modifying
     @Query("""
             update OutboxEvent o set o.status = com.team3.backend.outbox.domain.entity.OutboxStatus.SKIPPED,

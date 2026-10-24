@@ -261,10 +261,26 @@ class EventFanoutIntegrationTest {
         subscriber(closed.policyId(), true, false);
         batch.process(coordinator.claim(closed.eventId()).orElseThrow());
         assertThat(outboxes.findAll().getFirst().getPayload().get("channels")).isEqualTo(List.of("IN_APP"));
-        var unsupported = event(OpportunityEventType.DEADLINE_EXTENDED, true);
+        var unsupported = event(OpportunityEventType.ELIGIBILITY_CHANGED, true);
         assertThat(batch.process(coordinator.claim(unsupported.eventId()).orElseThrow())).isTrue();
         assertThat(events.findById(unsupported.eventId()).orElseThrow().getLastError())
                 .isEqualTo("UNSUPPORTED_EVENT_TYPE");
+    }
+
+    @Test
+    void extensionFanoutProducesOneRequestForSavedHiddenUserAndSkipsChangedScope() {
+        var extension = event(OpportunityEventType.DEADLINE_EXTENDED, true);
+        subscriber(extension.policyId(), true, true);
+        var execution = coordinator.claim(extension.eventId()).orElseThrow();
+        batch.process(execution);
+        assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(outboxes.findAll().getFirst().getNotificationType()).isEqualTo("DEADLINE_EXTENDED");
+        assertThat(outboxes.findAll().getFirst().getPayload().get("channels")).isEqualTo(List.of("IN_APP", "PUSH"));
+        var scoped = event(OpportunityEventType.DEADLINE_EXTENDED, true);
+        subscriber(scoped.policyId(), true, false);
+        jdbc.update("UPDATE application_windows SET scope = '{\"round\":\"changed\"}'::jsonb WHERE version_id = ?", scoped.versionId());
+        assertThat(batch.process(coordinator.claim(scoped.eventId()).orElseThrow())).isTrue();
+        assertThat(outboxes.count()).isEqualTo(1);
     }
 
     private Fixture event(OpportunityEventType type, boolean eligible) {
@@ -282,6 +298,10 @@ class EventFanoutIntegrationTest {
             Map<String, Object> payload = type == OpportunityEventType.APPLICATION_CLOSED
                     ? Map.of("endDate", end.toString())
                     : Map.of("threshold", "D-3", "applicationEndDate", end.toString());
+            if (type == OpportunityEventType.DEADLINE_EXTENDED) {
+                payload = Map.of("applicationStartDate", TODAY.minusDays(7).toString(),
+                        "previousApplicationEndDate", end.minusDays(1).toString(), "applicationEndDate", end.toString());
+            }
             var event = OpportunityEvent.create(policy, version, type, TODAY,
                     type + ":" + policy.getId(), payload, eligible,
                     eligible ? null : OpportunityEventSuppressionReason.THRESHOLD_ALREADY_PASSED, NOW);
