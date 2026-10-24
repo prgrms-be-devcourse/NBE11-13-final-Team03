@@ -33,6 +33,17 @@ class NotificationMessageApiTest {
     @MockitoBean NotificationMessageHandler handler;
 
     @Test
+    void withdrawalUsesSameAuthenticatedEndpointAndAcknowledgesOnlyAfterHandlerReturns() throws Exception {
+        String json = new ClassPathResource("contracts/user-withdrawn-v1.json").getContentAsString(StandardCharsets.UTF_8);
+        var id = java.util.UUID.fromString("11111111-1111-4111-8111-111111111112");
+        when(handler.handle(json)).thenReturn(new NotificationReceptionResult(id, ReceptionStatus.WITHDRAWN, null, false));
+        mvc.perform(post(PATH).header("X-INTERNAL-KEY", "test-notification-key")
+                        .contentType(MediaType.APPLICATION_JSON).content(json))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("WITHDRAWN"));
+        verify(handler).handle(json);
+    }
+
+    @Test
     void acceptsOnlyDedicatedKeyAndProducesSharedReceiptContract() throws Exception {
         var message = NotificationMessages.message(Map.of());
         when(handler.handle(any(NotificationRequestedMessage.class))).thenReturn(new NotificationReceptionResult(message.messageId(), ReceptionStatus.CREATED, 1L, false));

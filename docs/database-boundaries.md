@@ -79,7 +79,9 @@ update가 먼저 실행되면 다음 문제가 생긴다.
   예: event-fanout-outbox.sql의 `opportunity_events.last_user_id`는 `NOT NULL DEFAULT 0`으로 추가해야 하는데,
   update는 기본값 없이 NOT NULL 컬럼을 추가하려다 실패한다.
 
-적용 순서는 각 SQL 파일 머리말과 기능 문서(date-tracking.md, event-fanout-outbox.md)를 따른다.
+적용 순서는 각 SQL 파일 머리말과 기능 문서([date-tracking.md](date-tracking.md),
+[event-fanout-outbox.md](event-fanout-outbox.md), [notification-user-api.md](notification-user-api.md),
+[notification-withdrawal.md](notification-withdrawal.md), [notification-delivery.md](notification-delivery.md))를 따른다.
 Application 테이블이 없는 새 로컬 DB는 첫 기동의 update가 테이블을 만들므로 SQL을 실행하지 않는다.
 
 ### data-service (backend와 DB 공유 1단계)
@@ -101,19 +103,23 @@ data-service/.env에는 DB_URL과 APPLICATION_DB_PASSWORD(backend와 같은 값)
 
 ## 로컬 개발 DB
 
-backend/docker-compose.yml은 데이터 볼륨이 비어 있을 때 다음을 자동 실행한다.
+로컬 DB는 docker/compose.yaml의 postgres-db로 띄운다(전체 실행은 docker/start.sh, docker/README.md 참고).
+데이터 볼륨이 비어 있을 때 다음을 파일명 순서로 자동 실행한다.
 
 1. database/scripts/database-boundaries.sql: 두 계정과 스키마 생성
 2. database/local/02-set-local-passwords.sh: 두 계정의 비밀번호 설정 (로컬 전용)
+3. database/local/03-apply-notification-ddl.sh: Notification 수동 DDL을 notification_user 소유로 적용
+   (Notification은 validate라 기동 전에 테이블이 있어야 한다. 새 Notification DDL 파일은 이 스크립트 목록에 추가한다.)
 
-backend/.env에 APPLICATION_DB_PASSWORD와 NOTIFICATION_DB_PASSWORD를 둘 다 넣어야 compose가 실행된다
-(backend/.env.example 참고). notification-service/.env의 NOTIFICATION_DB_PASSWORD도 같은 값을 쓴다.
-backend는 첫 bootRun에서 update로 application 스키마의 테이블을 만든다.
+docker/.env에 APPLICATION_DB_PASSWORD와 NOTIFICATION_DB_PASSWORD를 둘 다 넣어야 compose가 실행된다.
+bootRun으로 개발할 때 backend/.env, notification-service/.env의 비밀번호도 같은 값을 쓴다.
+application 스키마의 테이블은 backend가 첫 기동에서 update로 만든다.
+backend/docker-compose.yml은 이전 방식으로, docker/compose.yaml로 대체한다.
 
 초기화 스크립트는 빈 볼륨에서만 실행된다. 기존 로컬 볼륨에 public 테이블이 있으면 둘 중 하나를 선택한다.
 
 - 데이터를 유지할 때: 아래 관리자 SQL 1·2단계(프로비저닝, public 이전)를 로컬 DB에 직접 실행하고 비밀번호를 설정한다.
-- 데이터가 필요 없을 때: `docker compose down -v`로 볼륨을 지우고 다시 올린다. 로컬 데이터가 모두 삭제된다.
+- 데이터가 필요 없을 때: `docker/`에서 `docker compose down -v`로 볼륨을 지우고 다시 올린다. 로컬 데이터가 모두 삭제된다.
 
 운영 DB 서버 compose(`deploy/db/docker-compose.yml`)도 빈 볼륨에서 같은 초기화 SQL을 실행한다.
 비밀번호 설정, 기존 볼륨 이전, NOTIFY 트리거 설치 절차는 `deploy/README.md`의 "DB 준비"를 따른다.

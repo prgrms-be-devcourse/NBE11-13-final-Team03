@@ -17,6 +17,14 @@ public class NotificationMessageFingerprint {
     }
 
     public String fingerprint(NotificationRequestedMessage message) {
+        return fingerprintFields(message);
+    }
+
+    public String fingerprint(UserWithdrawnMessage message) {
+        return fingerprintFields(message);
+    }
+
+    private String fingerprintFields(Object message) {
         Map<?, ?> fields = mapper.convertValue(message, Map.class);
         String canonical = mapper.writeValueAsString(canonical(fields));
         try {

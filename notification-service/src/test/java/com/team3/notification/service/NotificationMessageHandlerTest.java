@@ -23,7 +23,7 @@ class NotificationMessageHandlerTest {
             var mapper = JsonMapper.builder().build();
             var handler = new NotificationMessageHandler(new NotificationMessageDecoder(mapper),
                     new NotificationMessageValidator(validation.getValidator()),
-                    new NotificationMessageFingerprint(mapper), transaction);
+                    new NotificationMessageFingerprint(mapper), transaction, mock(UserWithdrawalHandler.class));
             for (String constraint : new String[]{"uk_consumed_messages_message_id", "uk_notifications_user_source_event"}) {
                 reset(transaction);
                 when(transaction.receive(eq(message), anyString()))

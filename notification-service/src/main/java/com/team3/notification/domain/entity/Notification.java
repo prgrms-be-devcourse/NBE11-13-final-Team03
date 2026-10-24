@@ -53,12 +53,19 @@ public class Notification {
     private Instant readAt;
     @Column(name = "clicked_at")
     private Instant clickedAt;
+    @Column(name = "in_app_visible", nullable = false, updatable = false)
+    private boolean inAppVisible = true;
 
     protected Notification() {
     }
 
     public static Notification inApp(NotificationRequestedMessage message, Instant now) {
+        return create(message, now, true);
+    }
+
+    public static Notification create(NotificationRequestedMessage message, Instant now, boolean inAppVisible) {
         var notification = new Notification();
+        notification.inAppVisible = inAppVisible;
         notification.userId = message.userId();
         notification.sourceEventId = message.sourceEventId();
         notification.messageId = message.messageId();
@@ -78,6 +85,7 @@ public class Notification {
     }
 
     public Long getId() { return id; }
+    public boolean isInAppVisible() { return inAppVisible; }
     public Long getUserId() { return userId; }
     public UUID getSourceEventId() { return sourceEventId; }
     public UUID getMessageId() { return messageId; }

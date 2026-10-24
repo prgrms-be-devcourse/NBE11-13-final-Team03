@@ -1,6 +1,7 @@
 package com.team3.notification.domain.entity;
 
 import com.team3.notification.message.NotificationRequestedMessage;
+import com.team3.notification.message.UserWithdrawnMessage;
 import jakarta.persistence.*;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
@@ -52,6 +53,17 @@ public class ConsumedMessage {
     }
 
     public Long getId() { return id; }
+    public static ConsumedMessage withdrawal(UserWithdrawnMessage message, String fingerprint, Instant now) {
+        var consumed = new ConsumedMessage();
+        consumed.messageId = message.messageId();
+        consumed.userId = message.userId();
+        consumed.sourceEventId = message.sourceEventId();
+        consumed.correlationId = message.correlationId();
+        consumed.requestFingerprint = fingerprint;
+        consumed.result = ReceptionStatus.WITHDRAWN;
+        consumed.consumedAt = now;
+        return consumed;
+    }
     public UUID getMessageId() { return messageId; }
     public Long getUserId() { return userId; }
     public UUID getSourceEventId() { return sourceEventId; }

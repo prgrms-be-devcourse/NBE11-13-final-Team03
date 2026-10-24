@@ -86,6 +86,16 @@ class OutboxPublicationPostgresTest {
     }
 
     @Test
+    void withdrawalControlCanBeClaimedAndRecoveredWithoutNotificationOnlyFilter() {
+        outboxes.saveAndFlush(OutboxEvent.userWithdrawn(7L, NOW));
+        var claimed = store.claimNext().orElseThrow();
+        assertThat(claimed.json()).contains("USER_WITHDRAWN").doesNotContain("expiresAt");
+        clock.now = NOW.plus(Duration.ofMinutes(2));
+        assertThat(store.recoverStale()).isEqualTo(1);
+        assertThat(state()).isEqualTo("PENDING");
+    }
+
+    @Test
     void configurationErrorReturnsToPendingWithoutSpendingAnAttempt() {
         save();
         doThrow(NotificationPublicationException.configuration("HTTP_401")).when(publisher).publish(any());
