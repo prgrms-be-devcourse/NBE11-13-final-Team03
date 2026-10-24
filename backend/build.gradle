@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'com.google.protobuf' version '0.9.6'
     id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
 }
@@ -23,11 +24,22 @@ ext {
 }
 
 
+sourceSets.main.proto.srcDir '../contracts/proto'
+
+// Match PR A and the Spring Boot 4.1.1 managed runtime versions.
+protobuf {
+    protoc { artifact = 'com.google.protobuf:protoc:4.35.1' }
+    plugins { grpc { artifact = 'io.grpc:protoc-gen-grpc-java:1.83.1' } }
+    generateProtoTasks { all().configureEach { plugins { grpc {} } } }
+}
+
 dependencies {
     implementation platform('software.amazon.awssdk:bom:2.57.2')
     implementation 'software.amazon.awssdk:sqs'
     implementation 'software.amazon.awssdk:url-connection-client'
-    // 내부 API 호출(DataService 수집 관리, Notification 메시지 전달)에 쓰는 OpenFeign
+    implementation 'org.springframework.boot:spring-boot-starter-grpc-client'
+
+    // 알림 서비스 연동(#39)이 사용하는 OpenFeign은 유지한다.
     implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
     // PATCH support for NotificationUserClient only (its child-context Client bean).
     implementation 'io.github.openfeign:feign-java11'

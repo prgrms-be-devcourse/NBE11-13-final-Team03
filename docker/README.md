@@ -41,7 +41,7 @@ Dockerfile이 빌드된 Boot JAR를 복사하므로, 서버 이미지를 다시 
 | 브라우저 진입점(nginx) | http://localhost |
 | backend 직접(디버깅, Swagger) | http://localhost:8080/swagger-ui.html |
 | PostgreSQL(호스트) | localhost:5432 |
-| data-service | 호스트에 공개하지 않음. backend가 `http://data-service:8082`로 호출(수집 관리자 API 전달) |
+| data-service | 호스트에 공개하지 않음. backend가 `static://data-service:9092` gRPC로 호출(수집 관리자 API 전달) |
 | notification-service | 호스트에 공개하지 않음. 컨테이너끼리 `http://notification-service:8081`로 호출 |
 
 포트가 이미 쓰이고 있으면 `docker/.env`의 `DB_PORT`, `BACKEND_PORT`, `HTTP_PORT`를 바꾼다.

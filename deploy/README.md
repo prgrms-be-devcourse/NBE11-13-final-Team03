@@ -11,7 +11,7 @@
 - 프론트(React)는 S3 + CloudFront로 따로 배포한다 (이 폴더 범위 밖).
 - 서버끼리는 **같은 VPC의 사설 IP**로 통신한다.
   - 메인·데이터 → DB: `DB_URL=jdbc:postgresql://<DB 사설 IP>:5432/yon`
-  - 메인 → 데이터: `DATA_SERVICE_BASE_URL=http://<데이터 사설 IP>:8082` (내부 키 `DATA_SERVICE_INTERNAL_API_KEY`)
+  - 메인 → 데이터: `DATA_SERVICE_GRPC_ADDRESS=static://<데이터 사설 IP>:9092` (내부 키 `DATA_SERVICE_INTERNAL_API_KEY`)
 - 두 앱 모두 `application_user` 계정·`application` 스키마로 접속한다 (`docs/database-boundaries.md`).
 - 수집·정규화는 데이터 서버에서만 돈다. backend의 수집·정규화 실행 플래그는 메인 compose가 `false`로 덮어쓴다.
 
@@ -21,9 +21,9 @@
 |---|---|
 | `yon-db` | 5432 ← `yon-main`, `yon-data` 보안 그룹만 / 22 |
 | `yon-main` | `BACKEND_PORT`(8080) ← 공개 / 22 |
-| `yon-data` | 8082 ← `yon-main` 보안 그룹만 / 22 |
+| `yon-data` | 9092 ← `yon-main` 보안 그룹만 / 22 (REST 공존 기간에만 8082도 같은 제한) |
 
-**5432·8082는 0.0.0.0/0으로 열지 않는다.** data-service는 Spring Security가 없다.
+**5432·9092(공존 기간 8082 포함)는 0.0.0.0/0으로 열지 않는다.** data-service는 Spring Security가 없다.
 한 겹 더: DB 서버 `.env`의 `DB_BIND_IP`, 데이터 서버 `.env`의 `DATA_SERVICE_BIND_IP`에 각 서버의 사설 IP를 넣으면 포트가 사설 IP에만 바인딩된다 (보안 그룹 실수 대비).
 
 ### 운영 진입점 (TLS): 미정
@@ -195,3 +195,16 @@ docker stats --no-stream
 - **SSH 22번 포트**: GitHub 호스팅 러너 IP 대역이 넓다. 비밀번호 로그인 금지, 배포 전용 키 사용. 나중에 SSM 접속 검토.
 - **`ddl-auto: update`**: enum CHECK 제약은 갱신하지 않는다. enum 값이 늘어나는 배포는 제약 재생성 SQL을 먼저 실행한다.
 - **테스트**: 테스트는 이미지 게시 워크플로가 돌린다. 테스트가 실패하면 이미지도 배포도 없다.
+
+
+### 수집 gRPC 전환과 내부 TLS 논의
+
+로컬 compose는 서비스 DNS `static://data-service:9092`를 사용한다.
+운영은 EC2가 분리되어 있으므로 데이터 서버의 사설 IP를 주소에 넣는다.
+`DATA_SERVICE_BIND_IP`는 필수이며 데이터 서버의 사설 IP로 9092를 바인딩한다.
+PR B는 8082를 REST 롤백 호환용으로 유지하고, PR C 배포 시 8082 매핑·점검을 제거한다.
+
+현재는 기존 REST와 같은 사설 VPC·사설 IP 바인딩·yon-main 보안 그룹 제한 및 전용 내부 키 전제로
+평문 gRPC를 유지한다. **TLS 필수 여부와 인증서 운영은 팀 논의가 필요한 미결정 사항**이다.
+이는 TLS를 적용했다고 보거나 운영 보안 승인을 완료했다는 의미가 아니다.
+내부 키는 전송 암호화를 제공하지 않으며, 공유망/공개망에 이 포트를 노출하지 않는다.
