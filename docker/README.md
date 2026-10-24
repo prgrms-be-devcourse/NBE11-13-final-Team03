@@ -58,6 +58,16 @@ application 스키마 테이블은 data-service(수집·정규화 테이블)와 
 정규화 요청 NOTIFY 트리거(`normalization-notifications.sql`)는 테이블이 생긴 뒤에만 설치할 수 있어 초기화에 넣지 않았다. 트리거가 없어도 data-service의 폴링으로 정규화는 진행된다.
 초기화 스크립트나 DDL을 바꿨다면 `docker compose down -v` 후 다시 기동해야 반영된다.
 
+### 예전 `backend/docker-compose.yml`에서 옮겨 올 때
+
+이 구성의 DB 볼륨은 `yon-postgres-data`로, 예전 구성의 볼륨(`backend_postgres_data`)과 다르다.
+그래서 기본으로는 **빈 DB로 새로 시작**하고, 예전 로컬 데이터는 이어지지 않는다(예전 볼륨은 삭제되지 않고 남는다).
+
+- 두 구성 모두 호스트 5432를 쓰므로, 먼저 `backend/`에서 `docker compose down`으로 예전 DB를 내린다.
+- 예전 데이터를 계속 쓰려면 `docker/.env`에 `YON_DB_VOLUME=backend_postgres_data`를 넣는다.
+  예전 구성은 3번(Notification 테이블)을 자동으로 실행하지 않았으므로, 기동 전에 `database/scripts/notification-inbox.sql`을
+  `notification_user`로 한 번 적용해야 notification-service가 뜬다(`ddl-auto: validate`).
+
 ## 알림 전달
 
 `NOTIFICATION_PUBLISHER_ENABLED`, `NOTIFICATION_RECEIVER_ENABLED`는 기본 `false`다.
