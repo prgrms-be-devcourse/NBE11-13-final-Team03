@@ -15,12 +15,15 @@ public class NotificationReceiveTransaction {
     private final NotificationRepository notifications;
     private final ConsumedMessageRepository consumedMessages;
     private final Clock clock;
+    private final NotificationSettingRepository settings;
 
     public NotificationReceiveTransaction(NotificationRepository notifications,
-                                           ConsumedMessageRepository consumedMessages, Clock clock) {
+                                           ConsumedMessageRepository consumedMessages, Clock clock,
+                                           NotificationSettingRepository settings) {
         this.notifications = notifications;
         this.consumedMessages = consumedMessages;
         this.clock = clock;
+        this.settings = settings;
     }
 
     /** Separate bean/transaction so a uniqueness conflict is fully rolled back before duplicate lookup. */
@@ -38,8 +41,9 @@ public class NotificationReceiveTransaction {
         Notification notification = null;
         if (!now.isBefore(message.expiresAt())) {
             status = EXPIRED;
-        } else if (!message.channels().contains(NotificationChannel.IN_APP)) {
-            // Phase 5 has no settings/Endpoint API: IN_APP defaults to allowed and PUSH to denied.
+        } else if (!message.channels().contains(NotificationChannel.IN_APP)
+                || settings.findById(message.userId()).map(setting -> !setting.isInAppEnabled()).orElse(false)) {
+            // PUSH delivery remains unimplemented; settings never enable message reception or FCM.
             status = CHANNEL_DISABLED;
         } else {
             var existing = notifications.findByUserIdAndSourceEventId(message.userId(), message.sourceEventId());

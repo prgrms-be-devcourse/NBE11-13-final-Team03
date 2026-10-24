@@ -79,7 +79,8 @@ update가 먼저 실행되면 다음 문제가 생긴다.
   예: event-fanout-outbox.sql의 `opportunity_events.last_user_id`는 `NOT NULL DEFAULT 0`으로 추가해야 하는데,
   update는 기본값 없이 NOT NULL 컬럼을 추가하려다 실패한다.
 
-적용 순서는 각 SQL 파일 머리말과 기능 문서(date-tracking.md, event-fanout-outbox.md)를 따른다.
+적용 순서는 각 SQL 파일 머리말과 기능 문서([date-tracking.md](date-tracking.md),
+[event-fanout-outbox.md](event-fanout-outbox.md), [notification-user-api.md](notification-user-api.md))를 따른다.
 Application 테이블이 없는 새 로컬 DB는 첫 기동의 update가 테이블을 만들므로 SQL을 실행하지 않는다.
 
 ### data-service (backend와 DB 공유 1단계)
