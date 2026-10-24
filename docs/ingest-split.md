@@ -26,7 +26,7 @@
 | B2b | backend에 남은 정규화 서비스 제거, 판정·검색 테스트 데이터 준비 방식 변경 |
 
 ## 운영 메모
-- 포트: backend 8080, notification-service 8081, data-service 8082.
+- 포트: backend 8080, notification-service 8081, data-service gRPC 9092.
 - B2a 이후 data-service가 떠 있어야 수집·정규화가 돈다 (배포 순서: data-service → backend).
 - data-service 정규화 연동(`YON_NORMALIZATION_INGEST_ENABLED`)은 B2a 전에는 backend와 한쪽에서만 켠다.
 
@@ -70,5 +70,16 @@ OpenFeign·Spring Cloud BOM·EnableFeignClients는 #39의 알림 호출을 위�
 평문은 기존 사설망·보안 그룹·내부 키 전제로 유지하며 TLS 필수 여부는 팀 논의가 필요한 미결정 사항이다.
 
 배포 순서는 data-service gRPC 서버(#53) → backend 클라이언트(이 단계) → REST 제거(PR C)다.
-PR B 배포·실제 수집 확인 전에는 REST를 제거하지 않는다.
+기존 REST backend가 동작 중인 환경에서는 REST 공존 data-service → gRPC backend → gRPC 전용 data-service 순으로 전환한다.
 운영 배포 구성은 #56의 deploy/main·deploy/data를 따른다. PR C에서 REST 8082 점검과 매핑을 제거한다.
+
+## 수집 내부 API gRPC 전환 — PR C
+
+PR B(#54)의 backend 전환을 반영하고 REST 수신부를 제거했다.
+data-service는 gRPC 9092만 제공하며 RestClient·Jackson을 통한 외부 REST 호출은 유지한다.
+내부 키 속성은 yon.data-service.internal-api-key, 환경변수는 DATA_SERVICE_INTERNAL_API_KEY다.
+운영·로컬 compose의 포트·healthcheck와 deploy.yml 기동 점검도 9092 기준이다.
+배포 점검은 인증된 읽기 RPC로 키와 DB 조회를 확인하며 복구·백필 완료는 별도로 확인한다.
+이전 REST backend로 롤백할 때는 data-service도 REST 공존 버전으로 함께 되돌려야 한다.
+코드 병합과 운영 배포를 구분한다. 운영 환경 준비 후 data-service → backend 순서로 배포하고
+실제 관리자 API로 사설망 연결·수집을 검증한다. 기존 REST 환경의 전환 순서는 PR B 절을 따른다.

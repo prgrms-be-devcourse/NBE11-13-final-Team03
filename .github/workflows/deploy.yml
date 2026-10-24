@@ -163,26 +163,33 @@ jobs:
           docker logout ghcr.io > /dev/null
           compose up -d "$SERVICE"
 
-          if [ "$SERVICE" = backend ]; then
-            port=$(grep -E '^BACKEND_PORT=' .env | tail -n 1 | cut -d= -f2 || true)
-            url="http://localhost:${port:-8080}/"
-          else
-            # 사설 IP로 바인딩했으면 그 주소로 확인한다 (deploy/data/.env.example DATA_SERVICE_BIND_IP)
-            bind=$(grep -E '^DATA_SERVICE_BIND_IP=' .env | tail -n 1 | cut -d= -f2 || true)
-            if [ -z "$bind" ] || [ "$bind" = "0.0.0.0" ]; then
-              bind=localhost
+          # The adjacent block anchors are used by deploy/tests/test_grpc_readiness.py.
+          # backend keeps its existing HTTP reachability check. data-service has no HTTP listener.
+          # Read the key from the container environment; never put it in the command line or logs.
+          probe() {
+            if [ "$SERVICE" = backend ]; then
+              port=$(grep -E '^BACKEND_PORT=' .env | tail -n 1 | cut -d= -f2 || true)
+              code=$(curl -s --connect-timeout 1 --max-time 3 -o /dev/null -w '%{http_code}' "http://localhost:${port:-8080}/" || true)
+              [ "$code" != "000" ]
+            else
+              timeout 8s docker compose -f docker-compose.yml --env-file .env --env-file deploy.env \
+                exec -T data-service java -Xms16m -Xmx64m \
+                -Dloader.main=com.team3.dataservice.collection.grpc.CollectionGrpcProbe \
+                -cp /app/app.jar org.springframework.boot.loader.launch.PropertiesLauncher
             fi
-            url="http://$bind:8082/"
-          fi
-          code=000
-          for _ in $(seq 1 36); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
-            [ "$code" != "000" ] && break
+          }
+          ready=false
+          deadline=$((SECONDS + 180))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if probe; then
+              ready=true
+              break
+            fi
             sleep 5
           done
 
-          if [ "$code" = "000" ]; then
-            echo "::error::$SERVICE 가 3분 안에 응답하지 않았습니다"
+          if [ "$ready" != true ]; then
+            echo "::error::$SERVICE 기동 확인이 약 3분 안에 성공하지 않았습니다"
             compose logs --tail 200 "$SERVICE" || true
             if grep -q "^$IMAGE_VAR=" deploy.env.prev; then
               echo "이전 이미지로 되돌립니다: $(grep "^$IMAGE_VAR=" deploy.env.prev)"
@@ -196,7 +203,7 @@ jobs:
             exit 1
           fi
 
-          echo "기동 확인 (HTTP $code): $SERVICE ← $IMAGE"
+          echo "기동 확인 성공: $SERVICE ← $IMAGE"
           docker image prune -f
           REMOTE
 

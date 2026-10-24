@@ -86,3 +86,15 @@ application 스키마 테이블은 data-service(수집·정규화 테이블)와 
 
 이 구성은 로컬 개발용이다. 운영은 CI가 만든 GHCR 이미지와 서버별 배포 compose(`deploy/db`, `deploy/main`, `deploy/data`, #56)를 쓴다.
 운영 메인 서버에 notification-service와 Notification DDL 선적용을 넣는 작업은 별도 PR에서 진행한다.
+
+
+data-service healthcheck는 9092 TCP 연결을 확인한다. 인증과 DB 조회까지 확인하려면:
+
+```bash
+docker compose exec -T data-service java -Xms16m -Xmx64m \
+  -Dloader.main=com.team3.dataservice.collection.grpc.CollectionGrpcProbe \
+  -cp /app/app.jar org.springframework.boot.loader.launch.PropertiesLauncher
+```
+
+키는 컨테이너의 DATA_SERVICE_INTERNAL_API_KEY를 사용하며 명령줄에 넣지 않는다.
+data-service 속성은 yon.data-service.internal-api-key이므로 공유 .env의 INTERNAL_API_KEY를 덮어쓸 필요가 없다.

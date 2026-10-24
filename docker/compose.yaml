@@ -67,16 +67,13 @@ services:
     env_file: .env
     environment:
       DB_URL: jdbc:postgresql://postgres-db:5432/${DB_NAME:-yon}
-      # data-service reads its key from the property internal.api-key. The shared .env also holds backend's
-      # INTERNAL_API_KEY, which Spring would bind to that same property and override the intended key.
-      INTERNAL_API_KEY: ${DATA_SERVICE_INTERNAL_API_KEY:?Set DATA_SERVICE_INTERNAL_API_KEY in docker/.env}
       TZ: Asia/Seoul
     # No host port: internal API only; backend relays /api/admin/collection/** to it.
     depends_on:
       postgres-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8082"]
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/9092"]
       interval: 5s
       timeout: 3s
       retries: 40

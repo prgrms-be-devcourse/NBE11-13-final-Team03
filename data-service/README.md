@@ -15,21 +15,36 @@
 
 ## 내부 API
 
-| 메서드 | 경로 | 메인 서비스 관리자 API |
-|---|---|---|
-| POST | `/internal/collection/syncs/{source}` | `/api/admin/collection/syncs/{source}` |
-| GET | `/internal/collection/syncs?date=` | `/api/admin/collection/syncs?date=` |
-| GET | `/internal/collection/syncs/{jobId}` | `/api/admin/collection/syncs/{jobId}` |
-| POST | `/internal/collection/raw-records` | `/api/admin/collection/raw-records` |
-| GET | `/internal/collection/raw-records/{id}` | `/api/admin/collection/raw-records/{id}` |
+수집 내부 수신 경로는 gRPC `yon.collection.v1.CollectionService`만 제공한다.
+기존 `/internal/collection/**` REST 컨트롤러와 HTTP 키 필터는 제거했다.
+backend의 `/api/admin/collection/**` 공개 HTTP API·ADMIN 권한은 유지된다.
 
-- 모든 요청에 `X-INTERNAL-KEY` 헤더가 필요합니다 (`DATA_SERVICE_INTERNAL_API_KEY`). 없거나 다르면 401 `AUTH_008`.
-- 관리자 권한 확인은 메인 서비스가 하고 넘어옵니다. 수동 수집 시작의 `Location`은 `/internal/...` 경로라 메인 서비스가 관리자 경로로 바꿔서 돌려줍니다.
+| RPC | 메인 서비스 관리자 API |
+|---|---|
+| StartSync | POST `/api/admin/collection/syncs/{source}` |
+| ListSyncJobsByDate | GET `/api/admin/collection/syncs?date=` |
+| GetSyncJob | GET `/api/admin/collection/syncs/{jobId}` |
+| SaveRawRecord | POST `/api/admin/collection/raw-records` |
+| GetRawRecord | GET `/api/admin/collection/raw-records/{id}` |
+
+모든 RPC에 metadata `x-internal-key` = `DATA_SERVICE_INTERNAL_API_KEY`가 필요하다.
+키 누락·불일치는 UNAUTHENTICATED / trailer AUTH_008이며, 관리자의 권한 검사는 backend가 담당한다.
 
 ## 배포
 
-- 포트 `8082`. Spring Security가 없는 내부 전용 서비스라 **8082는 내부 네트워크(메인 서비스)에서만 접근 가능해야 합니다.** 보안 그룹·compose에서 외부로 열지 않습니다.
-- 환경변수: `DB_URL`, `APPLICATION_DB_PASSWORD`(메인과 같은 DB·계정, 아래 DB 경계), `DATA_SERVICE_INTERNAL_API_KEY`, `EMPLOYMENT24_API_KEY`, `YOUTH_POLICY_API_KEY`, `REGION_CODE_API_KEY`, 실행 플래그 4개. 예시는 `.env.example`.
+- gRPC 포트: `DATA_SERVICE_GRPC_PORT` (기본 9092). 내부 네트워크에만 허용한다.
+- HTTP 8082 서버는 더 이상 기동하지 않으며 DATA_SERVICE_PORT는 사용하지 않는다.
+- 외부 API 호출용 RestClient와 Jackson 3는 `spring-boot-starter-restclient`로 유지한다.
+- 환경변수: `DB_URL`, `APPLICATION_DB_PASSWORD`, `DATA_SERVICE_INTERNAL_API_KEY`, 외부 API 키와 실행 플래그. 예시는 `.env.example`.
+
+**PR C 배포 전 필수 조건**
+
+1. PR A(#53)의 서버와 PR B(#54)의 backend를 먼저 배포한다.
+2. 실제 관리자 요청으로 접수·작업 조회·원본 저장/조회 및 DB 반영을 확인한다.
+3. #56의 배포 구성과 로컬 compose는 9092를 사용한다. 배포 워크플로는 인증된 읽기 RPC로 기동을 점검한다.
+4. 이 REST 제거 버전을 배포한다. 이후 REST 클라이언트인 이전 backend로 롤백하려면 data-service도 PR A 버전으로 함께 롤백한다.
+
+이 PR은 제거 코드를 미리 준비한 것이며, PR B 운영 배포·smoke test 완료를 의미하지 않는다.
 
 ### 전환 순서 (메인 서비스에서 수집·정규화를 옮기는 동안)
 
@@ -37,7 +52,7 @@
 |---|---|---|
 | 0 | 지금 (data-service 미배포) | 메인 |
 | 1 | data-service 배포, **메인의 실행 플래그 4개를 모두 끔** (아래 실행 플래그 표) | data-service |
-| 2 | 메인 관리자 API를 data-service 프록시로 교체 (`DATA_SERVICE_BASE_URL`, `DATA_SERVICE_INTERNAL_API_KEY`) | data-service |
+| 2 | 메인 관리자 API를 data-service 프록시로 교체 (`DATA_SERVICE_GRPC_ADDRESS`, `DATA_SERVICE_INTERNAL_API_KEY`) | data-service |
 | 3 | 메인에서 수집·정규화 코드 삭제 | data-service |
 
 - 1단계 전에 data-service를 띄워 보려면 data-service 쪽 실행 플래그를 모두 `false`로 둡니다 (두 서비스가 같은 스케줄·대조·백필을 중복 실행하지 않게).
@@ -72,10 +87,10 @@ yon-test data
 PostgreSQL 테스트는 `YON_TEST_DB_URL`이 있을 때만 돕니다.
 
 
-## 수집 gRPC 내부 API (전환 PR A)
+## 수집 gRPC 계약
 
-REST `/internal/collection/**`와 gRPC `yon.collection.v1.CollectionService`가 같은 서비스 빈을 호출한다.
-backend 전환과 배포가 끝난 뒤 별도 PR에서 REST를 제거한다.
+gRPC 서비스가 기존 ManualSyncService·SyncJobService·RawRecordService를 호출한다.
+수집·정규화 업무 로직과 DB 전달 방식은 유지한다.
 
 - 계약: `contracts/proto/collection/v1/collection.proto` (필드 번호 재사용 금지, 삭제 시 `reserved`)
 - RPC: `StartSync`, `ListSyncJobsByDate`, `GetSyncJob`, `SaveRawRecord`, `GetRawRecord`
@@ -111,10 +126,9 @@ backend의 주소는 `DATA_SERVICE_GRPC_ADDRESS=static://<데이터 서버 사�
 내부 키는 호출 인증용이고 전송 암호화를 제공하지 않는다.
 이 접근 제한을 유지할 수 없는 네트워크나 전송 암호화가 필요한 환경에서는 서버·클라이언트에 TLS를 설정한다.
 
-이 PR A는 REST 8082와 gRPC 9092를 공존시킨다.
-현재 운영 compose·Dockerfile·기동 확인은 아직 8082 기준이며, 9092 포트 매핑·Dockerfile EXPOSE·
-배포 기동 확인과 보안 그룹 안내는 배포 담당자의 별도 PR에서 맞춘다.
-PR C(#55)의 REST 제거와 함께 반영해야 하며, 그 전에 HTTP 8082 규칙을 제거하지 않는다.
+이 REST 제거 버전은 HTTP 8082를 제공하지 않는다. 운영 compose·Dockerfile·로컬 healthcheck는 9092로 바꿨다.
+배포 워크플로는 환경변수의 키로 CollectionGrpcProbe를 실행해 인증과 DB 조회를 확인한다.
+TLS는 기존 평문 전제를 유지하며 **팀 논의가 필요한 미결정 사항**으로 남긴다.
 
 ### 포트 바인딩과 기동 완료
 
@@ -139,3 +153,10 @@ DB 경계 검사는 DataSource 초기화 중 수행되지만, 기동 후 지역 
 배포 순서는 data-service(서버 추가) → backend(클라이언트 전환) → data-service(REST 제거)다.
 현재 backend-image 워크플로는 모든 main push에서 실행하므로 proto 변경도 이미 포함한다.
 data-service 및 backend PostgreSQL PR 워크플로는 `contracts/proto/**`도 검사한다.
+
+
+### 내부 키 설정과 배포 probe
+
+서버 속성은 yon.data-service.internal-api-key이며 값은 기존 DATA_SERVICE_INTERNAL_API_KEY 환경변수다.
+공유 .env의 backend INTERNAL_API_KEY와 이름이 겹치지 않아 compose의 키 덮어쓰기 우회를 제거했다.
+배포 점검 명령과 과거 이미지 롤백 제약은 deploy/README.md를 따른다.

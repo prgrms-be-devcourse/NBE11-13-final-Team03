@@ -19,10 +19,13 @@ import org.springframework.stereotype.Component;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class InternalKeyServerInterceptor implements ServerInterceptor {
     public static final Metadata.Key<String> INTERNAL_KEY = Metadata.Key.of("x-internal-key", Metadata.ASCII_STRING_MARSHALLER);
+    // Same contract as backend AuthErrorCode.INVALID_INTERNAL_API_KEY.
+    private static final String INVALID_KEY_CODE = "AUTH_008";
+    private static final String INVALID_KEY_MESSAGE = "유효하지 않은 내부 API Key입니다.";
     private final byte[] expectedKey;
 
-    public InternalKeyServerInterceptor(@Value("${internal.api-key}") String key) {
-        if (key == null || key.isBlank()) throw new IllegalStateException("internal.api-key must not be blank");
+    public InternalKeyServerInterceptor(@Value("${yon.data-service.internal-api-key}") String key) {
+        if (key == null || key.isBlank()) throw new IllegalStateException("yon.data-service.internal-api-key must not be blank");
         expectedKey = key.getBytes(StandardCharsets.UTF_8);
     }
 
@@ -31,10 +34,9 @@ public class InternalKeyServerInterceptor implements ServerInterceptor {
             Metadata headers, ServerCallHandler<ReqT, RespT> next) {
         var key = headers.get(INTERNAL_KEY);
         if (key == null || !MessageDigest.isEqual(expectedKey, key.getBytes(StandardCharsets.UTF_8))) {
-            var error = InternalApiErrorCode.INVALID_INTERNAL_API_KEY;
             var trailers = new Metadata();
-            trailers.put(CollectionExceptionInterceptor.ERROR_CODE, error.getCode());
-            call.close(Status.UNAUTHENTICATED.withDescription(error.getMessage()), trailers);
+            trailers.put(CollectionExceptionInterceptor.ERROR_CODE, INVALID_KEY_CODE);
+            call.close(Status.UNAUTHENTICATED.withDescription(INVALID_KEY_MESSAGE), trailers);
             return new ServerCall.Listener<>() {};
         }
         return next.startCall(call, headers);
