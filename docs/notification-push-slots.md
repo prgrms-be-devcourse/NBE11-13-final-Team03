@@ -105,11 +105,11 @@ Application이 priority를 싣는 이전 초안은 v1에 적용하지 않는다.
 
 ## 검증 상태와 후속
 
-### PR #73 리뷰 보완 전 로컬 검증 (2026-10-25)
+### 로컬 검증 (2026-10-25)
 
 | 테스트 | 건수 | 결과 |
 | --- | --- | --- |
-| NotificationSlotPostgresTest | 20 | skip/failure/error 0 |
+| NotificationSlotPostgresTest | 23 | skip/failure/error 0 |
 | NotificationSlotWorkerTest | 6 | skip/failure/error 0 |
 | NotificationPushConfigTest | 7 | skip/failure/error 0 |
 | FirebasePushSenderTest | 5 | skip/failure/error 0 |
@@ -118,12 +118,12 @@ Application이 priority를 싣는 이전 초안은 v1에 적용하지 않는다.
 | NotificationDeliveryPostgresTest | 17 | skip/failure/error 0 |
 | backend DateNotificationMessageFactoryTest | 13 | skip/failure/error 0 |
 | backend IngestBoundaryTest | 3 | skip/failure/error 0 |
-| **합계** | **87** | **skip/failure/error 0** |
+| **합계** | **90** | **skip/failure/error 0** |
 
-- 양쪽 프로젝트의 `test bootJar --rerun-tasks` 성공. 리뷰 검증 보고 기준 Notification 전체 139개 실패/건너뜀 0, backend 전체 835개 실패 0·기존 조건부 건너뜀 98이다.
+- 리뷰 보완 전 양쪽 프로젝트의 `test bootJar --rerun-tasks` 성공. 리뷰 검증 보고 기준 Notification 전체 139개 실패/건너뜀 0, backend 전체 835개 실패 0·기존 조건부 건너뜀 98이다. 아래 보완 후 대상 테스트 재실행과 전체 실행 결과는 구분한다.
 - 관련 조건부 테스트는 테스트 전용 yon_test에서 별도로 실행했다. EligibilityResultServiceTest 18개와 ConditionSetBackfillTest 1개 모두 skip/failure/error 0이며, 나머지 조건부 테스트의 실행을 뜻하지 않는다.
 - backend 최초 전체 실행의 OpportunityDetailPostgresTest는 PostgreSQL SSL 연결 오류로 Context 초기화가 실패했다. 해당 클래스 단독 및 전체 재실행은 통과했다. dialect 설정이나 업무 코드는 변경하지 않았다.
-- 창 종료 후/동의 철회 시 진행 중 SENDING의 영수증 보존과 lease 만료 후 정리 테스트 3개를 리뷰 보완으로 추가했다. 이 보완의 재실행 결과는 아직 미확인이고 위 표에 포함하지 않는다.
+- 리뷰 보완 후 NotificationSlotPostgresTest 23개와 NotificationSlotWorkerTest 6개를 재실행하여 총 29개 모두 skip/failure/error 0을 확인했다. 창 종료·동의 철회 시 진행 중 SENDING의 영수증 보존과 lease 만료 후 정리를 검증하는 추가 테스트 3개도 통과했으며 위 표에 포함한다.
 - 실제 운영 DDL 적용·실제 타이머·외부 FCM·운영 다중 인스턴스/부하 검증은 수행하지 않았다. 최신 보완 커밋의 CI와 운영 활성화는 별도 확인 대상이다.
 
 팀 정책 최종 합의·기존 대기 Delivery 전환·실제 알림함 경로 확인과 성능/실패 관측이 필요하다. 미시도 이월은 후속 PR이다.
