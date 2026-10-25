@@ -1,6 +1,6 @@
 # Y:ON Frontend
 
-청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. 기본 라우팅, 반응형 공통 레이아웃, 디자인 토큰, 공통 UI와 API 통신 기반을 구성했다. `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세 API를 호출하는 화면이며 나머지 경로는 플레이스홀더다.
+청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. 기본 라우팅, 반응형 공통 레이아웃, 디자인 토큰, 공통 UI와 API 통신 기반을 구성했다. `/`는 홈, `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세 화면이다. 나머지 경로는 플레이스홀더다.
 
 ## 기술 스택
 
@@ -21,7 +21,7 @@ npm run dev
 
 ```sh
 npm run lint     # ESLint 검사
-npm test         # API·검색·상세·개발 프록시 테스트
+npm test         # API·홈·검색·상세·개발 프록시 테스트
 npm run build    # TypeScript 검사 및 dist/ 빌드
 npm run preview  # 빌드 결과 로컬 미리보기
 ```
@@ -38,7 +38,7 @@ frontend/
 │   ├── api/            # apiClient, ApiError, queryClient
 │   ├── components/ui/  # Button, Card, TextField, StatusBadge, AsyncState
 │   ├── layouts/        # AppLayout, Header 및 CSS Modules
-│   ├── pages/          # PlaceholderPage, opportunities 검색·상세 화면
+│   ├── pages/          # home, opportunities 검색·상세, PlaceholderPage
 │   ├── routes/         # AppRoutes
 │   ├── App.tsx
 │   ├── main.tsx        # BrowserRouter, QueryClientProvider
@@ -72,7 +72,9 @@ await apiClient.get('/users/me', { requiresAuth: true })
 
 ## 현재 미구현 사항
 
-홈·개인화 등 검색·상세 외 화면과 로그인 UI·완료 흐름 및 OAuth 개발 프록시는 아직 구현하지 않았다. 지역 선택은 공개 지역 옵션 API가 없어 보류하며, 신청 가능성 필터와 인증 복구 초기화 함수 연결은 후속 로그인 구현에서 다룬다. 저장 여부는 검색·상세 응답에 따른 읽기 전용 표시다.
+로그인 UI·완료 흐름 및 OAuth 개발 프록시는 아직 구현하지 않았다. 홈은 공개 최신 공고를 조회하며 개인화 추천은 API·표시 구성을 준비하되 인증 연동 전에는 안내만 제공한다. 지역 선택은 공개 지역 옵션 API가 없어 보류하며, 신청 가능성 필터와 인증 복구 초기화 함수 연결은 후속 로그인 구현에서 다룬다. 저장 여부는 응답에 따른 읽기 전용 표시다. 프로필·저장 목록·마이페이지·알림 화면은 플레이스홀더다.
+
+홈 구성, 추천 인증 조건과 후속 연결 사항은 [홈 문서](docs/home.md)를 참고한다.
 
 검색 계약, URL 정책과 확인이 필요한 데이터는 [통합 검색 문서](docs/search.md)를 참고한다.
 

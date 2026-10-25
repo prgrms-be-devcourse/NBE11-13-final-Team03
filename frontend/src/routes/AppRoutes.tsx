@@ -3,12 +3,13 @@ import AppLayout from '../layouts/AppLayout'
 import PlaceholderPage from '../pages/PlaceholderPage'
 import OpportunitiesPage from '../pages/opportunities/OpportunitiesPage'
 import OpportunityDetailPage from '../pages/opportunities/OpportunityDetailPage'
+import HomePage from '../pages/home/HomePage'
 
 function AppRoutes() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        <Route index element={<PlaceholderPage title="홈" description="청년정책과 직업훈련 기회를 만날 홈 화면을 준비하고 있어요." />} />
+        <Route index element={<HomePage />} />
         <Route path="opportunities" element={<OpportunitiesPage />} />
         <Route path="opportunities/:id" element={<OpportunityDetailPage />} />
         <Route path="saved" element={<PlaceholderPage title="저장한 기회" description="저장한 기회를 모아 볼 화면을 준비하고 있어요." />} />
