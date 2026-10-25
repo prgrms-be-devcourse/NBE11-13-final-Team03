@@ -142,6 +142,10 @@ public class DateNotificationMessageFactory {
         envelope.put("link", "/opportunities/" + event.getOpportunity().getId());
         envelope.put("occurredAt", event.getOccurredAt().toString());
         envelope.put("expiresAt", prepared.expiresAt().toString());
+        if (event.getEventType() == OpportunityEventType.DEADLINE_SOON) {
+            // Only PUSH expires at the end of the threshold day; message/in-app validity remains unchanged.
+            envelope.put("pushExpiresAt", event.getEventDate().plusDays(1).atStartOfDay(KST).toInstant().toString());
+        }
         envelope.put("payload", prepared.payload());
         return OutboxEvent.notification(messageId, event.getEventId(), userId, event.getOpportunity().getId(),
                 event.getEventType().name(), envelope, now);

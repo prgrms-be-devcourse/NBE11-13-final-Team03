@@ -110,6 +110,70 @@ class NotificationDeliveryPostgresTest {
     }
 
     @Test
+    void expiredPushStillStoresInAppAndDoesNotCreateDelivery() {
+        consentAndEndpoint("expired-push");
+        var result = handler.handle(NotificationMessages.json(Map.of("pushExpiresAt", NOW.toString())));
+        assertThat(result.status()).isEqualTo(com.team3.notification.domain.entity.ReceptionStatus.CREATED);
+        var notification = notifications.findById(result.notificationId()).orElseThrow();
+        assertThat(notification.isInAppVisible()).isTrue();
+        assertThat(notification.getPushExpiresAt()).isEqualTo(NOW);
+        assertThat(notification.getExpiresAt()).isAfter(NOW);
+        assertThat(count()).isZero(); assertThat(users.unreadCount(7).unreadCount()).isEqualTo(1);
+    }
+
+    @Test
+    void pushOnlyExpiredRequestRecordsConsumptionWithoutNotificationOrDelivery() {
+        consentAndEndpoint("expired-push-only");
+        var json = NotificationMessages.json(Map.of("channels", List.of("PUSH"), "pushExpiresAt", NOW.toString()));
+        var result = handler.handle(json);
+        assertThat(result.status()).isEqualTo(com.team3.notification.domain.entity.ReceptionStatus.CHANNEL_DISABLED);
+        assertThat(result.notificationId()).isNull(); assertThat(notifications.count()).isZero(); assertThat(count()).isZero();
+        assertThat(handler.handle(json).duplicateMessage()).isTrue();
+    }
+
+    @Test
+    void deliveryPreflightUsesPushExpiryWithoutHidingStillValidInApp() {
+        consentAndEndpoint("separate-expiry");
+        var expiry = NOW.plusSeconds(60);
+        var json = NotificationMessages.json(Map.of("pushExpiresAt", expiry.toString()));
+        var result = handler.handle(json);
+        var claim = store.claimNext().orElseThrow();
+        assertThat(store.prepare(claim).orElseThrow().expiresAt()).isEqualTo(expiry);
+        clock.now = expiry;
+        assertThat(store.prepare(claim)).isEmpty();
+        assertThat(state()).isEqualTo("SKIPPED"); verifyNoInteractions(sender);
+        assertThat(users.unreadCount(7).unreadCount()).isEqualTo(1);
+        assertThat(notifications.findById(result.notificationId()).orElseThrow().getExpiresAt()).isAfter(expiry);
+    }
+
+    @Test
+    void knownPushExpiryMutationConflictsButSameMessageReplaysIdempotently() {
+        consentAndEndpoint("identity");
+        var json = NotificationMessages.json(Map.of("pushExpiresAt", NOW.plusSeconds(60).toString()));
+        handler.handle(json); assertThat(handler.handle(json).duplicateMessage()).isTrue();
+        assertThatThrownBy(() -> handler.handle(NotificationMessages.json(Map.of("pushExpiresAt", NOW.plusSeconds(120).toString()))))
+                .isInstanceOf(MessageIdentityConflictException.class);
+        assertThat(count()).isEqualTo(1); assertThat(notifications.count()).isEqualTo(1);
+    }
+
+    @Test
+    void existingDatabaseUpgradePreservesRowsAndIsRepeatable() throws Exception {
+        consentAndEndpoint("upgrade");
+        var result = handler.handle(NotificationMessages.json(Map.of()));
+        // Simulate the previous deployed schema only inside this disposable test database.
+        jdbc.execute("ALTER TABLE notifications DROP COLUMN push_expires_at");
+        try (var connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), "notification_user", "delivery-test-password");
+             var statement = connection.createStatement()) {
+            statement.execute(sql("notification-push-expiry.sql"));
+            statement.execute(sql("notification-push-expiry.sql"));
+        }
+        assertThat(notifications.findById(result.notificationId()).orElseThrow().getPushExpiresAt()).isNull();
+        assertThat(handler.handle(NotificationMessages.json(Map.of())).duplicateMessage()).isTrue();
+        assertThat(store.prepare(store.claimNext().orElseThrow()).orElseThrow().expiresAt())
+                .isEqualTo(NotificationMessages.message(Map.of()).expiresAt());
+    }
+
+    @Test
     void pushOnlyParentIsNeverExposedThroughInAppListCountReadOrClick() {
         users.updateSettings(7, new SettingsRequest(false, true));
         users.registerEndpoint(7, new EndpointRequest("push-only"));

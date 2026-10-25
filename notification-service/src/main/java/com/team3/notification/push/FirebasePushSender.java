@@ -22,7 +22,7 @@ public class FirebasePushSender implements PushSender {
         if (ttl <= 0) throw new PushFailure(PushFailure.Kind.PERMANENT, "PUSH_EXPIRED");
         var webpush = WebpushConfig.builder().putHeader("TTL", Long.toString(ttl))
                 .setNotification(WebpushNotification.builder().setTitle(message.title()).setBody(message.content())
-                        .setTag("notification-" + message.notificationId()).build())
+                        .setTag(message.bundleId() == null ? "notification-" + message.notificationId() : "push-bundle-" + message.bundleId()).build())
                 .setFcmOptions(WebpushFcmOptions.withLink(URI.create(properties.publicBaseUrl()).resolve(message.link()).toString()))
                 .build();
         // Existing endpoint contract uses FCM registration tokens (not installation IDs).

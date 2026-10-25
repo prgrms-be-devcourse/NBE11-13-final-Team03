@@ -38,6 +38,22 @@ class FirebasePushSenderTest {
     }
 
     @Test
+    void bundleUsesStableBundleTagRatherThanMutableRepresentativeId() {
+        var messaging=mock(FirebaseMessaging.class);
+        when(messaging.sendAsync(any(Message.class))).thenReturn(ApiFutures.immediateFuture("accepted"));
+        var sender=new FirebasePushSender(messaging,properties(),Clock.fixed(NOW,ZoneOffset.UTC));
+        var original=message(NOW.plusSeconds(120));
+        var bundled=new PushMessage(original.deliveryId(),original.notificationId(),original.userId(),original.endpointId(),
+                original.leaseToken(),original.fcmToken(),original.title(),original.content(),original.link(),original.expiresAt(),
+                original.messageId(),original.correlationId(),99L);
+        sender.send(bundled);
+        var captured=ArgumentCaptor.forClass(Message.class); verify(messaging).sendAsync(captured.capture());
+        var webpush=org.springframework.test.util.ReflectionTestUtils.getField(captured.getValue(),"webpushConfig");
+        var notification=(java.util.Map<?,?>)org.springframework.test.util.ReflectionTestUtils.getField(webpush,"notification");
+        assertThat(notification.get("tag")).isEqualTo("push-bundle-99");
+    }
+
+    @Test
     void timeoutCancelsOutstandingSdkFutureAndReturnsSafeRetryReason() throws Exception {
         var messaging = mock(FirebaseMessaging.class);
         @SuppressWarnings("unchecked")

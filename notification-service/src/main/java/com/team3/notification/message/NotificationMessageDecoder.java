@@ -26,6 +26,10 @@ public class NotificationMessageDecoder {
                 throw new IllegalArgumentException(field + " must be an integer");
             }
         }
+        var pushExpiry = root.get("pushExpiresAt");
+        if (pushExpiry != null && !pushExpiry.isNull() && !pushExpiry.isTextual()) {
+            throw new IllegalArgumentException("pushExpiresAt must be an ISO-8601 timestamp string");
+        }
         return reader.readValue(json);
     }
 
