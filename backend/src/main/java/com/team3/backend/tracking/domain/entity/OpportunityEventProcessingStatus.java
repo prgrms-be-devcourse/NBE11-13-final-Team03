@@ -12,6 +12,9 @@ public enum OpportunityEventProcessingStatus {
      */
     PROCESSING,
 
+    /** User assessment is durably deferred pending policy/input clarification, not a successful fan-out. */
+    WAITING_POLICY,
+
     /**
      * 대상 사용자 알림 생성이 완료된 이벤트.
      */

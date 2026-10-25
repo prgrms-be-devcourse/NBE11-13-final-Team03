@@ -26,14 +26,14 @@ public class EventFanoutCoordinator {
     public int recoverExhausted() {
         var now = clock.instant();
         return events.failExhaustedFanouts(now, now.minus(properties.leaseTimeout()), properties.maxAttempts(),
-                PENDING, PROCESSING, FAILED);
+                PENDING, PROCESSING, FAILED, DateNotificationMessageFactory.supportedTypes());
     }
 
     @Transactional(readOnly = true)
     public List<Long> candidates() {
         var now = clock.instant();
         return events.findFanoutCandidates(now, now.minus(properties.leaseTimeout()), properties.maxAttempts(),
-                PENDING, PROCESSING, PageRequest.of(0, properties.maxEventsPerRun()));
+                PENDING, PROCESSING, DateNotificationMessageFactory.supportedTypes(), PageRequest.of(0, properties.maxEventsPerRun()));
     }
 
     @Transactional
@@ -41,13 +41,14 @@ public class EventFanoutCoordinator {
         var now = clock.instant();
         var token = UUID.randomUUID();
         return events.claimFanout(eventId, token, now, now.minus(properties.leaseTimeout()),
-                properties.maxAttempts(), PENDING, PROCESSING) == 1
+                properties.maxAttempts(), PENDING, PROCESSING, DateNotificationMessageFactory.supportedTypes()) == 1
                 ? Optional.of(new EventFanoutExecution(eventId, token)) : Optional.empty();
     }
 
     @Transactional
     public boolean retry(EventFanoutExecution execution, RuntimeException failure) {
         var event = events.lockForFanout(execution.eventId()).orElseThrow();
+        if (!DateNotificationMessageFactory.supportedTypes().contains(event.getEventType())) return false;
         if (!event.ownedBy(execution.leaseToken())) return false;
         event.retryFanout(clock.instant(), properties.retryDelay(), FailureReasons.of(failure),
                 properties.maxAttempts());

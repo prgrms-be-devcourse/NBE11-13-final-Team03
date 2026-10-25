@@ -70,9 +70,18 @@ public class OpportunityVersionTracking {
     /** Call only in the transaction that durably stores the event assessment and any generated events. */
     public void completeEventAnalysis(Instant now) {
         if (status != READY_FOR_EVENT_ANALYSIS) throw new IllegalStateException("Version is not awaiting event analysis");
+        recordAnalysisProgress(now, false);
+    }
+
+    /** Only after eligibility work and deadline assessment have been persisted in this transaction. */
+    public void recordAnalysisProgress(Instant now, boolean deadlineDeferred) {
+        if (status != READY_FOR_EVENT_ANALYSIS && status != PROCESSED_WITH_DEFERRED_DEADLINE) {
+            throw new IllegalStateException("Version is not awaiting analysis or deadline resolution");
+        }
         var completedAt = Objects.requireNonNull(now, "now");
         if (completedAt.isBefore(recordedAt)) throw new IllegalArgumentException("Completion cannot precede comparison");
-        status = PROCESSED;
+        status = deadlineDeferred ? PROCESSED_WITH_DEFERRED_DEADLINE : PROCESSED;
+        // Sequence checkpoint, not a claim that the deferred deadline was resolved.
         processedAt = completedAt;
     }
 

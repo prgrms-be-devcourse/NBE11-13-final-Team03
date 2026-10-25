@@ -24,6 +24,19 @@ class DateNotificationMessageFactoryTest {
             .normalizationVersion("test").normalizedSnapshot(Map.of()).build();
 
     @Test
+    void supportedTypesAreExactlyTheFourDateTypesAndCannotBeModified() {
+        assertThat(DateNotificationMessageFactory.supportedTypes()).containsExactlyInAnyOrder(
+                OpportunityEventType.APPLICATION_OPENED, OpportunityEventType.APPLICATION_CLOSED,
+                OpportunityEventType.DEADLINE_SOON, OpportunityEventType.DEADLINE_EXTENDED);
+        for (var type : OpportunityEventType.values()) {
+            assertThat(factory.supports(type)).isEqualTo(DateNotificationMessageFactory.supportedTypes().contains(type));
+        }
+        assertThat(factory.supports(null)).isFalse();
+        assertThatThrownBy(() -> DateNotificationMessageFactory.supportedTypes().add(OpportunityEventType.ELIGIBILITY_CHANGED))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     void producerMatchesSharedVersionOneContract() throws Exception {
         var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
         var resource = new org.springframework.core.io.ClassPathResource("contracts/notification-requested-v1.json");

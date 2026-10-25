@@ -18,6 +18,15 @@ import java.util.List;
 
 public interface OpportunityRepository extends JpaRepository<Opportunity, Long> {
 
+    /** Unlocked keyset discovery only. The tracking transaction must lock and recheck each policy. */
+    @Query("""
+            select o.id from Opportunity o
+            where o.id > :afterId and o.opportunityType = :type and o.currentVersion is not null
+            order by o.id
+            """)
+    List<Long> findSequentialPolicyIds(@Param("afterId") long afterId,
+            @Param("type") OpportunityType type, Pageable pageable);
+
     @Lock(LockModeType.PESSIMISTIC_READ)
     @Query("select o from Opportunity o join fetch o.currentVersion where o.id = :id")
     java.util.Optional<Opportunity> lockForNotification(@Param("id") Long id);
