@@ -133,7 +133,7 @@ function OpportunitiesPage() {
                   {data.content.map((item) => <li key={item.opportunityId}>
                     <Card className={styles.resultCard}>
                       <div className={styles.cardMeta}><span className={styles.type}>{typeLabels[item.type]}</span><span>{item.saved ? '저장됨' : '저장 안 함'}</span></div>
-                      <h3><Link to={`/opportunities/${item.opportunityId}`}>{item.title || '제목 미확인'}</Link></h3>
+                      <h3><Link to={`/opportunities/${item.opportunityId}`} state={{ searchReturn: `/opportunities${canonical ? `?${canonical}` : ''}` }}>{item.title || '제목 미확인'}</Link></h3>
                       <p className={styles.category}>{[item.category, item.subCategory, item.detailCategory].filter(Boolean).join(' · ') || '분류 미확인'}</p>
                       <div className={styles.cardFooter}>
                         {/^\d{4}-\d{2}-\d{2}T/.test(item.createdAt) && <span>최초 등록일 <time dateTime={item.createdAt}>{item.createdAt.slice(0, 10)}</time></span>}

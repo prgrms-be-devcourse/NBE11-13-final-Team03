@@ -1,0 +1,165 @@
+.page,
+.stack,
+.columns {
+  min-inline-size: 0;
+}
+
+.backLink,
+.externalLink {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  padding-block: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.backLink {
+  margin-block-end: var(--space-3);
+}
+
+.hero,
+.card {
+  padding: var(--space-3);
+}
+
+.hero {
+  margin-block-end: var(--space-4);
+}
+
+.hero h1 {
+  margin-block: var(--space-3);
+  font-size: clamp(1.5rem, 4vw, var(--font-size-title));
+}
+
+.meta,
+.statuses,
+.eligibilityBadge {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--font-size-small);
+}
+
+.meta {
+  justify-content: space-between;
+}
+
+.type,
+.applicationStatus {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.statuses {
+  margin-block-start: var(--space-3);
+}
+
+.columns,
+.stack {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.columns {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.stack > section {
+  min-inline-size: 0;
+}
+
+.card h2 {
+  margin: 0 0 var(--space-3);
+  font-size: 1.25rem;
+}
+
+.card h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-body);
+}
+
+.card p {
+  margin-block: var(--space-2);
+}
+
+.info {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.info dt {
+  margin-block-end: var(--space-1);
+  font-weight: 600;
+}
+
+.info dd {
+  margin: 0;
+}
+
+.info dd,
+.sourceText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.muted,
+.externalLink span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+}
+
+.notice {
+  padding: var(--space-3);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.items li + li {
+  margin-block-start: var(--space-3);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--color-border);
+}
+
+.items summary {
+  padding-block: var(--space-2);
+  min-block-size: 2.75rem;
+  cursor: pointer;
+  color: var(--color-primary);
+}
+
+.links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.externalLink {
+  display: block;
+  max-inline-size: 100%;
+}
+
+@media (min-width: 768px) {
+  .hero,
+  .card {
+    padding: var(--space-4);
+  }
+}
+
+@media (min-width: 1024px) {
+  .columns {
+    grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
+  }
+}
