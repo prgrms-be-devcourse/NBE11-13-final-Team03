@@ -14,10 +14,13 @@ import com.team3.backend.tracking.domain.entity.OpportunityEvent;
 import com.team3.backend.tracking.domain.entity.OpportunityEventType;
 import com.team3.backend.tracking.domain.entity.OpportunityEventProcessingStatus;
 import com.team3.backend.tracking.domain.entity.EligibilityEventAssessment;
+import com.team3.backend.tracking.domain.entity.OpportunityVersionTracking;
+import com.team3.backend.tracking.domain.entity.OpportunityVersionTrackingStatus;
 import com.team3.backend.tracking.domain.repository.EligibilityEventAssessmentRepository;
 import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
 import com.team3.backend.tracking.config.EventFanoutProperties;
 import com.team3.backend.tracking.config.EligibilityFanoutProperties;
+import com.team3.backend.tracking.config.VersionTrackingProperties;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.user.domain.entity.User;
@@ -52,8 +55,8 @@ import static org.assertj.core.api.Assertions.*;
 
 /** Real repositories and evaluator. Fixtures use domain rows, not collection/normalization implementation classes. */
 @Testcontainers
-@DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "yon.tracking.eligibility-outbox.enabled=true",
-        "yon.tracking.eligibility-fanout.enabled=true"})
+@DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "app.scheduling.enabled=false", "yon.tracking.eligibility-outbox.enabled=true",
+        "yon.tracking.eligibility-fanout.enabled=true", "yon.tracking.version.enabled=true", "yon.tracking.version-analysis.enabled=true"})
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -61,7 +64,10 @@ import static org.assertj.core.api.Assertions.*;
         EligibilityVersionComparisonService.class, EligibilityEvaluator.class, EligibilityEngine.class,
         ApplicationStatusCalculator.class, RegionDirectory.class, EligibilityOutboxTransaction.class,
         EligibilityNotificationMessageFactory.class, EligibilityFanoutCoordinator.class, EligibilityFanoutBatch.class,
-        EligibilityFanoutWorker.class, EventFanoutCoordinator.class, EligibilityNotificationRevalidationPostgresTest.TimeConfig.class})
+        EligibilityFanoutWorker.class, EventFanoutCoordinator.class, VersionTrackingPipeline.class,
+        OpportunityVersionWorker.class, OpportunityVersionComparisonTransaction.class, OpportunityVersionAnalysisTransaction.class,
+        OpportunitySnapshotComparator.class, DeadlineExtensionTransaction.class, DeadlineExtensionDetector.class,
+        EligibilityNotificationRevalidationPostgresTest.TimeConfig.class})
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class EligibilityNotificationRevalidationPostgresTest {
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 25);
@@ -77,6 +83,7 @@ class EligibilityNotificationRevalidationPostgresTest {
         @Bean EligibilityFanoutProperties eligibilityFanoutProperties() {
             return new EligibilityFanoutProperties(true, 1, 10, Duration.ofMinutes(30), Duration.ofMinutes(1), 5);
         }
+        @Bean VersionTrackingProperties versionTrackingProperties() { return new VersionTrackingProperties(true, 1, 60000); }
     }
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
             .withDatabaseName("eligibility_revalidation_test");
@@ -103,6 +110,7 @@ class EligibilityNotificationRevalidationPostgresTest {
     @Autowired EventFanoutCoordinator dateFanout;
     @Autowired OpportunityEventRepository events;
     @Autowired EligibilityEventAssessmentRepository assessments;
+    @Autowired VersionTrackingPipeline pipeline;
 
     @BeforeEach
     void resetDisposableContainerDataOnly() {
@@ -526,6 +534,59 @@ class EligibilityNotificationRevalidationPostgresTest {
                 .isEqualTo(EligibilityEventAssessment.Status.OUTBOX_CREATED);
         assertThat(outboxes.count()).isEqualTo(1);
         assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+    }
+
+    @Test
+    void pipelineConnectsComparisonAndAnalysisThenManualUserConsumerCreatesOneOutbox() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        baselineAndSave(fixture);
+        var first = pipeline.runOnce();
+        assertThat(first.visitedPolicies()).isEqualTo(1); assertThat(first.failures()).isZero();
+        assertThat(events.findAll()).extracting(OpportunityEvent::getEventType).containsExactly(OpportunityEventType.ELIGIBILITY_CHANGED);
+        assertThat(outboxes.count()).isZero(); // Pipeline never publishes or automatically starts user fan-out.
+        fanoutWorker.runOnce();
+        assertThat(outboxes.count()).isEqualTo(1); assertThat(assessments.count()).isEqualTo(1);
+        pipeline.runOnce(); // v3 has the same snapshot: NO_CHANGE and no new event.
+        fanoutWorker.runOnce();
+        assertThat(events.count()).isEqualTo(1); assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM opportunity_version_tracking WHERE opportunity_version_id=?", String.class, fixture.currentId()))
+                .isEqualTo("NO_CHANGE");
+    }
+
+    @Test
+    void pipelineWithoutExplicitBaselineDoesNotGuessInitialIngestionOrCreateEvents() {
+        fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var result = pipeline.runOnce();
+        assertThat(result.analysisCalls()).isZero(); assertThat(result.failures()).isZero();
+        assertThat(events.count()).isZero(); assertThat(outboxes.count()).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM opportunity_version_tracking", Long.class)).isZero();
+    }
+
+    @Test
+    void pipelineRetainsCommittedComparisonWhenAnalysisFailsAndRetriesReadyVersion() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        baselineAndSave(fixture);
+        jdbc.execute("ALTER TABLE opportunity_version_analysis ADD CONSTRAINT reject_pipeline_analysis CHECK (completed_at IS NULL)");
+        try { assertThat(pipeline.runOnce().failures()).isEqualTo(1); }
+        finally { jdbc.execute("ALTER TABLE opportunity_version_analysis DROP CONSTRAINT reject_pipeline_analysis"); }
+        assertThat(jdbc.queryForObject("SELECT status FROM opportunity_version_tracking WHERE opportunity_version_id=?", String.class, fixture.toId()))
+                .isEqualTo(OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS.name());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM opportunity_changes", Long.class)).isEqualTo(1);
+        assertThat(events.count()).isZero();
+        assertThat(pipeline.runOnce().failures()).isZero();
+        assertThat(events.count()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM opportunity_changes", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM opportunity_version_tracking WHERE opportunity_version_id=?", String.class, fixture.toId()))
+                .isEqualTo("PROCESSED");
+    }
+
+    private void baselineAndSave(Fixture fixture) {
+        tx(() -> {
+            var from = em.find(OpportunityVersion.class, fixture.fromId());
+            em.persist(OpportunityVersionTracking.baseline(from, NOW));
+            var saved = UserOpportunityPreference.builder().user(em.find(User.class, USER)).opportunity(from.getOpportunity()).build();
+            saved.markSaved(); em.persist(saved); return null;
+        });
     }
 
     private Long savedUser(Fixture fixture, LocalDate birthDate) {

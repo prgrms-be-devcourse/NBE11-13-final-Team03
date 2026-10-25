@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 import static com.team3.backend.tracking.config.DateTrackingConfig.KST;
 import static com.team3.backend.tracking.domain.entity.OpportunityVersionAnalysis.DeadlineOutcome.*;
 
-/** Explicit development path only. No scheduler or user fan-out is connected. */
+/** Opt-in analysis path used directly or by the gated version pipeline; user fan-out remains independent. */
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "yon.tracking.version-analysis.enabled", havingValue = "true")
