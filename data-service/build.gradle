@@ -62,3 +62,8 @@ tasks.named('test') {
 tasks.named('bootJar') {
     archiveFileName = 'app.jar'
 }
+
+tasks.named('processTestResources') {
+    from('../contracts/collection-completed-v1.json') { into 'contracts' }
+    from('../database/scripts/collection-outbox.sql') { into 'db-boundary' }
+}

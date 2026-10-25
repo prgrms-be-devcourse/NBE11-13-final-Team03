@@ -15,6 +15,7 @@ import jakarta.persistence.EntityNotFoundException;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +31,7 @@ public class SyncJobService {
     private static final List<SyncJobStatus> ACTIVE = List.of(SyncJobStatus.PENDING, SyncJobStatus.RUNNING);
     private final ExternalSourceRepository sources;
     private final SyncHistoryRepository histories;
+    private final CollectionCompletionOutbox completionOutbox;
     private final OffsetDateTime applicationStartedAt = OffsetDateTime.now();
 
     @Value("${collection.youth-policy.url}")
@@ -112,12 +114,20 @@ public class SyncJobService {
 
     @Transactional
     public void complete(Long jobId, boolean completed) {
-        locked(jobId).finish(completed, OffsetDateTime.now());
+        var history = locked(jobId);
+        // PostgreSQL timestamps have microsecond precision; keep occurredAt identical to finished_at.
+        history.finish(completed, OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS));
+        completionOutbox.recordIfDailyCompletion(history);
     }
 
     @Transactional
     public void fail(Long jobId, String safeReason, boolean interrupted) {
-        locked(jobId).fail(safeReason, interrupted, OffsetDateTime.now());
+        var history = locked(jobId);
+        if (!ACTIVE.contains(history.getStatus())) {
+            return;
+        }
+        history.fail(safeReason, interrupted, OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS));
+        completionOutbox.recordIfDailyCompletion(history);
     }
 
     @EventListener(ApplicationReadyEvent.class)

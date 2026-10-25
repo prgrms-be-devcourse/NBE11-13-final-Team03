@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'contracts/proto/**'
+      - 'contracts/collection-completed-v1.json'
       - 'data-service/**'
       - 'deploy/tests/**'
       - '.github/workflows/deploy.yml'
@@ -15,6 +16,7 @@ on:
     branches: [main]
     paths:
       - 'contracts/proto/**'
+      - 'contracts/collection-completed-v1.json'
       - 'data-service/**'
       - 'deploy/tests/**'
       - '.github/workflows/deploy.yml'
@@ -69,6 +71,11 @@ jobs:
           assert int(worker.attrib['tests']) > 0, 'gRPC worker tests did not run'
           for key in ('skipped', 'failures', 'errors'):
               assert int(worker.attrib[key]) == 0, f'gRPC worker tests: {key}={worker.attrib[key]}'
+          completion = ET.parse(results / 'TEST-com.team3.dataservice.collection.service.CollectionCompletionOutboxPostgresTest.xml').getroot()
+          assert int(completion.attrib['tests']) > 0, 'Collection completion Outbox tests did not run'
+          for key in ('skipped', 'failures', 'errors'):
+              assert int(completion.attrib[key]) == 0, f'Collection completion Outbox tests: {key}={completion.attrib[key]}'
+          print(f"Collection completion PostgreSQL tests passed: {completion.attrib['tests']}")
           suites = [ET.parse(path).getroot() for path in results.glob('TEST-*.xml')]
           counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
           print(f"data-service test totals: {counts}")
