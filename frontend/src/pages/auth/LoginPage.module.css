@@ -1,0 +1,64 @@
+.page {
+  max-inline-size: 38rem;
+  margin-inline: auto;
+  min-inline-size: 0;
+}
+
+.card {
+  padding: var(--space-4);
+}
+
+.eyebrow {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.card h1 {
+  margin-block: var(--space-3);
+  font-size: clamp(1.5rem, 4vw, var(--font-size-title));
+}
+
+.card p + p {
+  margin-block-start: var(--space-3);
+}
+
+.kakao,
+.link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 2.75rem;
+  padding: var(--space-3);
+  margin-block-start: var(--space-3);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.kakao {
+  margin-block: var(--space-4);
+  background: var(--color-accent-yellow);
+  color: var(--color-text-primary);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.kakao:hover {
+  text-decoration: underline;
+}
+
+.help {
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+}
+
+.notice {
+  padding: var(--space-3);
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-sm);
+}
+
+@media (min-width: 768px) {
+  .card {
+    padding: var(--space-5);
+  }
+}

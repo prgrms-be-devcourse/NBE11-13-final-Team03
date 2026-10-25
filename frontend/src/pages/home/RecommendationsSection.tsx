@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import type { AuthStatus } from '../../auth/AuthContext'
 import { useQuery } from '@tanstack/react-query'
 import { recommendationsQuery } from '../../api/recommendations'
 import type { RecommendationItem } from '../../api/recommendations'
@@ -30,16 +31,20 @@ function RecommendationCard({ item }: { item: RecommendationItem }) {
   </HomeOpportunityCard>
 }
 
-// 현재 Home은 ID를 전달하지 않는다. 후속 로그인 완료·인증 상태 확인 후에만 연결한다.
-function RecommendationsSection({ confirmedUserId }: { confirmedUserId?: number }) {
-  const options = recommendationsQuery(confirmedUserId)
+function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUserId?: number; authStatus?: AuthStatus }) {
+  const options = recommendationsQuery(authStatus && authStatus !== 'authenticated' ? undefined : confirmedUserId)
   const result = useQuery(options)
   let content
-  if (!options.enabled) {
+  if (authStatus === 'checking') {
+    content = <AsyncState status="loading" title="로그인 상태를 확인하고 있어요" />
+  } else if (authStatus === 'error') {
+    content = <AsyncState status="error" title="인증 상태를 확인하지 못했어요" description="통신 오류일 수 있어요. 헤더의 ‘다시 확인’으로 로그인 상태를 확인해 주세요." />
+  } else if (!options.enabled) {
     content = <Card variant="sage" className={styles.recommendationIntro}>
       <h3>나에게 맞는 기회를 놓치지 마세요</h3>
       <p>내 조건과 관심 분야를 설정하면 적합한 청년정책과 직업훈련을 추천받을 수 있어요.</p>
-      <p className={styles.help}>개인화 추천은 로그인과 맞춤 조건 설정이 필요해요. 현재 로그인 연결을 준비하고 있어요.</p>
+      <p className={styles.help}>개인화 추천은 로그인과 맞춤 조건 설정이 필요해요.</p>
+      <Link className={styles.textLink} to="/login?returnTo=%2F">카카오로 로그인하기 →</Link>
       <Link className={styles.textLink} to="/opportunities">공개 기회 먼저 살펴보기 →</Link>
     </Card>
   } else if (result.isPending) {
@@ -49,7 +54,7 @@ function RecommendationsSection({ confirmedUserId }: { confirmedUserId?: number 
     if (error instanceof ApiError && error.status === 404 && error.code === 'ELIGIBILITY_001') {
       content = <AsyncState status="empty" title="맞춤 조건 설정이 필요해요" description="판정 프로필이 등록되어 있지 않아요. 프로필 설정 기능은 준비 중이에요." />
     } else if (error instanceof ApiError && error.status === 401) {
-      content = <AsyncState status="error" title="로그인 상태를 다시 확인해 주세요" description="인증을 확인하지 못했어요. 추천 결과가 없는 상황과는 달라요." />
+      content = <><AsyncState status="error" title="로그인 상태를 다시 확인해 주세요" description="인증을 확인하지 못했어요. 추천 결과가 없는 상황과는 달라요." /><Link className={styles.textLink} to="/login?returnTo=%2F">카카오 로그인 다시 확인</Link></>
     } else {
       content = <AsyncState status="error" {...homeErrorMessage(error)} onRetry={() => { void result.refetch() }} />
     }

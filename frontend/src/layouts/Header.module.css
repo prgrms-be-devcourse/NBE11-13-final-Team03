@@ -106,6 +106,26 @@
   text-decoration: underline;
 }
 
+.auth {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-block-start: var(--space-2);
+  font-size: var(--font-size-small);
+}
+
+.nickname {
+  overflow-wrap: anywhere;
+  max-inline-size: 12rem;
+}
+
+.authError {
+  flex-basis: 100%;
+  color: var(--color-error);
+  margin: 0;
+}
+
 @media (min-width: 768px) {
   .menuButton {
     display: none;
@@ -114,10 +134,15 @@
   .navigation {
     display: block;
     flex-basis: auto;
+    flex: 1;
   }
 
   .menuList {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  .auth {
+    justify-content: flex-end;
   }
 }

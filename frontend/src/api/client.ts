@@ -51,6 +51,15 @@ function assertCurrentSession(session: number): void {
 
 /** 서버에서 재로그인 성공을 확인한 뒤에만 호출한다. 단순 401/네트워크 오류에는 호출하지 않는다. */
 export function resetAuthRecovery(): void {
+  advanceAuthSession()
+}
+
+/** 서버 로그아웃 204 확인 후 이전 세션의 재발급·늦은 401을 차단한다. 로그인 성공을 의미하지 않는다. */
+export function endAuthSession(): void {
+  advanceAuthSession()
+}
+
+function advanceAuthSession(): void {
   const previousAttempt = reissueAttempt
   authSession += 1
   authGeneration += 1

@@ -1,5 +1,6 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
+import { fileURLToPath } from 'node:url'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -7,8 +8,23 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      rolldownOptions: {
+        input: {
+          main: fileURLToPath(new URL('./index.html', import.meta.url)),
+          loginSuccess: fileURLToPath(new URL('./login-success.html', import.meta.url)),
+          loginFailure: fileURLToPath(new URL('./login-failure.html', import.meta.url)),
+        },
+      },
+    },
     server: {
       proxy: {
+        '/oauth2/authorization': {
+          target: env.BACKEND_URL || 'http://localhost:8080', changeOrigin: false, xfwd: true,
+        },
+        '/login/oauth2/code': {
+          target: env.BACKEND_URL || 'http://localhost:8080', changeOrigin: false, xfwd: true,
+        },
         '/api': {
           target: env.BACKEND_URL || 'http://localhost:8080',
           changeOrigin: true,

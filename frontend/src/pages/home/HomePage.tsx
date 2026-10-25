@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useAuth } from '../../auth/AuthContext'
 import { ArrowRight, Search } from 'lucide-react'
 import Button from '../../components/ui/Button'
 import TextField from '../../components/ui/TextField'
@@ -12,6 +13,7 @@ import styles from './HomePage.module.css'
 
 function HomePage() {
   const navigate = useNavigate()
+  const auth = useAuth()
   const latest = useQuery(homeLatestQuery())
   function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -43,7 +45,7 @@ function HomePage() {
             : <>{latest.isFetching && <p role="status" className={styles.help}>최근 등록된 기회를 새로 확인하고 있어요.</p>}
               <ul className={styles.grid}>{latest.data.content.map((item) => <li key={item.opportunityId}><HomeOpportunityCard item={item} /></li>)}</ul></>}
     </section>
-    <RecommendationsSection />
+    <RecommendationsSection confirmedUserId={auth.user?.id} authStatus={auth.status} />
   </div>
 }
 

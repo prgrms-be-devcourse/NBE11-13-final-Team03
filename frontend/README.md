@@ -1,6 +1,6 @@
 # Y:ON Frontend
 
-청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. 기본 라우팅, 반응형 공통 레이아웃, 디자인 토큰, 공통 UI와 API 통신 기반을 구성했다. `/`는 홈, `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세 화면이다. 나머지 경로는 플레이스홀더다.
+청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. `/`는 홈, `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세, `/login`은 카카오 로그인 진입 화면이다. 서버 사용자 조회에 기반한 인증 상태·로그아웃과 인증 후 홈 추천을 연결했다. 그 외 주요 메뉴는 플레이스홀더다.
 
 ## 기술 스택
 
@@ -35,10 +35,11 @@ frontend/
 │   ├── favicon.png
 │   └── logo/yon-symbol.png
 ├── src/
-│   ├── api/            # apiClient, ApiError, queryClient
+│   ├── api/            # apiClient, ApiError, queryClient, 인증·조회 API
+│   ├── auth/           # 사용자 Query·인증 전환·안전한 복귀 경로
 │   ├── components/ui/  # Button, Card, TextField, StatusBadge, AsyncState
 │   ├── layouts/        # AppLayout, Header 및 CSS Modules
-│   ├── pages/          # home, opportunities 검색·상세, PlaceholderPage
+│   ├── pages/          # home, auth, opportunities 검색·상세, PlaceholderPage
 │   ├── routes/         # AppRoutes
 │   ├── App.tsx
 │   ├── main.tsx        # BrowserRouter, QueryClientProvider
@@ -46,7 +47,9 @@ frontend/
 │   └── index.css
 ├── tests/              # API 클라이언트 및 개발 프록시 테스트
 ├── .env.example
-└── index.html
+├── index.html
+├── login-success.html
+└── login-failure.html
 ```
 
 디자인 토큰은 [src/tokens.css](src/tokens.css), 전역 스타일은 [src/index.css](src/index.css)에서 관리한다. 컴포넌트별 스타일은 해당 CSS Module에 둔다.
@@ -55,7 +58,9 @@ frontend/
 
 개발 서버는 `/api` 요청을 기본적으로 `http://localhost:8080`으로 전달하며 경로를 rewrite하지 않는다. 주소를 바꾸려면 [.env.example](.env.example)을 `.env.local`로 복사하고 `BACKEND_URL`을 설정한 뒤 Vite를 재시작한다.
 
-`BACKEND_URL`은 개발 서버 전용이며 브라우저에 노출하는 `VITE_` 변수가 아니다. `npm run preview`와 실제 배포에는 이 프록시가 적용되지 않는다. 배포 시 같은 출처의 `/api`를 백엔드로 연결하는 별도 서버 설정이 필요하다.
+OAuth 시작·콜백 경로도 같은 백엔드로 전달한다. 프런트엔드 Host를 유지하며 카카오에 실제 접속 출처의 `/login/oauth2/code/kakao`를 등록해야 한다. 예를 들어 `http://localhost:5173/login/oauth2/code/kakao`다. localhost와 127.0.0.1은 혼용하지 않는다. 등록과 실제 로그인 통합은 별도 확인 대상이다.
+
+`BACKEND_URL`은 개발 서버 전용이며 브라우저에 노출하는 `VITE_` 변수가 아니다. `npm run preview`와 실제 배포에는 이 프록시가 적용되지 않는다. 배포 시 프런트엔드 HTML·SPA 화면을 제공하고 같은 출처의 API·OAuth 경로를 백엔드로 연결하는 서버 설정이 필요하다.
 
 ## apiClient 사용
 
@@ -72,7 +77,9 @@ await apiClient.get('/users/me', { requiresAuth: true })
 
 ## 현재 미구현 사항
 
-로그인 UI·완료 흐름 및 OAuth 개발 프록시는 아직 구현하지 않았다. 홈은 공개 최신 공고를 조회하며 개인화 추천은 API·표시 구성을 준비하되 인증 연동 전에는 안내만 제공한다. 지역 선택은 공개 지역 옵션 API가 없어 보류하며, 신청 가능성 필터와 인증 복구 초기화 함수 연결은 후속 로그인 구현에서 다룬다. 저장 여부는 응답에 따른 읽기 전용 표시다. 프로필·저장 목록·마이페이지·알림 화면은 플레이스홀더다.
+프로필·관심 분야 수정, 저장·숨김 변경, 신청 가능성 검색 필터, 알림 기능은 구현하지 않았다. 지역 선택은 공개 지역 옵션 API가 없어 보류한다. 저장 여부는 응답에 따른 읽기 전용 표시다. 프로필·저장 목록·마이페이지·알림 화면은 플레이스홀더다. 실제 카카오·브라우저 쿠키·배포 통합은 미검증이다.
+
+로그인 흐름, 인증 상태와 배포 협의 사항은 [인증 UI 문서](docs/auth.md)를 참고한다.
 
 홈 구성, 추천 인증 조건과 후속 연결 사항은 [홈 문서](docs/home.md)를 참고한다.
 

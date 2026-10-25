@@ -31,6 +31,7 @@ const element = React.createElement
 
 function render({ recommendationsOnly = false, userId, data, error, cachedRecommendations } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, gcTime: Infinity, staleTime: Infinity } } })
+  client.setQueryData(['auth', 'user'], null)
   const key = recommendationsOnly ? recommendationsQuery(userId).queryKey : homeLatestQuery().queryKey
   if (data !== undefined) client.setQueryData(key, data)
   if (error) client.getQueryCache().build(client, { queryKey: key }).setState({ status: 'error', error, fetchStatus: 'idle' })
@@ -56,7 +57,8 @@ test('actual root route renders home hero, labelled search and working destinati
   assert.match(html, /type="submit"/)
   assert.match(html, /<h2 id="latest-heading">최근 등록된 기회/)
   assert.match(html, /<h2 id="recommendations-heading">개인화 추천/)
-  assert.doesNotMatch(html, /href="\/login|href="\/signup/)
+  assert.match(html, /href="\/login\?returnTo=/)
+  assert.doesNotMatch(html, /href="\/signup/)
 })
 
 test('public home cards render only actual search fields and connect to detail without invented status/dates/regions', () => {
@@ -90,10 +92,10 @@ test('public loading, empty, network, server and connection-refusal states remai
   }
 })
 
-test('unknown authentication always shows recommendation guidance even if disabled or another-account caches contain data', () => {
+test('anonymous authentication shows recommendation guidance even if disabled or another-account caches contain data', () => {
   const html = render({ data: latestResponse, cachedRecommendations: [policyRecommendation] })
   assert.match(html, /나에게 맞는 기회를 놓치지 마세요/)
-  assert.match(html, /현재 로그인 연결을 준비하고 있어요/)
+  assert.match(html, /개인화 추천은 로그인과 맞춤 조건 설정이 필요해요/)
   assert.doesNotMatch(html, /테스트 정책 추천|서버가 제공한 실제 판정/)
   const section = render({ recommendationsOnly: true, data: [trainingRecommendation] })
   assert.doesNotMatch(section, /테스트 훈련 추천/)
