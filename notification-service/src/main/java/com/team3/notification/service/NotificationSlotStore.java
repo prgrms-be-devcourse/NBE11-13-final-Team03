@@ -245,7 +245,13 @@ public class NotificationSlotStore {
     private boolean skip(Claim c,String reason) { return jdbc.update("UPDATE notification_bundle_deliveries SET status='SKIPPED',last_error=?,processing_started_at=NULL,lease_token=NULL WHERE id=? AND bundle_id=? AND status='CLAIMED' AND lease_token=?",reason,c.id(),c.bundleId(),c.token())==1; }
     private boolean skipSending(Claim c,String reason) { return jdbc.update("UPDATE notification_bundle_deliveries SET status='SKIPPED',last_error=?,processing_started_at=NULL,lease_token=NULL WHERE id=? AND bundle_id=? AND status='SENDING' AND lease_token=?",reason,c.id(),c.bundleId(),c.token())==1; }
     private void close(Bundle b,String reason) {
-        jdbc.update("UPDATE notification_bundle_deliveries SET status='SKIPPED',last_error=?,processing_started_at=NULL,lease_token=NULL WHERE bundle_id=? AND status IN ('PENDING','CLAIMED','SENDING')",reason,b.id());
+        // A valid SENDING lease may already be in FCM. Preserve its token so the acceptance receipt can still commit.
+        // PENDING/CLAIMED have not started I/O; abandoned SENDING is terminal only after the lease expires.
+        jdbc.update("""
+                UPDATE notification_bundle_deliveries SET status='SKIPPED',last_error=?,processing_started_at=NULL,lease_token=NULL
+                WHERE bundle_id=? AND (status IN ('PENDING','CLAIMED')
+                  OR (status='SENDING' AND processing_started_at<=?))
+                """,reason,b.id(),ts(clock.instant().minus(push.leaseTimeout())));
         finish(b);
     }
     private void finish(Bundle b) {

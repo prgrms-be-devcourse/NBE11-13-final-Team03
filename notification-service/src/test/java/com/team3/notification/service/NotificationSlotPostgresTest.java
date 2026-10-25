@@ -196,6 +196,51 @@ class NotificationSlotPostgresTest {
         clock.now=NOW.plusSeconds(1800); assertThat(store.prepare(claim)).isEmpty(); assertThat(usage()).isZero();
     }
 
+    @Test void windowClosePreservesInflightLeaseAndReceiptButCancelsUnpreparedDevice() {
+        users.registerEndpoint(7,new EndpointRequest("device-b")); receive(); store.build(7);
+        clock.now=NOW.plusSeconds(1790);
+        var sending=store.claimNext().orElseThrow(); store.prepare(sending).orElseThrow();
+        var unprepared=store.claimNext().orElseThrow();
+        clock.now=NOW.plusSeconds(1800);
+        store.expire(new NotificationSlotStore.BundleRef(sending.bundleId(),sending.userId()));
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_bundle_deliveries WHERE id=?",String.class,sending.id())).isEqualTo("SENDING");
+        assertThat(jdbc.queryForObject("SELECT lease_token FROM notification_bundle_deliveries WHERE id=?",UUID.class,sending.id())).isEqualTo(sending.token());
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_bundle_deliveries WHERE id=?",String.class,unprepared.id())).isEqualTo("SKIPPED");
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_push_bundles",String.class)).isEqualTo("READY");
+        assertThat(store.claimNext()).isEmpty(); assertThat(store.prepare(unprepared)).isEmpty();
+        // Completion of a call started inside the window may arrive after its exclusive end.
+        assertThat(store.sent(sending,"accepted-before-window-close")).isTrue();
+        assertThat(jdbc.queryForObject("SELECT fcm_message_id FROM notification_bundle_deliveries WHERE id=?",String.class,sending.id()))
+                .isEqualTo("accepted-before-window-close");
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_push_bundles",String.class)).isEqualTo("COMPLETED");
+        assertThat(usage()).isEqualTo(1); verifyNoInteractions(sender);
+    }
+
+    @Test void windowCleanupTerminatesAbandonedSendingOnlyAfterLeaseExpiry() {
+        receive(); store.build(7); clock.now=NOW.plusSeconds(1790);
+        var claim=store.claimNext().orElseThrow(); store.prepare(claim).orElseThrow();
+        var ref=new NotificationSlotStore.BundleRef(claim.bundleId(),claim.userId());
+        clock.now=NOW.plusSeconds(1800); store.expire(ref);
+        assertThat(deliveryState()).isEqualTo("SENDING"); assertThat(store.claimNext()).isEmpty();
+        clock.now=NOW.plusSeconds(1910); // Exactly 120 seconds since this SENDING lease began.
+        store.expire(ref);
+        assertThat(deliveryState()).isEqualTo("SKIPPED"); assertThat(store.sent(claim,"too-late")).isFalse();
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_push_bundles",String.class)).isEqualTo("SKIPPED");
+        assertThat(usage()).isEqualTo(1); verifyNoInteractions(sender);
+    }
+
+    @Test void revokedConsentCancelsUnpreparedDeviceButKeepsAlreadyStartedDeviceReceipt() {
+        users.registerEndpoint(7,new EndpointRequest("device-b")); receive(); store.build(7);
+        var sending=store.claimNext().orElseThrow(); store.prepare(sending).orElseThrow();
+        var unprepared=store.claimNext().orElseThrow(); users.updateSettings(7,new SettingsRequest(true,false));
+        assertThat(store.prepare(unprepared)).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_bundle_deliveries WHERE id=?",String.class,sending.id())).isEqualTo("SENDING");
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_bundle_deliveries WHERE id=?",String.class,unprepared.id())).isEqualTo("SKIPPED");
+        assertThat(store.claimNext()).isEmpty(); assertThat(store.sent(sending,"already-in-flight")).isTrue();
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_push_bundles",String.class)).isEqualTo("COMPLETED");
+        assertThat(usage()).isEqualTo(1); verifyNoInteractions(sender);
+    }
+
     @Test void staleSendingRetainsFirstAttemptAndOldTokenCannotCompleteOrDeactivateEndpoint() {
         receive(); store.build(7); var old=store.claimNext().orElseThrow(); var snapshot=store.prepare(old).orElseThrow();
         clock.now=NOW.plusSeconds(181); assertThat(store.recoverStale()).isEqualTo(1); assertThat(usage()).isEqualTo(1);

@@ -92,7 +92,10 @@ Application이 priority를 싣는 이전 초안은 v1에 적용하지 않는다.
   각 기기의 준비 시점에 대표/건수가 달라질 수 있으며, FCM tag는 대표 ID 대신 고정 bundle ID를 사용한다.
 - stale CLAIMED는 시도 기록/장애 횟수 없이 재점유한다. stale SENDING은 기존 지수 백오프/횟수 소모를 적용하고 최초 시도 기록은 보존한다.
   과거 token의 완료·무효 토큰 처리로 새 lease/Endpoint 상태를 변경할 수 없다.
-- 창 밖에서는 새 점유/발송을 금지하고 미완료 전달은 예산 내에서 SKIPPED로 정리한다. 결과는 SENT가 있으면 COMPLETED,
+- 창 밖에서는 새 점유/발송을 금지하고 PENDING/CLAIMED 및 lease가 만료된 SENDING만 예산 내에서 SKIPPED로 정리한다.
+  창 종료·동의 철회 때도 lease 유효한 SENDING은 이미 FCM을 호출했을 수 있으므로 token을 보존하고 완료/실패 콜백을 허용한다.
+  그동안 묶음은 READY로 남을 수 있지만 창 밖 신규 점유는 불가하며, 미완료 콜백 없이 lease가 만료되면 후속 poll에서 종료한다.
+  결과는 SENT가 있으면 COMPLETED,
   SENT 없이 FAILED가 있으면 FAILED, 나머지는 SKIPPED로 집계한다. 정리는 여러 poll이 걸릴 수 있어도 창 밖 claim은 허용하지 않는다.
 - 아직 묶이지 않은 만료 대기는 poll당 최대 1000개를 CAS로 제외한다. 인앱 행은 삭제하지 않는다.
 - 묶음은 대표 Notification FK에 연결하고 대기 항목/기기별 전달/사용 기록도 Notification·Endpoint 삭제에 CASCADE로 정리한다.
@@ -102,13 +105,26 @@ Application이 priority를 싣는 이전 초안은 v1에 적용하지 않는다.
 
 ## 검증 상태와 후속
 
-기반 검증 XML(2026-10-25): PushSlotPolicyTest 6·NotificationMessageContractTest 10·NotificationDeliveryPostgresTest 17,
-backend DateNotificationMessageFactoryTest 13·IngestBoundaryTest 3, 합계 49개 skip/failure/error 0을 확인했다.
-이 결과는 슬롯 Worker 연결 이전 기반 검증이며 새 연결 코드의 회귀 성공을 뜻하지 않는다.
+### PR #73 리뷰 보완 전 로컬 검증 (2026-10-25)
 
-추가한 검증: NotificationSlotPostgresTest의 대기/묶음/횟수 원자성·다기기·대표 교체·창 종료·세 슬롯·stale lease·동시 생성/점유·탈퇴 CASCADE·전환 가드,
-NotificationSlotWorkerTest의 최종 창 검사·예산·중복 호출·완료 저장 실패, 설정 게이트/경로/예산 및 FCM 고정 tag 검사.
-신규 테스트는 아직 실행하지 않았다. 실제 DDL·실제 타이머·외부 FCM·운영 다중 인스턴스 검증도 수행하지 않았다.
+| 테스트 | 건수 | 결과 |
+| --- | --- | --- |
+| NotificationSlotPostgresTest | 20 | skip/failure/error 0 |
+| NotificationSlotWorkerTest | 6 | skip/failure/error 0 |
+| NotificationPushConfigTest | 7 | skip/failure/error 0 |
+| FirebasePushSenderTest | 5 | skip/failure/error 0 |
+| PushSlotPolicyTest | 6 | skip/failure/error 0 |
+| NotificationMessageContractTest | 10 | skip/failure/error 0 |
+| NotificationDeliveryPostgresTest | 17 | skip/failure/error 0 |
+| backend DateNotificationMessageFactoryTest | 13 | skip/failure/error 0 |
+| backend IngestBoundaryTest | 3 | skip/failure/error 0 |
+| **합계** | **87** | **skip/failure/error 0** |
+
+- 양쪽 프로젝트의 `test bootJar --rerun-tasks` 성공. 리뷰 검증 보고 기준 Notification 전체 139개 실패/건너뜀 0, backend 전체 835개 실패 0·기존 조건부 건너뜀 98이다.
+- 관련 조건부 테스트는 테스트 전용 yon_test에서 별도로 실행했다. EligibilityResultServiceTest 18개와 ConditionSetBackfillTest 1개 모두 skip/failure/error 0이며, 나머지 조건부 테스트의 실행을 뜻하지 않는다.
+- backend 최초 전체 실행의 OpportunityDetailPostgresTest는 PostgreSQL SSL 연결 오류로 Context 초기화가 실패했다. 해당 클래스 단독 및 전체 재실행은 통과했다. dialect 설정이나 업무 코드는 변경하지 않았다.
+- 창 종료 후/동의 철회 시 진행 중 SENDING의 영수증 보존과 lease 만료 후 정리 테스트 3개를 리뷰 보완으로 추가했다. 이 보완의 재실행 결과는 아직 미확인이고 위 표에 포함하지 않는다.
+- 실제 운영 DDL 적용·실제 타이머·외부 FCM·운영 다중 인스턴스/부하 검증은 수행하지 않았다. 최신 보완 커밋의 CI와 운영 활성화는 별도 확인 대상이다.
 
 팀 정책 최종 합의·기존 대기 Delivery 전환·실제 알림함 경로 확인과 성능/실패 관측이 필요하다. 미시도 이월은 후속 PR이다.
 초기 데이터 기준선·WAITING_POLICY 재개 등 10단계 잔여는 별도 후속으로 유지한다.
