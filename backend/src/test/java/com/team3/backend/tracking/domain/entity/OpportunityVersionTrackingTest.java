@@ -85,6 +85,19 @@ class OpportunityVersionTrackingTest {
         assertThat(record.getProcessedAt()).isNull();
     }
 
+    @Test
+    void deadlineDeferralIsExplicitAndCanLaterResolveWithoutPretendingItWasComplete() {
+        var from = version(1, 1, 10, "v1"); var to = version(2, 2, 10, "v1");
+        var comparison = comparator.compare(Map.of(), "v1", Map.of("title", "changed"), "v1");
+        var record = OpportunityVersionTracking.compared(from, to, comparison, NOW);
+        record.recordAnalysisProgress(NOW, true);
+        assertThat(record.getStatus()).isEqualTo(PROCESSED_WITH_DEFERRED_DEADLINE);
+        assertThat(record.getProcessedAt()).isEqualTo(NOW);
+        record.recordAnalysisProgress(NOW.plusSeconds(1), false);
+        assertThat(record.getStatus()).isEqualTo(PROCESSED);
+        assertThatThrownBy(() -> record.recordAnalysisProgress(NOW.plusSeconds(2), true)).isInstanceOf(IllegalStateException.class);
+    }
+
     private OpportunityVersion version(long id, int versionNo, long opportunityId, String normalizationVersion) {
         return OpportunityVersion.builder().id(id).versionNo(versionNo)
                 .opportunity(Opportunity.builder().id(opportunityId).build())

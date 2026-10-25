@@ -6,7 +6,7 @@ import com.team3.backend.eligibility.service.EligibilityEvaluator.Judgement;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.repository.*;
 import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceRepository;
-import com.team3.backend.tracking.config.EventFanoutProperties;
+import com.team3.backend.tracking.config.EligibilityFanoutProperties;
 import com.team3.backend.tracking.domain.entity.*;
 import com.team3.backend.tracking.domain.model.*;
 import com.team3.backend.tracking.domain.repository.*;
@@ -36,7 +36,7 @@ public class EligibilityFanoutBatch {
     private final EligibilityVersionComparisonService comparisons;
     private final ProvisionalEligibilityTransitionClassifier classifier;
     private final EligibilityOutboxTransaction outboxes;
-    private final EventFanoutProperties properties;
+    private final EligibilityFanoutProperties properties;
     private final EntityManager em;
     private final JdbcTemplate jdbc;
     private final Clock clock;
@@ -92,7 +92,7 @@ public class EligibilityFanoutBatch {
             if (preferences.lockSavedForNotification(policy.getId(), List.of(userId)).isEmpty()) reason = "NOT_SAVED";
             else {
                 var profileIds = jdbc.queryForList("SELECT id FROM eligibility_profiles WHERE user_id=? FOR SHARE", Long.class, userId);
-                if (profileIds.isEmpty()) { status = DEFERRED; reason = "PROFILE_MISSING"; }
+                if (profileIds.isEmpty()) { status = SKIPPED; reason = "PROFILE_MISSING"; }
                 else {
                     em.refresh(em.find(EligibilityProfile.class, profileIds.getFirst()));
                     var source = comparisons.compare(userId, from, to, date).orElseThrow();
@@ -117,11 +117,10 @@ public class EligibilityFanoutBatch {
                                 evidence.put("revalidatedVersionId", fresh.revalidatedVersionId());
                                 evidence.put("latest", judgement(fresh.latestJudgement()));
                             }
-                            boolean pending = fresh.outcome() == EligibilityNotificationRevalidation.Outcome.PROFILE_MISSING
-                                    || fresh.outcome() == EligibilityNotificationRevalidation.Outcome.RULE_VERSION_CHANGED
+                            boolean pending = outboxId == null && (fresh.outcome() == EligibilityNotificationRevalidation.Outcome.RULE_VERSION_CHANGED
                                     || (fresh.freshComparison() != null && classifier.classify(fresh.freshComparison().before().evaluation().status(),
                                             fresh.freshComparison().after().evaluation().status()) == EligibilityTransitionDecision.DEFERRED)
-                                    || (fresh.latestJudgement() != null && fresh.latestJudgement().evaluation().status() == EligibilityStatus.UNKNOWN);
+                                    || (fresh.latestJudgement() != null && fresh.latestJudgement().evaluation().status() == EligibilityStatus.UNKNOWN));
                             if (pending) { status = DEFERRED; reason = fresh.outcome().name(); }
                         }
                     }

@@ -1,7 +1,7 @@
 package com.team3.backend.tracking.service;
 
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
-import com.team3.backend.tracking.domain.repository.OpportunityVersionTrackingRepository;
+import com.team3.backend.opportunity.domain.repository.OpportunityRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -17,7 +17,7 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class OpportunityVersionWorker {
-    private final OpportunityVersionTrackingRepository tracking;
+    private final OpportunityRepository opportunities;
     private final OpportunityVersionComparisonTransaction comparisons;
 
     /** Each policy commits independently. A failed step is rediscovered when a later sweep starts at zero. */
@@ -26,7 +26,7 @@ public class OpportunityVersionWorker {
         if (afterOpportunityId < 0 || maxPolicies < 1 || maxPolicies > 500) {
             throw new IllegalArgumentException("Non-negative cursor and policy limit 1..500 are required");
         }
-        var ids = tracking.findSequentialPolicyIds(afterOpportunityId, OpportunityType.YOUTH_POLICY,
+        var ids = opportunities.findSequentialPolicyIds(afterOpportunityId, OpportunityType.YOUTH_POLICY,
                 PageRequest.of(0, maxPolicies + 1));
         var attempts = new ArrayList<Attempt>();
         long cursor = afterOpportunityId;
@@ -36,6 +36,7 @@ public class OpportunityVersionWorker {
             } catch (RuntimeException failure) {
                 attempts.add(new Attempt(id, Optional.empty()));
                 log.warn("Version comparison failed: opportunityId={}, error={}", id, failure.getClass().getSimpleName());
+                if (log.isDebugEnabled()) log.debug("Version comparison diagnostic: opportunityId={}, trace={}", id, FailureReasons.diagnosticTrace(failure));
             }
             cursor = id;
         }

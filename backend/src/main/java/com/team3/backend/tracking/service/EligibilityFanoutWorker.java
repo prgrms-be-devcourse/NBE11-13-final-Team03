@@ -28,6 +28,7 @@ public class EligibilityFanoutWorker {
             } catch (RuntimeException failure) {
                 boolean retained = coordinator.retry(execution, failure);
                 log.warn("Eligibility fanout failed: eventId={}, retryOwned={}, error={}", id, retained, failure.getClass().getSimpleName());
+                if (log.isDebugEnabled()) log.debug("Eligibility fanout diagnostic: eventId={}, trace={}", id, FailureReasons.diagnosticTrace(failure));
             }
         }
     }

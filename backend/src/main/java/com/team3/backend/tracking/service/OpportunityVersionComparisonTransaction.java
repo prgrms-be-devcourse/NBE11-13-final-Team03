@@ -88,6 +88,7 @@ public class OpportunityVersionComparisonTransaction {
         if (from.isEmpty()) return new Step(Outcome.WAITING_FOR_BASELINE, target.getId(), null);
         var previous = tracking.findByOpportunityVersionId(from.orElseThrow().getId());
         if (previous.isEmpty() || previous.orElseThrow().getProcessedAt() == null) {
+            // Defensive invariant check; normal earliest-unfinished discovery selects this predecessor first.
             return new Step(Outcome.WAITING_FOR_PREDECESSOR, target.getId(), null);
         }
         // Self-invocation intentionally shares this transaction and the already acquired policy lock.

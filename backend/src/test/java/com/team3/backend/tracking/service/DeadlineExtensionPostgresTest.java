@@ -431,17 +431,19 @@ class DeadlineExtensionPostgresTest {
     }
 
     @Test
-    void scopedPeriodAssessmentPersistsDeferralWithoutCompletingOrQueuingUserWork() {
+    void scopedPeriodDeferralKeepsEvidenceButQueuesEligibilityAndAdvancesTheSequence() {
         var pair = seed(true, "v1", Map.of("round", "not-matched")); comparisons.compare(pair.toId());
         var result = analysis.analyze(pair.toId());
-        assertThat(result.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.DEFERRED);
+        assertThat(result.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.DEADLINE_DEFERRED);
         var saved = analyses.findById(result.analysisId()).orElseThrow();
         assertThat(saved.getDeadlineOutcome()).isEqualTo(OpportunityVersionAnalysis.DeadlineOutcome.DEFERRED_SCOPED);
         assertThat(saved.getCompletedAt()).isNull();
         assertThat(analysis.analyze(pair.toId())).isEqualTo(result);
         assertThat(tracking.findByOpportunityVersionId(pair.toId()).orElseThrow().getStatus())
-                .isEqualTo(OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS);
-        assertThat(events.count()).isZero();
+                .isEqualTo(OpportunityVersionTrackingStatus.PROCESSED_WITH_DEFERRED_DEADLINE);
+        assertThat(events.findAll()).extracting(OpportunityEvent::getEventType).containsExactly(OpportunityEventType.ELIGIBILITY_CHANGED);
+        var third = appendThird(pair, "v1");
+        assertThat(comparisons.compareNext(pair.policyId()).versionId()).isEqualTo(third);
     }
 
     @Test
@@ -450,10 +452,10 @@ class DeadlineExtensionPostgresTest {
         jdbc.update("UPDATE application_windows SET validation_status='INVALID' WHERE version_id=?", pair.toId());
         comparisons.compare(pair.toId());
         var result = analysis.analyze(pair.toId());
-        assertThat(result.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.DEFERRED);
+        assertThat(result.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.DEADLINE_DEFERRED);
         assertThat(analyses.findById(result.analysisId()).orElseThrow().getDeadlineOutcome())
                 .isEqualTo(OpportunityVersionAnalysis.DeadlineOutcome.DEFERRED_PERIOD);
-        assertThat(events.count()).isZero();
+        assertThat(events.findAll()).extracting(OpportunityEvent::getEventType).containsExactly(OpportunityEventType.ELIGIBILITY_CHANGED);
     }
 
     @Test
@@ -547,6 +549,47 @@ class DeadlineExtensionPostgresTest {
         assertThatThrownBy(() -> analysis.analyze(pair.toId())).isInstanceOf(IllegalStateException.class);
         assertThat(analyses.count()).isZero(); assertThat(events.count()).isEqualTo(1);
         assertThat(tracking.findByOpportunityVersionId(pair.toId()).orElseThrow().getProcessedAt()).isNull();
+    }
+
+    @Test
+    void newAnalysisVersionAppendsEvidenceAndResolvesDeadlineWithoutDuplicatingEligibilityWork() {
+        var pair = seed(true, "v1", Map.of("round", "unmatched")); appendThird(pair, "v1");
+        comparisons.compareNext(pair.policyId());
+        var original = analysis.analyze(pair.toId());
+        // Model an older deployed analyzer's durable result; domain versions remain untouched in production.
+        jdbc.update("UPDATE opportunity_version_analysis SET analysis_version='older-analysis-rule' WHERE id=?", original.analysisId());
+        var trackingId = tracking.findByOpportunityVersionId(pair.toId()).orElseThrow().getId();
+        var eligibilityId = events.findAll().getFirst().getEventId();
+        // Simulate repaired immutable fixture input so the newer analyzer can reach a conclusive result.
+        jdbc.update("UPDATE application_windows SET scope=NULL WHERE version_id IN (?, ?)", pair.fromId(), pair.toId());
+        var resolved = analysis.analyze(pair.toId());
+        assertThat(resolved.outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.COMPLETED);
+        assertThat(resolved.analysisId()).isNotEqualTo(original.analysisId());
+        assertThat(analyses.findByTrackingIdOrderByIdAsc(trackingId)).hasSize(2);
+        assertThat(analyses.findById(original.analysisId()).orElseThrow().getCompletedAt()).isNull();
+        assertThat(analyses.findByTrackingIdAndAnalysisVersion(trackingId, OpportunityVersionAnalysisTransaction.ANALYSIS_VERSION))
+                .isPresent();
+        assertThat(tracking.findById(trackingId).orElseThrow().getStatus()).isEqualTo(OpportunityVersionTrackingStatus.PROCESSED);
+        assertThat(events.findAll()).extracting(OpportunityEvent::getEventId).containsExactly(eligibilityId);
+        assertThat(analysis.analyze(pair.toId())).isEqualTo(resolved);
+    }
+
+    @Test
+    void failedDeadlineReanalysisKeepsPreviousEvidenceAndSequenceCheckpoint() {
+        var pair = seed(true, "v1", Map.of("round", "unmatched")); comparisons.compare(pair.toId());
+        var original = analysis.analyze(pair.toId());
+        jdbc.update("UPDATE opportunity_version_analysis SET analysis_version='older-analysis-rule' WHERE id=?", original.analysisId());
+        jdbc.execute("ALTER TABLE opportunity_version_analysis ADD CONSTRAINT reject_new_analysis CHECK (analysis_version = 'older-analysis-rule')");
+        try {
+            assertThatThrownBy(() -> analysis.analyze(pair.toId())).isInstanceOf(RuntimeException.class);
+        } finally {
+            jdbc.execute("ALTER TABLE opportunity_version_analysis DROP CONSTRAINT reject_new_analysis");
+        }
+        assertThat(analyses.count()).isEqualTo(1); assertThat(events.count()).isEqualTo(1);
+        assertThat(tracking.findByOpportunityVersionId(pair.toId()).orElseThrow().getStatus())
+                .isEqualTo(OpportunityVersionTrackingStatus.PROCESSED_WITH_DEFERRED_DEADLINE);
+        assertThat(analysis.analyze(pair.toId()).outcome()).isEqualTo(OpportunityVersionAnalysisTransaction.Outcome.DEADLINE_DEFERRED);
+        assertThat(analyses.count()).isEqualTo(2); assertThat(events.count()).isEqualTo(1);
     }
 
     private Pair seed(boolean baseline, String toRule, Map<String, Object> scope) {

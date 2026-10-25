@@ -15,13 +15,13 @@ import java.util.Objects;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "opportunity_version_analysis", uniqueConstraints = @UniqueConstraint(
-        name = "uk_version_analysis_tracking", columnNames = "tracking_id"))
+        name = "uk_version_analysis_rule", columnNames = {"tracking_id", "analysis_version"}))
 public class OpportunityVersionAnalysis {
     public enum DeadlineOutcome { UNCHANGED, EXTENDED, NOT_EXTENDED, DEFERRED_SCOPED, DEFERRED_PERIOD }
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "tracking_id", nullable = false, updatable = false,
             foreignKey = @ForeignKey(name = "fk_version_analysis_tracking"))
     private OpportunityVersionTracking tracking;
@@ -52,7 +52,8 @@ public class OpportunityVersionAnalysis {
             Long currentVersionId, DeadlineOutcome deadlineOutcome, List<String> changedPaths,
             OpportunityEvent deadlineEvent, OpportunityEvent eligibilityEvent, Instant now) {
         Objects.requireNonNull(tracking, "tracking");
-        if (tracking.getId() == null || tracking.getStatus() != OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS) {
+        if (tracking.getId() == null || (tracking.getStatus() != OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS
+                && tracking.getStatus() != OpportunityVersionTrackingStatus.PROCESSED_WITH_DEFERRED_DEADLINE)) {
             throw new IllegalArgumentException("Persisted pending tracking record required");
         }
         if (analysisVersion == null || analysisVersion.isBlank() || currentVersionId == null || currentVersionId <= 0) {
@@ -60,9 +61,7 @@ public class OpportunityVersionAnalysis {
         }
         Objects.requireNonNull(deadlineOutcome, "deadlineOutcome");
         boolean deferred = deadlineOutcome == DeadlineOutcome.DEFERRED_PERIOD || deadlineOutcome == DeadlineOutcome.DEFERRED_SCOPED;
-        if ((deferred && eligibilityEvent != null) || (!deferred && eligibilityEvent == null)) {
-            throw new IllegalArgumentException("Only completed assessment queues user analysis");
-        }
+        Objects.requireNonNull(eligibilityEvent, "Durable user analysis work required even when deadline is deferred");
         if (deadlineEvent != null && (deadlineOutcome != DeadlineOutcome.EXTENDED
                 || deadlineEvent.getEventType() != OpportunityEventType.DEADLINE_EXTENDED)) {
             throw new IllegalArgumentException("Deadline event must match extension assessment");

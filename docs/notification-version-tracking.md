@@ -31,10 +31,12 @@
 | NO_CHANGE | 같은 정규화 규칙에서 구조 차이 없음 |
 | NORMALIZATION_VERSION_CHANGED | 정규화 규칙 변경으로 이벤트 분석 억제 |
 | READY_FOR_EVENT_ANALYSIS | 차이 발견, 이벤트 분석 미완료 |
+| PROCESSED_WITH_DEFERRED_DEADLINE | 자격조건 후속 작업은 영속화해 다음 버전으로 진행 가능. 마감 판단은 미완료로 별도 보존 |
 | PROCESSED | 버전 단위 이벤트 판단/필요 후속 작업 저장까지 완료. 사용자별 판정·발송 완료와 별개 |
 
 변경 발견만으로 버전을 처리 완료로 간주하지 않는다. READY_FOR_EVENT_ANALYSIS는 processed_at이 없고,
-이벤트 판단과 필요한 이벤트 저장이 커밋되는 트랜잭션에서만 PROCESSED로 바꾼다.
+이벤트 판단과 필요한 이벤트 저장이 커밋되는 트랜잭션에서만 완료/진행 상태로 바꾼다.
+마감만 보류된 상태의 processed_at은 순차 진행 체크포인트이며 마감 해결을 뜻하지 않는다.
 명시적 분석 트랜잭션에서 근거·후속 이벤트와 완료 전환을 함께 저장한다. 이를 자동 실행하는 스케줄러는 연결하지 않았다.
 
 `opportunity_changes`는 (from_version_id, to_version_id) UNIQUE이며 실제 구조 차이가 있을 때만 저장한다.
@@ -335,21 +337,26 @@ Outbox 생성과 근거 보존은 같은 행의 원자적 INSERT다. profile/정
 `yon.tracking.version-analysis.enabled=true`일 때만 등록되는 명시적 개발 경로다. 속성이 없거나 false이면 등록하지 않는다.
 실제 환경에 이 옵션을 추가하지 않았고 자동 Worker에서도 호출하지 않는다. 사용자별 Outbox 옵션·전달·푸시 옵션과 별개다.
 
-- 정책 행을 잠근 뒤 현재 포인터·직전 완료 버전·같은 정규화 규칙·READY 상태와 변경 이력을 확인한다.
-- `opportunity_version_analysis`에 tracking ID UNIQUE, 분석 규칙 버전, 분석 당시 현재 버전 ID, 변경 경로,
+- 정책 행을 잠근 뒤 현재 포인터·직전 버전 진행 근거·같은 정규화 규칙·READY/마감 보류 상태와 변경 이력을 확인한다.
+- `opportunity_version_analysis`에 `(tracking_id, analysis_version)` UNIQUE, 분석 규칙 버전, 분석 당시 현재 버전 ID, 변경 경로,
   마감 분석 결과, 후속 이벤트 참조와 기록/완료 시각을 저장한다. backend의 기존 update 정책을 따르며 실제 DB 반영은 미검증이다.
 - 신청기간은 행 ID·원문 표현을 제외하되 기간 유형·시작/종료일·검증 상태·scope·중복 개수를 보존해 비교한다.
-  동일한 기간은 UNCHANGED다. 달라진 scope/복수·불명확 기간은 DEFERRED_SCOPED 또는 DEFERRED_PERIOD로 기록하고 READY를 유지한다.
+  동일한 기간은 UNCHANGED다. 달라진 scope/복수·불명확 기간은 DEFERRED_SCOPED 또는 DEFERRED_PERIOD로 기록한다.
+  마감 보류와 무관하게 자격조건 비교 이벤트를 저장하고 PROCESSED_WITH_DEFERRED_DEADLINE으로 순차 진행을 허용한다.
+  이때 분석 이력의 completed_at은 NULL로 남는다. 마감 판단을 완료로 간주하거나 보류 근거를 지우지 않는다.
 - 명확한 연장은 기존 마감 연장 경로를 사용한다. 과거 버전의 연장 근거는 남기지만 오래된 연장 알림은 새로 생성하지 않는다.
 - 명확한 구조 변경에는 버전 쌍 단위 `ELIGIBILITY_CHANGED:{policyId}:{fromId}:{toId}` 후속 작업을 저장한다.
   이는 사용자별 판정을 비교하라는 요청이지 실제 신청 가능성 변화나 알림 발송의 확정이 아니다.
   제목 등 판정과 무관한 변경도 후속 판정에서 NO_CHANGE가 될 수 있다. 사용자별 DEFERRED를 완료로 바꾸는 규칙을 추가한 것은 아니다.
 - 후속 작업의 occurredAt/eventDate는 비교 기록 시점을 보존한다. 늦은 분석이나 재실행으로 만료 기점을 새로 갱신하지 않는다.
-- 분석 근거·필요 이벤트·PROCESSED 전환은 같은 트랜잭션에서 커밋/롤백한다. 저장 또는 완료 갱신 실패 시 READY가 남아 재시도할 수 있다.
+- 분석 근거·필요 이벤트·완료/진행 상태 전환은 같은 트랜잭션에서 커밋/롤백한다. 실패 시 기존 READY 또는 마감 보류 체크포인트가 유지된다.
   재실행/동시 호출은 같은 분석 기록·이벤트를 반환하며 기존 이벤트의 버전 쌍이 충돌하면 완료를 거부한다.
 - **완료 경계:** 버전 분석 완료는 후속 작업의 영속화까지다. 이벤트의 사용자별 순회·Outbox 완료는 별도 상태다.
   이번 경로에서 사용자를 평가하거나 Outbox를 만들지 않으며 이벤트는 PENDING으로 남는다.
-- 기존 DEFERRED 버전 분석을 자동 승격하지 않는다. 미확정 기간 대응/재분석 규칙은 후속이며 사용자별 순회는 아래 별도 경로다.
+- 같은 분석 규칙의 재실행은 같은 행을 반환한다. 분석 규칙 버전이 바뀌면 기존 마감 보류 버전에 새 이력을 추가할 수 있다.
+  현재 분석 규칙은 development-version-analysis-v2이며 호출자가 임의 문자열을 지정하지 않는다.
+  보류가 해결되면 PROCESSED로 전환하고, 해결되지 않으면 새 보류 근거와 진행 체크포인트를 유지한다.
+  자격조건 이벤트는 버전 쌍 멱등키를 재사용하며 재분석으로 사용자 알림을 복제하거나 만료를 연장하지 않는다.
 
 버전 분석 경로는 DeadlineExtensionPostgresTest 34개·OpportunityVersionAnalysisConfigurationTest 2개·
 OpportunityVersionWorkerTest 4개·IngestBoundaryTest 3개에서 skip/failure/error 0을 확인했다.
@@ -359,7 +366,8 @@ OpportunityVersionWorkerTest 4개·IngestBoundaryTest 3개에서 skip/failure/er
 
 EligibilityFanoutCoordinator / Batch / Worker는 `yon.tracking.eligibility-fanout.enabled`와
 `yon.tracking.eligibility-outbox.enabled`가 **모두 true**일 때만 등록한다. 기본값은 비활성이며 실제 환경에는 추가하지 않았다.
-`runOnce()` 명시 호출만 있고 자동 스케줄러는 없다. 페이지 크기·lease·재시도·이벤트 예산은 기존 `yon.tracking.fanout.*` 수치 설정을 재사용한다.
+`runOnce()` 명시 호출만 있고 자동 스케줄러는 없다. 페이지 크기·lease·재시도·이벤트 예산은 전용 `yon.tracking.eligibility-fanout.*` 설정을 사용한다.
+기본 페이지는 25명이고 날짜 Worker 기본 500명과 독립적이다. 이 값은 초기 운영 설정이며 실제 잠금 시간·판정 비용 측정 후 조정해야 한다.
 기존 날짜 스케줄러의 enabled 옵션으로 새 Worker가 실행되지는 않는다.
 
 - 전용 Coordinator는 ELIGIBILITY_CHANGED만 후보 조회·claim·소진 복구·재시도한다. 날짜 Worker와 서로의 이벤트를 점유하지 않는다.
@@ -374,14 +382,63 @@ EligibilityFanoutCoordinator / Batch / Worker는 `yon.tracking.eligibility-fanou
 - 근거·Outbox·커서·heartbeat는 페이지 단위로 함께 커밋/롤백한다. 실패한 페이지가 앞 페이지의 커밋을 취소하지 않는다.
   오래된 PROCESSING은 새 lease로 이어받아 마지막 커서 다음부터 재개하며 과거 lease의 저장/재시도는 거부한다.
 - `(userId, sourceEventId)` Outbox 멱등성을 유지한다. 이미 생성한 명시적 Outbox도 재사용하며 재실행으로 근거를 덮어쓰지 않는다.
-- 잠정 매핑 DEFERRED, 프로필 없음, 최신 판정 불명 등은 사용자별 DEFERRED로 남긴다.
+- 판정용 프로필 없음은 SKIPPED / PROFILE_MISSING으로 기록하고 다른 회원 처리를 계속한다.
+  로그인 회원 정보(User)와 판정용 프로필(EligibilityProfile)은 별개다. 없는 입력을 UNKNOWN/NO_CHANGE로 만들거나 정책 보류로 묶지 않는다.
+  나중에 프로필을 생성해도 해당 이벤트의 소급 알림을 보장하지 않는다.
+- 잠정 매핑 DEFERRED, 최신 판정 불명 등은 사용자별 DEFERRED로 남긴다.
   페이지 커서는 전진시켜 나머지 사용자를 처리하되, 마지막 페이지 뒤 보류가 남으면 이벤트를 **WAITING_POLICY**로 둔다.
   이 상태는 processedAt/lease가 없으며 COMPLETED·FAILED가 아니다. 자동 후보/소진 복구 대상에서 제외한다.
   팀 정책 확정 후 보류 재평가·재개 절차는 아직 구현하지 않았다. 입력/매핑 불명을 전송 오류처럼 반복하거나 성공으로 승격하지 않는다.
 - 보류 없이 순회가 끝나면 이벤트 COMPLETED다. 이벤트 만료(발생 후 7일)는 EXPIRED로 종료하고 만료를 연장하지 않는다.
   순회 중 새로 저장한 사용자 포함은 기존 키셋 정책처럼 보장하지 않는다.
 
-신규 사용자 순회 검증 대상은 EligibilityNotificationRevalidationPostgresTest(기존 17개 포함),
-EligibilityFanoutConfigurationTest, 날짜 Batch의 잘못된 타입 방어 테스트다. 아직 신규 테스트를 실행하지 않았다.
+리뷰 보완 후 로컬 검증 결과는 문서 마지막 검증 절을 따른다.
 버전 비교 → 명시적 분석 → 명시적 사용자 Worker는 각각 호출 가능하지만 자동 주기 실행·초기 적재 분류는 미연결이다.
 플래그·실제 DB·AWS/FCM·Notification 프로젝트 코드는 변경하지 않았다.
+
+## 활성화 전 DB 제약·운영 확인
+
+1. backend를 중지하고 대상 DB/계정·백업을 확인한다. 개인 테스트 이외의 DB에 임의 적용하지 않는다.
+2. 배포 담당이 아래 조회로 현재 application 테이블의 제약을 확인한다.
+
+```sql
+SELECT c.conrelid::regclass AS table_name, c.conname, pg_get_constraintdef(c.oid)
+FROM pg_constraint c
+WHERE c.conrelid IN (
+  to_regclass('application.opportunity_events'),
+  to_regclass('application.opportunity_version_tracking'),
+  to_regclass('application.opportunity_version_analysis'))
+ORDER BY 1, 2;
+```
+
+3. 기존 테이블에는 application_user로 database/scripts/notification-version-worker-upgrade.sql을 검토 후 수동 적용한다.
+   이 스크립트는 WAITING_POLICY와 PROCESSED_WITH_DEFERRED_DEADLINE을 허용하도록 enum CHECK를 바꾸고,
+   분석 이력의 tracking_id 단독 UNIQUE를 규칙별 복합 UNIQUE로 전환한다. 기존 행을 삭제하지 않는다.
+   알 수 없는 사용자 정의 CHECK/단독 UNIQUE 인덱스는 임의 삭제하지 않고 실패시킨다. 오류 시 전체 트랜잭션을 롤백한다.
+4. 새 테이블이 없으면 새 backend를 **모든 신규 기능 비활성 상태**로 기동해 기존 update 정책으로 생성하고 제약/FK를 다시 확인한다.
+   update가 기존 CHECK/UNIQUE를 바꿔 줄 것이라고 가정하지 않는다. 위 스크립트는 재적용 가능하며 테이블 자체를 생성하지 않는다.
+5. 기준선 초기화·초기 적재 계약을 먼저 확인한다. 기준선이 없으면 WAITING_FOR_BASELINE인 것이 정상이며 활성화 완료가 아니다.
+6. 비교 → 분석 → 사용자 순회를 7일 만료 내에 실행할 운영 절차를 검증한다. 만료 기점은 비교 기록 시점이며 연장하지 않는다.
+7. 팀 미확정 상태 쌍·UPCOMING 가드·WAITING_POLICY 재개·마감 대응 규칙과 운영 관측을 합의하고 CI 성공 후 배포/활성화를 별도로 승인한다.
+
+## 리뷰 보완 후 로컬 검증 (2026-10-25)
+
+| 테스트 | 건수 | 결과 |
+| --- | --- | --- |
+| DeadlineExtensionPostgresTest | 36 | skip/failure/error 0 |
+| EligibilityNotificationRevalidationPostgresTest | 31 | skip/failure/error 0 |
+| OpportunityVersionTrackingTest | 7 | skip/failure/error 0 |
+| OpportunityVersionWorkerTest | 4 | skip/failure/error 0 |
+| EligibilityFanoutPropertiesTest | 3 | skip/failure/error 0 |
+| VersionWorkerUpgradePostgresTest | 3 | skip/failure/error 0 |
+| FailureDiagnosticTest | 2 | skip/failure/error 0 |
+| IngestBoundaryTest | 3 | skip/failure/error 0 |
+| **합계** | **89** | **skip/failure/error 0** |
+
+- 프로필 없음 건너뜀/다음 사용자 처리, 마감 보류 후 순차 진행, 규칙별 재분석 이력·롤백·멱등성을 검증했다.
+- 전용 페이지 기본값/설정 검증, 민감 메시지가 포함되지 않는 디버그 진단을 확인했다.
+- DB 전환 SQL은 일회용 PostgreSQL에서 CHECK·UNIQUE 전환, 이력 보존, 재적용, 사용자 정의 제약 보호를 검증했다.
+- 보완 후 `./gradlew test bootJar --rerun-tasks`가 성공했다. 전체 테스트에서 조건부 PostgreSQL 19개는 환경변수 미지정으로 건너뛰었다.
+- 해당 19개를 테스트 전용 yon_test DB로 별도 재실행했다. EligibilityResultServiceTest 18개와 ConditionSetBackfillTest 1개 모두 skip/failure/error 0이다.
+- 이 결과는 로컬 검증이며 추가 커밋 기준 CI 성공은 별도 확인해야 한다. 실제 DB에 전환 SQL을 적용하지 않았다.
+- 실제 환경변수·자동 실행·전달/푸시 활성화는 변경하지 않았다. 기준선/초기 적재 계약·팀 미확정 정책·운영 배포는 후속이다.

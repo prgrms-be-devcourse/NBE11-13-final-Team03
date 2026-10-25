@@ -23,7 +23,7 @@ import static com.team3.backend.tracking.domain.entity.OpportunityVersionAnalysi
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "yon.tracking.version-analysis.enabled", havingValue = "true")
 public class OpportunityVersionAnalysisTransaction {
-    public static final String ANALYSIS_VERSION = "development-version-analysis-v1";
+    public static final String ANALYSIS_VERSION = "development-version-analysis-v2";
     private final OpportunityVersionRepository versions;
     private final ApplicationWindowRepository windows;
     private final OpportunityVersionTrackingRepository tracking;
@@ -36,7 +36,7 @@ public class OpportunityVersionAnalysisTransaction {
     private final EntityManager em;
     private final Clock clock;
 
-    public enum Outcome { COMPLETED, DEFERRED, NOT_READY, POLICY_UNAVAILABLE }
+    public enum Outcome { COMPLETED, DEADLINE_DEFERRED, NOT_READY, POLICY_UNAVAILABLE }
     public record Result(Outcome outcome, Long analysisId) { }
 
     @Transactional
@@ -51,17 +51,18 @@ public class OpportunityVersionAnalysisTransaction {
         var pending = tracking.findByOpportunityVersionId(toVersionId);
         if (pending.isEmpty()) return new Result(Outcome.NOT_READY, null);
         var record = pending.orElseThrow();
-        var existing = analyses.findByTrackingId(record.getId());
+        var existing = analyses.findByTrackingIdAndAnalysisVersion(record.getId(), ANALYSIS_VERSION);
         if (existing.isPresent()) {
             var saved = existing.orElseThrow();
             boolean completed = saved.getCompletedAt() != null;
             if ((completed && record.getStatus() != OpportunityVersionTrackingStatus.PROCESSED)
-                    || (!completed && record.getStatus() != OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS)) {
+                    || (!completed && record.getStatus() != OpportunityVersionTrackingStatus.PROCESSED_WITH_DEFERRED_DEADLINE)) {
                 throw new IllegalStateException("Assessment and version completion disagree");
             }
-            return new Result(completed ? Outcome.COMPLETED : Outcome.DEFERRED, saved.getId());
+            return new Result(completed ? Outcome.COMPLETED : Outcome.DEADLINE_DEFERRED, saved.getId());
         }
-        if (record.getStatus() != OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS) return new Result(Outcome.NOT_READY, null);
+        if (record.getStatus() != OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS
+                && record.getStatus() != OpportunityVersionTrackingStatus.PROCESSED_WITH_DEFERRED_DEADLINE) return new Result(Outcome.NOT_READY, null);
         var from = versions.findFirstByOpportunityIdAndVersionNoLessThanOrderByVersionNoDesc(policy.getId(), to.getVersionNo()).orElseThrow();
         if (!from.getId().equals(record.getFromVersion().getId())
                 || !Objects.equals(from.getNormalizationVersion(), to.getNormalizationVersion())
@@ -75,36 +76,33 @@ public class OpportunityVersionAnalysisTransaction {
         var deadline = assessDeadline(before, after);
         var now = clock.instant();
         OpportunityEvent deadlineEvent = null;
-        OpportunityEvent eligibilityEvent = null;
         boolean deferred = deadline == DEFERRED_PERIOD || deadline == DEFERRED_SCOPED;
-        if (!deferred) {
-            if (deadline == EXTENDED) {
-                // Historical evidence is retained, but the existing extension path only creates a current-version alert.
-                extensions.process(from.getId(), toVersionId);
-                deadlineEvent = events.findByDedupKey("DEADLINE_EXTENDED:" + policy.getId() + ":" + from.getId() + ":" + toVersionId).orElse(null);
-            }
-            String key = "ELIGIBILITY_CHANGED:" + policy.getId() + ":" + from.getId() + ":" + toVersionId;
-            eligibilityEvent = events.findByDedupKey(key).orElseGet(() -> {
-                var requested = OpportunityEvent.create(policy, to, OpportunityEventType.ELIGIBILITY_CHANGED,
-                        LocalDate.ofInstant(record.getRecordedAt(), KST), key,
-                        Map.of("fromVersionId", from.getId(), "toVersionId", toVersionId,
-                                "analysisVersion", ANALYSIS_VERSION, "changedPaths", paths), true, null, now);
-                requested.recordOrigin(requested.getCorrelationId(), record.getRecordedAt());
-                return events.saveAndFlush(requested);
-            });
-            if (eligibilityEvent.getEventType() != OpportunityEventType.ELIGIBILITY_CHANGED
-                    || !eligibilityEvent.getOpportunityVersion().getId().equals(toVersionId)
-                    || !Objects.equals(String.valueOf(eligibilityEvent.getPayload().get("fromVersionId")), from.getId().toString())
-                    || !Objects.equals(String.valueOf(eligibilityEvent.getPayload().get("toVersionId")), toVersionId.toString())) {
-                throw new IllegalStateException("Existing user assessment event has a conflicting identity");
-            }
-            // This is a request to compare saved users, not a claim that their eligibility actually changed.
+        if (deadline == EXTENDED) {
+            // Historical evidence is retained, but the existing extension path only creates a current-version alert.
+            extensions.process(from.getId(), toVersionId);
+            deadlineEvent = events.findByDedupKey("DEADLINE_EXTENDED:" + policy.getId() + ":" + from.getId() + ":" + toVersionId).orElse(null);
+        }
+        // Deadline uncertainty must not prevent eligibility work or erase its independent evidence.
+        String key = "ELIGIBILITY_CHANGED:" + policy.getId() + ":" + from.getId() + ":" + toVersionId;
+        var eligibilityEvent = events.findByDedupKey(key).orElseGet(() -> {
+            var requested = OpportunityEvent.create(policy, to, OpportunityEventType.ELIGIBILITY_CHANGED,
+                    LocalDate.ofInstant(record.getRecordedAt(), KST), key,
+                    Map.of("fromVersionId", from.getId(), "toVersionId", toVersionId,
+                            "analysisVersion", ANALYSIS_VERSION, "changedPaths", paths), true, null, now);
+            requested.recordOrigin(requested.getCorrelationId(), record.getRecordedAt());
+            return events.saveAndFlush(requested);
+        });
+        if (eligibilityEvent.getEventType() != OpportunityEventType.ELIGIBILITY_CHANGED
+                || !eligibilityEvent.getOpportunityVersion().getId().equals(toVersionId)
+                || !Objects.equals(String.valueOf(eligibilityEvent.getPayload().get("fromVersionId")), from.getId().toString())
+                || !Objects.equals(String.valueOf(eligibilityEvent.getPayload().get("toVersionId")), toVersionId.toString())) {
+            throw new IllegalStateException("Existing user assessment event has a conflicting identity");
         }
         var saved = analyses.saveAndFlush(OpportunityVersionAnalysis.record(record, ANALYSIS_VERSION,
                 policy.getCurrentVersion().getId(), deadline, paths, deadlineEvent, eligibilityEvent, now));
-        if (!deferred) record.completeEventAnalysis(now);
+        record.recordAnalysisProgress(now, deferred);
         tracking.flush();
-        return new Result(deferred ? Outcome.DEFERRED : Outcome.COMPLETED, saved.getId());
+        return new Result(deferred ? Outcome.DEADLINE_DEFERRED : Outcome.COMPLETED, saved.getId());
     }
 
     private OpportunityVersionAnalysis.DeadlineOutcome assessDeadline(List<ApplicationWindow> before, List<ApplicationWindow> after) {

@@ -4,6 +4,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(EventFanoutProperties.class)
+@EnableConfigurationProperties({EventFanoutProperties.class, EligibilityFanoutProperties.class})
 public class EventFanoutConfig {
 }

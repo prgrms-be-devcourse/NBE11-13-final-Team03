@@ -17,6 +17,7 @@ import com.team3.backend.tracking.domain.entity.EligibilityEventAssessment;
 import com.team3.backend.tracking.domain.repository.EligibilityEventAssessmentRepository;
 import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
 import com.team3.backend.tracking.config.EventFanoutProperties;
+import com.team3.backend.tracking.config.EligibilityFanoutProperties;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.user.domain.entity.User;
@@ -72,6 +73,9 @@ class EligibilityNotificationRevalidationPostgresTest {
         @Bean Clock eligibilityTestClock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
         @Bean EventFanoutProperties fanoutProperties() {
             return new EventFanoutProperties(false, 1, 10, Duration.ofMinutes(30), Duration.ofMinutes(1), 5);
+        }
+        @Bean EligibilityFanoutProperties eligibilityFanoutProperties() {
+            return new EligibilityFanoutProperties(true, 1, 10, Duration.ofMinutes(30), Duration.ofMinutes(1), 5);
         }
     }
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
@@ -373,16 +377,16 @@ class EligibilityNotificationRevalidationPostgresTest {
     }
 
     @Test
-    void missingProfileRemainsPendingPolicyInsteadOfBecomingUnknownOrNoChange() {
+    void missingProfileIsSkippedWithoutPuttingTheEventOnPolicyHold() {
         var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
         var request = request(fixture, NOW);
         jdbc.update("DELETE FROM eligibility_profiles WHERE user_id=?", USER);
         fanoutWorker.runOnce();
         var result = assessments.findByEventIdAndUserId(request.eventId(), USER).orElseThrow();
-        assertThat(result.getStatus()).isEqualTo(EligibilityEventAssessment.Status.DEFERRED);
+        assertThat(result.getStatus()).isEqualTo(EligibilityEventAssessment.Status.SKIPPED);
         assertThat(result.getReason()).isEqualTo("PROFILE_MISSING");
         assertThat(result.getEvidence()).doesNotContainKey("source");
-        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.WAITING_POLICY);
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
         assertThat(outboxes.count()).isZero();
     }
 
@@ -508,6 +512,20 @@ class EligibilityNotificationRevalidationPostgresTest {
         assertThat(fanout.recoverExhausted()).isEqualTo(1);
         assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.FAILED);
         assertThat(assessments.count()).isZero(); assertThat(outboxes.count()).isZero();
+    }
+
+    @Test
+    void missingProfileDoesNotPreventFollowingSavedUserFromReceivingTheirCandidate() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW); var following = savedUser(fixture, LocalDate.of(1990, 5, 15));
+        jdbc.update("DELETE FROM eligibility_profiles WHERE user_id=?", USER);
+        fanoutWorker.runOnce();
+        assertThat(assessments.findByEventIdAndUserId(request.eventId(), USER).orElseThrow().getStatus())
+                .isEqualTo(EligibilityEventAssessment.Status.SKIPPED);
+        assertThat(assessments.findByEventIdAndUserId(request.eventId(), following).orElseThrow().getStatus())
+                .isEqualTo(EligibilityEventAssessment.Status.OUTBOX_CREATED);
+        assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
     }
 
     private Long savedUser(Fixture fixture, LocalDate birthDate) {

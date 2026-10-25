@@ -1,7 +1,7 @@
 package com.team3.backend.tracking.service;
 
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
-import com.team3.backend.tracking.domain.repository.OpportunityVersionTrackingRepository;
+import com.team3.backend.opportunity.domain.repository.OpportunityRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageRequest;
 import java.util.List;
@@ -10,13 +10,13 @@ import static org.mockito.Mockito.*;
 import static com.team3.backend.tracking.service.OpportunityVersionComparisonTransaction.Outcome.*;
 
 class OpportunityVersionWorkerTest {
-    private final OpportunityVersionTrackingRepository tracking = mock(OpportunityVersionTrackingRepository.class);
+    private final OpportunityRepository opportunities = mock(OpportunityRepository.class);
     private final OpportunityVersionComparisonTransaction comparisons = mock(OpportunityVersionComparisonTransaction.class);
-    private final OpportunityVersionWorker worker = new OpportunityVersionWorker(tracking, comparisons);
+    private final OpportunityVersionWorker worker = new OpportunityVersionWorker(opportunities, comparisons);
 
     @Test
     void boundedKeysetPageProcessesOneStepPerPolicyAndDoesNotConsumeLookahead() {
-        when(tracking.findSequentialPolicyIds(10, OpportunityType.YOUTH_POLICY, PageRequest.of(0, 3)))
+        when(opportunities.findSequentialPolicyIds(10, OpportunityType.YOUTH_POLICY, PageRequest.of(0, 3)))
                 .thenReturn(List.of(11L, 15L, 20L));
         when(comparisons.compareNext(11L)).thenReturn(new OpportunityVersionComparisonTransaction.Step(COMPARED, 21L, 31L));
         when(comparisons.compareNext(15L)).thenReturn(new OpportunityVersionComparisonTransaction.Step(WAITING_FOR_BASELINE, 25L, null));
@@ -30,7 +30,7 @@ class OpportunityVersionWorkerTest {
 
     @Test
     void failedPolicyDoesNotAbortOtherPoliciesAndNewSweepRetriesIt() {
-        when(tracking.findSequentialPolicyIds(0, OpportunityType.YOUTH_POLICY, PageRequest.of(0, 3)))
+        when(opportunities.findSequentialPolicyIds(0, OpportunityType.YOUTH_POLICY, PageRequest.of(0, 3)))
                 .thenReturn(List.of(1L, 2L));
         when(comparisons.compareNext(1L)).thenThrow(new IllegalStateException("not logged"))
                 .thenReturn(new OpportunityVersionComparisonTransaction.Step(COMPARED, 3L, 4L));
@@ -46,7 +46,7 @@ class OpportunityVersionWorkerTest {
 
     @Test
     void emptyPagePreservesCursor() {
-        when(tracking.findSequentialPolicyIds(40, OpportunityType.YOUTH_POLICY, PageRequest.of(0, 2))).thenReturn(List.of());
+        when(opportunities.findSequentialPolicyIds(40, OpportunityType.YOUTH_POLICY, PageRequest.of(0, 2))).thenReturn(List.of());
         var result = worker.runOnce(40, 1);
         assertThat(result.lastOpportunityId()).isEqualTo(40);
         assertThat(result.hasNext()).isFalse(); assertThat(result.attempts()).isEmpty();
@@ -58,6 +58,6 @@ class OpportunityVersionWorkerTest {
         assertThatIllegalArgumentException().isThrownBy(() -> worker.runOnce(-1, 1));
         assertThatIllegalArgumentException().isThrownBy(() -> worker.runOnce(0, 0));
         assertThatIllegalArgumentException().isThrownBy(() -> worker.runOnce(0, 501));
-        verifyNoInteractions(tracking, comparisons);
+        verifyNoInteractions(opportunities, comparisons);
     }
 }

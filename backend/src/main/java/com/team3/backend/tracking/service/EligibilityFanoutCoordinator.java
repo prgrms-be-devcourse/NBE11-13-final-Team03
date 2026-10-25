@@ -1,6 +1,6 @@
 package com.team3.backend.tracking.service;
 
-import com.team3.backend.tracking.config.EventFanoutProperties;
+import com.team3.backend.tracking.config.EligibilityFanoutProperties;
 import com.team3.backend.tracking.domain.entity.OpportunityEventType;
 import com.team3.backend.tracking.domain.model.EventFanoutExecution;
 import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
@@ -19,7 +19,7 @@ import static com.team3.backend.tracking.domain.entity.OpportunityEventProcessin
 public class EligibilityFanoutCoordinator {
     private static final Set<OpportunityEventType> TYPES = Set.of(OpportunityEventType.ELIGIBILITY_CHANGED);
     private final OpportunityEventRepository events;
-    private final EventFanoutProperties properties;
+    private final EligibilityFanoutProperties properties;
     private final Clock clock;
 
     @Transactional(readOnly = true)
