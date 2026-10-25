@@ -55,7 +55,31 @@ Worker는 기존 두 기능 옵션이 모두 true여야 등록된다. 자동 실
 - EligibilityFanoutSchedulingTest: 기본 비활성·각 게이트·공통 제어·설정 검증·poll 실패 후 재호출. 실제 타이머는 실행하지 않는다.
 - EligibilityNotificationRevalidationPostgresTest: 여러 번 반납 후 완료/멱등성, 이전 장애 횟수 보존, 과거 lease 거부,
   다른 due 이벤트 진행, 페이지 실패 후 커밋된 커서·근거·Outbox로 재개. 기존 연결·정책 보류 테스트도 유지한다.
-- 위 신규 검증 결과는 아직 미확인이다. Gradle·실제 타이머 주기 실행·다중 인스턴스 주기 실행·업무 DB·AWS/FCM은 이번 작업에서 실행하지 않았다.
+
+### 로컬 검증 결과 (2026-10-25)
+
+| 테스트 | 건수 | 결과 |
+| --- | --- | --- |
+| EligibilityFanoutWorkerTest | 7 | skip/failure/error 0 |
+| EligibilityFanoutSchedulingTest | 7 | skip/failure/error 0 |
+| EligibilityNotificationRevalidationPostgresTest | 39 | skip/failure/error 0 |
+| IngestBoundaryTest | 3 | skip/failure/error 0 |
+| **합계** | **56** | **skip/failure/error 0** |
+
+- `./gradlew test bootJar --rerun-tasks` 성공. 전체 실행의 비정상 카운트 검색 결과는 기존 조건부 테스트 98개 건너뜀이며 실패·오류는 0이다.
+- 관련 조건부 DB 테스트는 테스트 전용 `yon_test`에서 별도 실행했다. EligibilityResultServiceTest 18개와 ConditionSetBackfillTest 1개 모두 skip/failure/error 0이다. 나머지 조건부 테스트의 실행을 뜻하지 않는다.
+- PR 리뷰 검증 보고 기준 backend 834개 실패 0·조건부 건너뜀 98이다. Worker 7개·Scheduling 7개·추가 PostgreSQL 5개가 위 표에 포함된다.
+- 실제 타이머 주기 실행·장시간 실행·다중 인스턴스 주기 실행·업무 DB·AWS/FCM은 검증하지 않았다. 최신 커밋의 CI 성공과 운영 활성화는 별도 확인 대상이다.
+
+### 운영 관측·수동 복구 판단
+
+- ELIGIBILITY_CHANGED 중 `processingStatus=FAILED`이면서 `lastUserId > 0`인 이벤트를 확인 대상으로 둔다.
+  정상 페이지 커밋 뒤 반납 전에 중단되면 claim 횟수가 환급되지 않으므로, 한도에 도달한 이벤트는 진행을 보존한 채 FAILED가 될 수 있다.
+  이 조건이 반납 전 중단을 확정하는 것은 아니며, 이후 페이지의 실제 실패로도 같은 상태가 생길 수 있다.
+- 실패 원인·누적 횟수·마지막 사용자 커서·기존 근거/Outbox·원래 발생 시각과 7일 만료를 함께 확인한 뒤 수동 재개 필요성을 판단한다.
+  관측 조건만으로 FAILED를 자동 PENDING 전환하거나 커서를 초기화하지 않는다. 수동 재개 도구·절차는 이번에 추가하지 않았다.
+- retryCount와 lastError는 영구 장애 이력의 쌍이 아니다. 기존 claim과 정상 반납에서 lastError를 지우므로 횟수가 남아도 오류 정보가 없을 수 있다.
+  과거 오류 보존이 필요하면 별도 장애 이력을 후속 설계한다. 이번 변경은 오류 저장 동작을 바꾸지 않는다.
 
 운영 활성화 전에는 기준선/초기 적재 계약·잠정 상태 매핑·UPCOMING·보류 재개 정책과 DB 전환을 확인한다.
 25명 판정 페이지의 지연·부하, 스케줄러 풀 점유, 이벤트 적체·7일 만료 내 처리 가능 여부, 반복 장애 감시를 검증한다.
