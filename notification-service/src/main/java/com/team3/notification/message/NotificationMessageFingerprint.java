@@ -25,7 +25,10 @@ public class NotificationMessageFingerprint {
     }
 
     private String fingerprintFields(Object message) {
-        Map<?, ?> fields = mapper.convertValue(message, Map.class);
+        Map<String, Object> fields = new LinkedHashMap<>(mapper.convertValue(message, Map.class));
+        if (message instanceof NotificationRequestedMessage requested && requested.pushExpiresAt() == null) {
+            fields.remove("pushExpiresAt"); // Preserve fingerprints stored before the optional contract extension.
+        }
         String canonical = mapper.writeValueAsString(canonical(fields));
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")

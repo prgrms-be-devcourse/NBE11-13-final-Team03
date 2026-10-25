@@ -114,4 +114,41 @@ class NotificationMessageContractTest {
         assertThat(fingerprints.fingerprint(NotificationMessages.message(Map.of("title", "다른 내용"))))
                 .isNotEqualTo(fingerprints.fingerprint(original));
     }
+
+    @Test
+    void optionalPushExpiryPreservesLegacyFingerprintButChangedKnownExpiryConflicts() {
+        var original = NotificationMessages.message(Map.of());
+        assertThat(original.pushExpiresAt()).isNull();
+        assertThat(original.effectivePushExpiresAt()).isEqualTo(original.expiresAt());
+        assertThat(fingerprints.fingerprint(original))
+                .isEqualTo("bd16d218b2f563bf9a2d8739933e5eff63e87fd4f11b68e96913da265d2c7167");
+        var explicitNull = new HashMap<String, Object>(); explicitNull.put("pushExpiresAt", null);
+        assertThat(fingerprints.fingerprint(NotificationMessages.message(explicitNull)))
+                .isEqualTo(fingerprints.fingerprint(original));
+        var shortened = NotificationMessages.message(Map.of("pushExpiresAt", "2026-10-23T15:00:00Z"));
+        assertThat(shortened.effectivePushExpiresAt()).isEqualTo(Instant.parse("2026-10-23T15:00:00Z"));
+        assertThat(shortened.expiresAt()).isEqualTo(original.expiresAt());
+        assertThat(fingerprints.fingerprint(shortened)).isNotEqualTo(fingerprints.fingerprint(original));
+    }
+
+    @Test
+    void pushExpiryCannotExtendMessageValidityAndAlreadyExpiredPushDoesNotInvalidateInAppContract() {
+        var later = NotificationMessages.message(Map.of("pushExpiresAt", "2026-12-01T00:00:00Z"));
+        assertThat(later.effectivePushExpiresAt()).isEqualTo(later.expiresAt());
+        var expiredPush = NotificationMessages.message(Map.of("pushExpiresAt", "2026-10-22T00:00:00Z"));
+        assertThatCode(() -> validator.validate(expiredPush)).doesNotThrowAnyException();
+        assertThat(expiredPush.effectivePushExpiresAt()).isBefore(expiredPush.occurredAt());
+    }
+
+    @Test
+    void readsPushExpiryExampleAndRejectsMalformedOptionalTimestamp() throws Exception {
+        var resource = new org.springframework.core.io.ClassPathResource("contracts/notification-requested-push-expiry-v1.json");
+        var message = decoder.decode(resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+        assertThatCode(() -> validator.validate(message)).doesNotThrowAnyException();
+        assertThat(message.pushExpiresAt()).isEqualTo(Instant.parse("2026-10-23T15:00:00Z"));
+        for (Object invalid : List.of(123, true, "not-a-timestamp")) {
+            assertThatThrownBy(() -> decoder.decode(NotificationMessages.json(Map.of("pushExpiresAt", invalid))))
+                    .isInstanceOf(RuntimeException.class);
+        }
+    }
 }

@@ -39,7 +39,7 @@ class DateNotificationMessageFactoryTest {
     @Test
     void producerMatchesSharedVersionOneContract() throws Exception {
         var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
-        var resource = new org.springframework.core.io.ClassPathResource("contracts/notification-requested-v1.json");
+        var resource = new org.springframework.core.io.ClassPathResource("contracts/notification-requested-push-expiry-v1.json");
         var expected = mapper.readTree(resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
         var event = deadline();
         ReflectionTestUtils.setField(event, "eventId", UUID.fromString(expected.get("sourceEventId").asText()));
@@ -74,8 +74,21 @@ class DateNotificationMessageFactoryTest {
                 .containsEntry("channels", List.of("IN_APP", "PUSH"))
                 .containsEntry("link", "/opportunities/10")
                 .containsEntry("expiresAt", "2026-10-26T15:00:00Z")
+                .containsEntry("pushExpiresAt", "2026-10-23T15:00:00Z")
                 .containsEntry("payload", event.getPayload())
                 .containsKeys("title", "content", "occurredAt");
+    }
+
+    @Test
+    void pushExpiryUsesThresholdDayWithoutShorteningTheMessageForAllThreeThresholds() {
+        for (int days : List.of(1, 3, 7)) {
+            var event = event(OpportunityEventType.DEADLINE_SOON,
+                    Map.of("threshold", "D-" + days, "applicationEndDate", TODAY.plusDays(days).toString()), true);
+            var prepared = factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(days))), NOW).orElseThrow();
+            var envelope = factory.create(event, 7L, prepared, NOW).getPayload();
+            assertThat(envelope).containsEntry("pushExpiresAt", TODAY.plusDays(1).atStartOfDay(KST).toInstant().toString());
+            assertThat(prepared.expiresAt()).isEqualTo(TODAY.plusDays(days + 1L).atStartOfDay(KST).toInstant());
+        }
     }
 
     @Test

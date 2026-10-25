@@ -5,6 +5,8 @@ import com.google.firebase.FirebaseApp;
 import com.team3.notification.push.PushSender;
 import com.team3.notification.service.NotificationDeliveryStore;
 import com.team3.notification.service.NotificationDeliveryWorker;
+import com.team3.notification.service.NotificationSlotStore;
+import com.team3.notification.service.NotificationSlotWorker;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import java.io.IOException;
@@ -62,5 +64,34 @@ class NotificationPushConfigTest {
                             .doesNotHaveBean(FirebaseApp.class);
                     assertThat(context.containsBean("notificationDeliveryScheduler")).isTrue();
                 });
+    }
+
+    @Test
+    void slotModeRegistersOnlySlotWorkerWhenPushEnabled() {
+        runner.withBean(NotificationSlotStore.class,()->mock(NotificationSlotStore.class))
+                .withBean(PushSender.class,()->mock(PushSender.class))
+                .withPropertyValues("NOTIFICATION_PUSH_ENABLED=true","FCM_PROJECT_ID=test-project",
+                        "NOTIFICATION_PUBLIC_BASE_URL=https://app.example","yon.notification.push.slots.enabled=true",
+                        "yon.notification.push.slots.inbox-path=/test-inbox")
+                .run(context->assertThat(context).hasNotFailed().hasSingleBean(NotificationSlotWorker.class)
+                        .doesNotHaveBean(NotificationDeliveryWorker.class).doesNotHaveBean(FirebaseApp.class));
+    }
+
+    @Test
+    void slotModeAloneDoesNotEnablePushAndRequiresVerifiedInboxPath() {
+        runner.withPropertyValues("yon.notification.push.slots.enabled=true","yon.notification.push.slots.inbox-path=/test-inbox")
+                .run(context->assertThat(context).hasNotFailed().doesNotHaveBean(NotificationSlotWorker.class)
+                        .doesNotHaveBean(NotificationDeliveryWorker.class).doesNotHaveBean(FirebaseApp.class));
+        for(String path:new String[]{"","https://elsewhere.example/inbox","//elsewhere.example/inbox","/%2felsewhere","/x%5cy","/x%0ay"}) {
+            runner.withPropertyValues("yon.notification.push.slots.enabled=true","yon.notification.push.slots.inbox-path="+path)
+                    .run(context->assertThat(context).hasFailed());
+        }
+    }
+
+    @Test
+    void slotWorkBudgetsAreValidated() {
+        for(String property:new String[]{"users-per-run=0","users-per-run=101","items-per-bundle=0","items-per-bundle=501"}) {
+            runner.withPropertyValues("yon.notification.push.slots."+property).run(context->assertThat(context).hasFailed());
+        }
     }
 }

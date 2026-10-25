@@ -47,6 +47,8 @@ public class Notification {
     private Instant occurredAt;
     @Column(name = "expires_at", nullable = false, updatable = false)
     private Instant expiresAt;
+    @Column(name = "push_expires_at", updatable = false)
+    private Instant pushExpiresAt;
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
     @Column(name = "read_at")
@@ -80,6 +82,7 @@ public class Notification {
         notification.payload = message.payload();
         notification.occurredAt = message.occurredAt();
         notification.expiresAt = message.expiresAt();
+        notification.pushExpiresAt = message.pushExpiresAt();
         notification.createdAt = now;
         return notification;
     }
@@ -100,6 +103,7 @@ public class Notification {
     public Map<String, Object> getPayload() { return payload; }
     public Instant getOccurredAt() { return occurredAt; }
     public Instant getExpiresAt() { return expiresAt; }
+    public Instant getPushExpiresAt() { return pushExpiresAt; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getReadAt() { return readAt; }
     public Instant getClickedAt() { return clickedAt; }
