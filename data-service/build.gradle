@@ -33,6 +33,9 @@ protobuf {
 }
 
 dependencies {
+    implementation platform('software.amazon.awssdk:bom:2.57.2')
+    implementation 'software.amazon.awssdk:sqs'
+    implementation 'software.amazon.awssdk:url-connection-client'
     implementation 'org.springframework.boot:spring-boot-starter-grpc-server'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     // 외부 API 호출과 Jackson 3는 유지하되 HTTP 수신 서버는 두지 않는다

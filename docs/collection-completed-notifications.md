@@ -1,15 +1,15 @@
-# 수집 완료 알림 — 1단계: 완료 메시지 보존
+# 수집 완료 알림 — 메시지 보존과 관리자 큐 발행
 
 ## 범위
 
 정기 수집 종료와 같은 트랜잭션에서 data-service 소유 `collection_outbox_events`에
-`COLLECTION_COMPLETED` 메시지를 저장한다. 이 단계는 Outbox 기록까지만 구현하며 외부 전송은 하지 않는다.
+`COLLECTION_COMPLETED` 메시지를 저장한다. Publisher는 기본 비활성이며 명시적으로 켠 경우에만 관리자 큐로 전송한다.
 사용자 알림 Outbox·큐·notification 테이블을 사용하지 않는다.
 
 | 단계 | 구현 범위 | 상태 |
 | --- | --- | --- |
-| 1 | 메시지 계약·SQL·완료 판정·Outbox 저장 | 이 PR |
-| 2 | 관리자 큐 SQS Publisher·lease·재시도·전용 스케줄러·기본 비활성 설정 | 후속 PR |
+| 1 | 메시지 계약·SQL·완료 판정·Outbox 저장 | 구현 |
+| 2 | 관리자 큐 SQS Publisher·lease·재시도·전용 스케줄러·기본 비활성 설정 | 구현, 기본 비활성 |
 | 수신·운영 | notification-service 관리자 큐 Consumer·소비 중복 제거·Slack, 별도 큐·DLQ·IAM | 알림·배포 담당 후속 |
 
 ## 완료 기준과 계약
@@ -53,7 +53,41 @@ Outbox 삽입 전에 작업 변경을 flush하고, 중복이면 예외 대신 �
 `application.collection_outbox_events`는 data-service가 소유한다.
 backend `outbox_events`에 쓰지 않으며 사용자 ID 열·다른 서비스 테이블로의 FK가 없다.
 sync_job_id는 추적용 숫자이며 FK가 없어 작업 이력 정리 후에도 메시지가 남는다.
-모든 새 행은 `PENDING`, retry_count=0이고 전송 상태 변경은 다음 단계 소유다.
+모든 새 행은 `PENDING`, retry_count=0이며 Publisher 활성화 여부와 무관하게 저장된다.
+
+## SQS Publisher와 복구
+
+backend Outbox의 저장소·Worker·SQS 전송·오류 분류를 data-service 내부로 복제했다.
+공용 Java 모듈이나 backend 의존은 추가하지 않는다. AWS SDK v2 BOM·sqs·url-connection-client는 backend와 같은 2.57.2다.
+
+- 전용 `collectionOutboxScheduler` 한 스레드가 5초마다 최대 10건을 처리한다.
+  `collectionExecutor`와 별도이며 Boot의 일반 taskScheduler도 대체하지 않는다.
+- 짧은 REQUIRES_NEW 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 한 행을 선점하고 `PROCESSING`·UUID lease를 저장한다.
+  실제 SQS 요청은 DB 트랜잭션 밖에서 수행한다. 수집 종료나 DB 잠금을 네트워크 응답까지 붙잡지 않는다.
+- SQS 응답의 messageId와 본문 MD5가 유효해야 `PUBLISHED`로 바꾼다. 이는 큐 수락이며 Slack 전달 완료를 뜻하지 않는다.
+- 저장된 envelope·messageId는 재전송에도 그대로 쓰며 correlationId를 message attribute에도 담는다.
+  `COLLECTION_COMPLETED` 이외의 eventType·행과 다른 messageId·잘못된 correlationId는 영구 오류다.
+- 일시 오류는 1·2·4·8분처럼 지수 백오프로 재시도하고 최대 5회 후 FAILED로 남긴다(배율 최대 64).
+  SDK 자체 재시도는 끄고 API 전체 10초·단일 시도 5초로 제한한다.
+- 자격증명·권한·큐 설정 오류는 PENDING으로 반환하고 시도 횟수를 늘리지 않으며 현재 배치를 중단한다.
+- 기동 중단이나 SQS 수락 뒤 DB 저장 실패로 남은 PROCESSING은 1분 lease 만료 후 복구한다.
+  lease 소유권 CAS로 오래된 Worker가 새 소유자의 상태를 덮어쓰지 못한다. 마지막 시도의 중단도 FAILED로 정리된다.
+- 원격 오류 본문·자격증명은 기록하지 않고 고정 오류 코드만 보존한다.
+
+설정 접두사는 `yon.collection.notification.publisher.*`이며 아래 별도 별칭을 사용한다.
+기존 `NOTIFICATION_*` 환경변수로 이 Publisher가 켜지거나 사용자 큐 주소가 재사용되지 않는다.
+
+| 환경변수 | 기본값·요구 |
+| --- | --- |
+| COLLECTION_NOTIFICATION_PUBLISHER_ENABLED | false |
+| COLLECTION_NOTIFICATION_SQS_REGION | 켰을 때 필수 |
+| COLLECTION_NOTIFICATION_SQS_QUEUE_URL | 켰을 때 필수, 별도 관리자 Standard 큐 |
+| COLLECTION_NOTIFICATION_SQS_ENDPOINT | 비움. LocalStack 사용 시 같은 loopback origin만 허용 |
+| COLLECTION_NOTIFICATION_PUBLISHER_POLL_DELAY_MS | 5000, 양수 |
+
+batch-size(10), max-attempts(5), lease-timeout(PT1M), retry-delay(PT1M)는 속성 접두사 아래에서 조정할 수 있다.
+lease는 SDK 10초 호출과 복구 여유를 포함해 15초보다 길어야 한다.
+운영 큐 URL은 해당 region의 HTTPS SQS 호스트여야 하며 FIFO·인증정보·query·fragment URL은 거부한다.
 
 ## 배포 순서
 
@@ -67,11 +101,14 @@ psql -v ON_ERROR_STOP=1 -f database/scripts/collection-outbox.sql
 ```
 
 연결 정보는 안전한 인증 설정으로 주입한다. 앱이 SQL을 자동 실행하지 않는다.
-이 PR에는 SQS SDK·Publisher·발행 활성화 환경변수가 없으며 큐·IAM·Slack도 변경하지 않는다.
+실제 큐·IAM·Slack은 이 코드로 생성하거나 변경하지 않는다.
 현재 사용자 Consumer는 이 계약을 처리할 수 없으므로 사용자 큐로 메시지를 보내면 안 된다.
-후속 단계는 별도의 관리자 큐·DLQ를 사용하고 Publisher는 기본 비활성으로 둔다.
+관리자 큐·DLQ는 `deploy/sqs/queues.cloudformation.yaml`을 별도 QueueName/스택으로 배포한다.
+데이터 서버 Instance Role에는 그 관리자 큐 ARN의 `sqs:SendMessage`만 부여한다. 사용자 큐·DLQ 접근·큐 생성 권한은 주지 않는다.
+SQS HTTPS 아웃바운드 443을 허용하고 자격증명은 SDK 기본 공급자 체인/Instance Role로 주입한다.
+알림 담당의 관리자 Consumer·중복 소비 제거·Slack을 준비하고 검증한 후 Publisher를 활성화한다.
 활성화 전에 과거 PENDING을 모두 발행할지 운영에서 정리할지 결정해야 한다.
-롤백 시 테이블·기존 메시지는 유지한다.
+발행 플래그를 false로 바꾸면 발행만 멈추고 수집·Outbox 저장은 계속된다. 테이블·기존 메시지는 유지한다.
 
 ## 검증
 
@@ -79,4 +116,7 @@ psql -v ON_ERROR_STOP=1 -f database/scripts/collection-outbox.sql
 - PostgreSQL Testcontainers: 실제 SQL 선적용 후 application_user로 서비스 실행,
   출처·날짜 유일성, 동시 무시 삽입, 양쪽 롤백, 기록 실패 시 종료 롤백, 중단 복구·늦은 콜백 제외.
 - data-service CI는 새 PostgreSQL 테스트의 실행 > 0, 실패·오류·건너뜀 = 0을 검사한다.
-- SQS·Slack E2E와 실제 운영 검증은 후속 단계다.
+- SDK 단위 테스트: 본문·ID 불변, 잘못된 메시지/MD5, 자격증명·권한·throttle·timeout 분류와 민감 본문 비노출.
+- LocalStack+PostgreSQL: 실제 SDK 전송, 커밋 전 미발행, 응답 유실·DB ACK 실패 시 동일 본문 재발행,
+  잘못된 큐 지연, 지수 백오프·최대 횟수, lease 복구·CAS·동시 선점. CI는 실행 > 0·실패/오류/스킵 = 0을 검사한다.
+- 실제 관리자 Consumer·Slack E2E와 운영 검증은 후속 단계다.

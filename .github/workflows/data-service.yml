@@ -76,6 +76,11 @@ jobs:
           for key in ('skipped', 'failures', 'errors'):
               assert int(completion.attrib[key]) == 0, f'Collection completion Outbox tests: {key}={completion.attrib[key]}'
           print(f"Collection completion PostgreSQL tests passed: {completion.attrib['tests']}")
+          sqs = ET.parse(results / 'TEST-com.team3.dataservice.outbox.CollectionSqsOutboxPostgresTest.xml').getroot()
+          assert int(sqs.attrib['tests']) > 0, 'Collection SQS/PostgreSQL tests did not run'
+          for key in ('skipped', 'failures', 'errors'):
+              assert int(sqs.attrib[key]) == 0, f'Collection SQS/PostgreSQL tests: {key}={sqs.attrib[key]}'
+          print(f"Collection SQS/PostgreSQL tests passed: {sqs.attrib['tests']}")
           suites = [ET.parse(path).getroot() for path in results.glob('TEST-*.xml')]
           counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
           print(f"data-service test totals: {counts}")
