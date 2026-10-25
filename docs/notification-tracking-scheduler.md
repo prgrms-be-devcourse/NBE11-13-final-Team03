@@ -36,7 +36,8 @@
 - 동일 JVM의 중복 호출은 실행 가드로 건너뛴다. 여러 인스턴스 간 정합성은 기존 정책 행 잠금과 UNIQUE/멱등키에 의존한다.
 - Run의 analysisCalls는 분석 호출 수이며, 완료·알림 생성 건수가 아니다. 이미 처리됨·사용 불가 등의 반환도 호출 수에 포함된다.
 
-생성된 ELIGIBILITY_CHANGED는 PENDING으로 남는다. 사용자 Worker의 자동 연결은 이벤트 전체 순회에 대한 실행 예산을 보강한 뒤 별도로 진행한다.
+생성된 ELIGIBILITY_CHANGED는 PENDING으로 남는다. 이 파이프라인이 사용자 Worker를 직접 호출하지 않는다.
+사용자 Worker의 예산·자동 실행은 별도 기본 비활성 경로로 연결하며 [신청 가능성 사용자 Fan-out 스케줄러](notification-eligibility-scheduler.md)를 따른다.
 기존 사용자 Worker의 lease 복구와 WAITING_POLICY 보류 계약은 변경하지 않는다.
 
 ## 활성화 전 조건

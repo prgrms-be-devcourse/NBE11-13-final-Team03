@@ -276,6 +276,20 @@ public class OpportunityEvent {
         leaseToken = null;
     }
 
+    /** Successful bounded work yields its lease, refunding this claim rather than spending failure attempts. */
+    public void yieldEligibilityFanout(UUID token, Instant resumeAt) {
+        if (eventType != OpportunityEventType.ELIGIBILITY_CHANGED || !ownedBy(token) || retryCount < 1) {
+            throw new IllegalStateException("Owned eligibility claim required for yield");
+        }
+        nextRetryAt = Objects.requireNonNull(resumeAt, "resumeAt");
+        processingStatus = OpportunityEventProcessingStatus.PENDING;
+        processingStartedAt = null;
+        leaseToken = null;
+        processedAt = null;
+        lastError = null;
+        retryCount--;
+    }
+
     /** Set once before persistence; historical events keep their original occurrence time. */
     public void recordOrigin(UUID correlationId, Instant occurredAt) {
         if (id != null) {

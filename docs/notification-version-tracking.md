@@ -3,7 +3,8 @@
 ## 현재 범위
 
 10단계는 PARTIAL이다. 구조적 snapshot 비교기와 Application 소유의 버전 처리 기록/변경 이력 모델을 구현했다.
-기준선 초기화·사용자별 자동 순회는 아직 연결하지 않았다. 버전 비교·분석 스케줄러는 기본 비활성으로 연결했으며 notification-tracking-scheduler.md를 따른다.
+기준선 초기화는 아직 연결하지 않았다. 버전 비교·분석 스케줄러는 기본 비활성으로 연결했으며 notification-tracking-scheduler.md를 따른다.
+사용자별 예산·자동 순회도 별도 기본 비활성 경로로 연결하며 notification-eligibility-scheduler.md를 따른다.
 잠정 알림 매핑·명시적 사용자별 Outbox 경로와 순차 비교 실행 경로는 아래 범위를 따른다.
 버전 비교 기록과 마감 연장 이벤트·기존 Outbox 취소는 아래 명시적 호출 트랜잭션으로 연결했다.
 새 테이블은 backend의 기존 ddl-auto:update 정책을 따른다. 실제 운영 DB 적용은 미검증이다.
@@ -242,7 +243,7 @@ EligibilityNotificationRevalidationPostgresTest는 일회용 Testcontainers Post
 
 EligibilityOutboxTransaction은 `yon.tracking.eligibility-outbox.enabled=true`인 경우에만 등록된다.
 기본값/실제 설정은 비활성 상태이며, 통합 테스트에서만 속성을 지정한다. 이 옵션은 Publisher/Consumer/Push 플래그와 별개다.
-자동 스케줄러에는 연결하지 않았다. 아래 명시적 소비 경로가 Outbox 트랜잭션을 재사용하며 날짜 Fan-out은 ELIGIBILITY_CHANGED를 점유하지 않는다.
+아래 소비 경로가 Outbox 트랜잭션을 재사용하며 날짜 Fan-out은 ELIGIBILITY_CHANGED를 점유하지 않는다. 사용자 자동 호출은 별도 기본 비활성 scheduler 옵션을 요구한다.
 새 경로는 올바른 버전 쌍을 가진 영속 ELIGIBILITY_CHANGED 이벤트를 명시적으로 전달해야만 실행된다.
 
 - 이벤트 → 현재 정책 → 사용자 → 저장 상태 → 프로필 순서로 잠근다. 사용자 행은 탈퇴/저장 변경과 같은 FOR UPDATE,
@@ -272,11 +273,11 @@ Outbox 생성과 근거 보존은 같은 행의 원자적 INSERT다. profile/정
   아래 명시적 분석 경로의 이벤트 생산과 별개이며 날짜 Worker는 이 이벤트를 소비하지 않는다.
 - **잠정 상태 쌍:** POSSIBLY_ELIGIBLE → ELIGIBLE, NOT_ELIGIBLE → POSSIBLY_ELIGIBLE을 포함한 DEFERRED 쌍의 의미·채널을 팀과 합의한다.
 - **신청 상태 가드:** CLOSED/UNKNOWN 차단 및 UPCOMING 통과 여부를 검토한다. 현재 허용 범위를 확정 정책으로 승격하지 않는다.
-- **나머지:** 아래 명시적 비교·분석·사용자별 순회/lease 복구 외에 자동 스케줄러·초기 적재 계약·정책 보류 재개는 미연결이며 새 경로와 실제 발송은 비활성 상태를 유지한다.
+- **나머지:** 비교·분석과 사용자 순회의 스케줄러는 각각 별도 기본 비활성 옵션으로 연결한다. 초기 적재 계약·정책 보류 재개는 미연결이며 실제 발송은 활성화하지 않는다.
 
 ## 순차 버전 비교 실행 경로
 
-`OpportunityVersionWorker.runOnce(afterOpportunityId, maxPolicies)`는 자동 스케줄러 없는 명시적 실행 경로다.
+`OpportunityVersionWorker.runOnce(afterOpportunityId, maxPolicies)`는 명시적으로 호출하거나 버전 스케줄러의 파이프라인에서 호출하는 실행 경로다.
 정책 ID 키셋 페이지(최대 500개)와 정책별 한 버전 처리로 실행량을 제한한다. 반환한 커서로 다음 페이지를 이어가며,
 한 순회가 끝나면 다음 순회는 0부터 시작한다. 커서는 버전 처리 완료 기록을 대신하지 않는다.
 
@@ -297,7 +298,7 @@ Outbox 생성과 근거 보존은 같은 행의 원자적 INSERT다. profile/정
 
 `OpportunityVersionAnalysisTransaction.analyze(toVersionId)`는
 `yon.tracking.version-analysis.enabled=true`일 때만 등록되는 명시적 개발 경로다. 속성이 없거나 false이면 등록하지 않는다.
-실제 환경에 이 옵션을 추가하지 않았고 자동 Worker에서도 호출하지 않는다. 사용자별 Outbox 옵션·전달·푸시 옵션과 별개다.
+실제 환경에 이 옵션을 추가하지 않았다. 별도 버전 스케줄러 게이트를 충족하면 파이프라인에서 호출하며, 사용자별 Outbox 옵션·전달·푸시 옵션과 별개다.
 
 - 정책 행을 잠근 뒤 현재 포인터·직전 버전 진행 근거·같은 정규화 규칙·READY/마감 보류 상태와 변경 이력을 확인한다.
 - `opportunity_version_analysis`에 `(tracking_id, analysis_version)` UNIQUE, 분석 규칙 버전, 분석 당시 현재 버전 ID, 변경 경로,
@@ -324,7 +325,9 @@ Outbox 생성과 근거 보존은 같은 행의 원자적 INSERT다. profile/정
 
 EligibilityFanoutCoordinator / Batch / Worker는 `yon.tracking.eligibility-fanout.enabled`와
 `yon.tracking.eligibility-outbox.enabled`가 **모두 true**일 때만 등록한다. 기본값은 비활성이며 실제 환경에는 추가하지 않았다.
-`runOnce()` 명시 호출만 있고 자동 스케줄러는 없다. 페이지 크기·lease·재시도·이벤트 예산은 전용 `yon.tracking.eligibility-fanout.*` 설정을 사용한다.
+`runOnce()`는 수동/자동 공통으로 전체·이벤트별 페이지 예산을 적용한다. 페이지 크기·lease·재시도·이벤트 예산은 전용 `yon.tracking.eligibility-fanout.*` 설정을 사용한다.
+자동 호출은 기존 두 기능 옵션에 더해 `yon.tracking.eligibility-fanout.scheduler.enabled=true`와 공통 스케줄 제어를 요구한다.
+예산 반납은 커서를 보존하고 해당 claim 횟수만 환급하며 다음 due 시각에 재개한다. 상세 설정·장애 경계는 notification-eligibility-scheduler.md를 따른다.
 기본 페이지는 25명이고 날짜 Worker 기본 500명과 독립적이다. 이 값은 초기 운영 설정이며 실제 잠금 시간·판정 비용 측정 후 조정해야 한다.
 기존 날짜 스케줄러의 enabled 옵션으로 새 Worker가 실행되지는 않는다.
 
@@ -350,7 +353,7 @@ EligibilityFanoutCoordinator / Batch / Worker는 `yon.tracking.eligibility-fanou
 - 보류 없이 순회가 끝나면 이벤트 COMPLETED다. 이벤트 만료(발생 후 7일)는 EXPIRED로 종료하고 만료를 연장하지 않는다.
   순회 중 새로 저장한 사용자 포함은 기존 키셋 정책처럼 보장하지 않는다.
 
-버전 비교 → 분석의 주기 실행은 별도 기본 비활성 스케줄러에 연결했다. 사용자 Worker 자동 실행·초기 적재 분류는 미연결이다.
+버전 비교 → 분석의 주기 실행은 별도 기본 비활성 스케줄러에 연결했다. 사용자 Worker의 예산·자동 실행은 notification-eligibility-scheduler.md를 따른다. 초기 적재 분류는 미연결이다.
 플래그·실제 DB·AWS/FCM·Notification 프로젝트 코드는 변경하지 않았다.
 
 ## 활성화 전 DB 제약·운영 확인

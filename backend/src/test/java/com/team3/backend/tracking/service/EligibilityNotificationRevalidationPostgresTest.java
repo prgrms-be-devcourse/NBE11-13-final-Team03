@@ -20,6 +20,7 @@ import com.team3.backend.tracking.domain.repository.EligibilityEventAssessmentRe
 import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
 import com.team3.backend.tracking.config.EventFanoutProperties;
 import com.team3.backend.tracking.config.EligibilityFanoutProperties;
+import com.team3.backend.tracking.config.EligibilityFanoutSchedulingProperties;
 import com.team3.backend.tracking.config.VersionTrackingProperties;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
@@ -84,6 +85,9 @@ class EligibilityNotificationRevalidationPostgresTest {
             return new EligibilityFanoutProperties(true, 1, 10, Duration.ofMinutes(30), Duration.ofMinutes(1), 5);
         }
         @Bean VersionTrackingProperties versionTrackingProperties() { return new VersionTrackingProperties(true, 1, 60000); }
+        @Bean EligibilityFanoutSchedulingProperties eligibilitySchedulingProperties() {
+            return new EligibilityFanoutSchedulingProperties(false, 10, 10, 60000);
+        }
     }
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
             .withDatabaseName("eligibility_revalidation_test");
@@ -338,6 +342,118 @@ class EligibilityNotificationRevalidationPostgresTest {
             } finally { release.countDown(); }
         }
         assertThat(outboxes.count()).isEqualTo(1);
+    }
+
+    @Test
+    void repeatedBudgetYieldsResumeAllUsersWithoutExhaustingFailureAttempts() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        for (int i = 0; i < 6; i++) savedUser(fixture, LocalDate.of(1990, 5, 15));
+        var worker = boundedWorker(1, 1);
+        for (int i = 0; i < 7; i++) {
+            var result = worker.runOnce();
+            assertThat(result.pageCalls()).isEqualTo(1); assertThat(result.yieldedEvents()).isEqualTo(1);
+            var pending = events.findById(request.eventId()).orElseThrow();
+            assertThat(pending.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+            assertThat(pending.getRetryCount()).isZero(); assertThat(pending.getLeaseToken()).isNull();
+            assertThat(pending.getProcessedAt()).isNull();
+            assertThat(pending.getNextRetryAt()).isEqualTo(NOW.plusSeconds(60));
+            assertThat(assessments.count()).isEqualTo(i + 1); assertThat(outboxes.count()).isEqualTo(i + 1);
+            assertThat(fanout.recoverExhausted()).isZero();
+            assertThat(worker.runOnce().pageCalls()).isZero(); // Not due yet, even for manual callers.
+            makeDue(request.eventId());
+        }
+        assertThat(worker.runOnce().pageCalls()).isEqualTo(1); // Terminal empty page also spends budget.
+        var complete = events.findById(request.eventId()).orElseThrow();
+        assertThat(complete.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+        assertThat(complete.getRetryCount()).isEqualTo(1); // Final successful claim retains existing counting convention.
+        assertThat(assessments.count()).isEqualTo(7); assertThat(outboxes.count()).isEqualTo(7);
+    }
+
+    @Test
+    void yieldedEventDoesNotBlockFollowingDueEventWithOnePageBudget() {
+        var firstFixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var first = request(firstFixture, NOW);
+        var secondFixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var second = request(secondFixture, NOW);
+        var worker = boundedWorker(1, 1);
+        worker.runOnce();
+        assertThat(fanout.candidates()).containsExactly(second.eventId());
+        worker.runOnce();
+        assertThat(assessments.findByEventIdAndUserId(first.eventId(), USER)).isPresent();
+        assertThat(assessments.findByEventIdAndUserId(second.eventId(), USER)).isPresent();
+        assertThat(outboxes.count()).isEqualTo(2);
+    }
+
+    @Test
+    void yieldingRejectsOldOwnerAndPreservesPreviouslyConsumedFailureAttempts() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        jdbc.update("UPDATE opportunity_events SET retry_count=2 WHERE id=?", request.eventId());
+        var first = fanout.claim(request.eventId()).orElseThrow();
+        assertThat(fanoutBatch.process(first)).isFalse();
+        assertThat(fanout.yieldExecution(first)).isTrue();
+        var pending = events.findById(request.eventId()).orElseThrow();
+        assertThat(pending.getRetryCount()).isEqualTo(2); assertThat(pending.getLastUserId()).isEqualTo(USER);
+        assertThat(fanout.yieldExecution(first)).isFalse();
+        assertThat(fanout.retry(first, new IllegalStateException("old lease"))).isFalse();
+        makeDue(request.eventId());
+        var recovered = fanout.claim(request.eventId()).orElseThrow();
+        assertThat(recovered.leaseToken()).isNotEqualTo(first.leaseToken());
+        assertThat(fanout.yieldExecution(first)).isFalse();
+        assertThatThrownBy(() -> fanoutBatch.process(first)).isInstanceOf(IllegalStateException.class);
+        assertThat(fanoutBatch.process(recovered)).isTrue();
+        assertThat(outboxes.count()).isEqualTo(1); assertThat(assessments.count()).isEqualTo(1);
+    }
+
+    @Test
+    void boundedWorkerFailureRetainsPriorPageAndConsumesOnlyItsFailedClaim() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW); var second = savedUser(fixture, LocalDate.of(1990, 5, 15));
+        var worker = boundedWorker(3, 3);
+        jdbc.execute("ALTER TABLE eligibility_event_assessments ADD CONSTRAINT reject_budget_second CHECK (user_id <> " + second + ")");
+        try {
+            var result = worker.runOnce();
+            assertThat(result.failures()).isEqualTo(1); assertThat(result.pageCalls()).isEqualTo(2);
+            assertThat(result.yieldedEvents()).isZero();
+        } finally { jdbc.execute("ALTER TABLE eligibility_event_assessments DROP CONSTRAINT reject_budget_second"); }
+        var pending = events.findById(request.eventId()).orElseThrow();
+        assertThat(pending.getLastUserId()).isEqualTo(USER); assertThat(pending.getRetryCount()).isEqualTo(1);
+        assertThat(pending.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+        assertThat(pending.getLastError()).isNotBlank();
+        assertThat(assessments.count()).isEqualTo(1); assertThat(outboxes.count()).isEqualTo(1);
+        makeDue(request.eventId());
+        assertThat(worker.runOnce().failures()).isZero();
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+        assertThat(assessments.count()).isEqualTo(2); assertThat(outboxes.count()).isEqualTo(2);
+    }
+
+    private EligibilityFanoutWorker boundedWorker(int total, int perEvent) {
+        return new EligibilityFanoutWorker(fanout, fanoutBatch, new EligibilityFanoutSchedulingProperties(false, total, perEvent, 60000));
+    }
+
+    @Test
+    void deferredEvidenceRemainsPendingAcrossBudgetsUntilTerminalPageMovesToPolicyHold() {
+        var text = Map.<String, Object>of("status", "UNSTRUCTURED");
+        var fixture = fixture(age(39), text, text, ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        var older = savedUser(fixture, LocalDate.of(1980, 5, 15));
+        var worker = boundedWorker(1, 1);
+        worker.runOnce(); makeDue(request.eventId()); worker.runOnce();
+        assertThat(assessments.findByEventIdAndUserId(request.eventId(), older).orElseThrow().getStatus())
+                .isEqualTo(EligibilityEventAssessment.Status.DEFERRED);
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+        makeDue(request.eventId()); worker.runOnce();
+        var held = events.findById(request.eventId()).orElseThrow();
+        assertThat(held.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.WAITING_POLICY);
+        assertThat(held.getProcessedAt()).isNull(); assertThat(held.getLeaseToken()).isNull();
+        assertThat(worker.runOnce().pageCalls()).isZero();
+        assertThat(assessments.count()).isEqualTo(2); assertThat(outboxes.count()).isEqualTo(1);
+    }
+
+    private void makeDue(Long id) {
+        // Only disposable test rows: simulate reaching the due time without sleeping or changing event expiry.
+        jdbc.update("UPDATE opportunity_events SET next_retry_at=? WHERE id=?", java.sql.Timestamp.from(NOW), id);
     }
 
     @Test
