@@ -1,5 +1,7 @@
 -- Manual, reviewed rollout only; stop backend before applying as application_user.
 -- Preserves rows. Replaces enum allow-list CHECKs and the obsolete single-tracking UNIQUE.
+-- The single-tracking UNIQUE removal applies only to DBs provisioned from the initial PR #70 schema.
+-- Fresh databases use the composite UNIQUE directly; its removal loop is then a no-op.
 -- Unknown/custom status constraints or standalone unique indexes require manual review, never silent removal.
 BEGIN;
 SET LOCAL lock_timeout = '5s';

@@ -51,24 +51,6 @@
 - 최초 출처의 정규화 실패/재시도에 대한 기준선 완료 조건과 판정 상태 쌍별 알림 매핑은 확정 전 자동 구현하지 않는다.
 - 훈련 시작일·사업기간을 신청기간으로 취급하지 않고 복수 기간의 연장 여부가 불명확하면 임의 확정하지 않는다.
 
-## 기존 병합 범위 검증 (2026-10-25)
-
-| 테스트 | 건수 | 결과 |
-| --- | --- | --- |
-| OpportunitySnapshotComparatorTest | 10 | skip/failure/error 0 |
-| OpportunityVersionTrackingTest | 6 | skip/failure/error 0 |
-| OpportunityVersionTrackingPostgresTest | 8 | skip/failure/error 0 |
-| EligibilityVersionComparisonServiceTest | 6 | skip/failure/error 0 |
-| DeadlineExtensionDetectorTest | 14 | skip/failure/error 0 |
-| DeadlineExtensionPostgresTest | 15 | skip/failure/error 0 |
-
-- 기존 마감 임박·Fan-out·의존성 경계 및 양쪽 메시지 계약 테스트 통과.
-- Notification의 계약/HTTP 수신 테스트 33개는 skip/failure/error 0. 새 타입 저장과 재전달 멱등성 포함.
-- backend 전체 테스트·bootJar 성공. 기존 조건부 PostgreSQL 테스트 19개는 별도 실행하여 skip/failure/error 0 확인.
-- notification-service 전체 테스트·bootJar 성공, 전체 skip/failure/error 0 확인.
-- PostgreSQL에서 JSONB 보존·UNIQUE·동시 중복 실행·변경 이력/처리 기록/연장 이벤트/취소의 원자적 롤백을 검증했다.
-- 자동 Worker, 연속 버전의 전체 처리 체인, 실제 운영 DB·AWS 전달·FCM 발송은 이번 검증 대상이 아니다.
-
 ## 동일 입력 신청 가능성 비교
 
 EligibilityVersionComparisonService는 프로필을 한 번 조회하고 기존 EligibilityEvaluator에 이전·변경 버전 ID를
@@ -220,25 +202,8 @@ ProvisionalEligibilityTransitionClassifier는 상태 쌍만 받는 순수 분류
 - 초기 적재분은 늦게 복구돼도 기준선으로 처리하고 초기 변경 알림을 생략하는 잠정 방향을 유지한다.
 - 초기 적재 여부가 불명확하면 임의로 일반 갱신으로 보지 않고 판단 대기로 둔다.
 - 구체 필드·저장 위치·초기화 완료 조건은 data-service 담당자와 협의 전이다. 실패 복구 코드는 변경하지 않는다.
-- 모든 버전의 순차 비교·분석 완료·복구는 여전히 후속 구현이다. 최신 재검증은 아래 명시적 저장 경로에 연결했다.
+- 순차 비교·분석·사용자 순회/lease 복구·최신 재검증은 명시적 경로로 연결했다. 자동 실행·초기 적재 분류·정책 보류 재개는 후속이다.
 - 이번 승인에 11단계 푸시 슬롯·묶음·횟수 정책은 포함하지 않는다.
-
-### 후속 기능 검증 — 최종 상태
-
-| 신규 테스트 | 건수 | 결과 |
-| --- | --- | --- |
-| ProvisionalEligibilityTransitionClassifierTest | 20 | skip/failure/error 0 |
-| EligibilityNotificationRevalidationServiceTest | 12 | skip/failure/error 0 |
-| EligibilityNotificationRevalidationPostgresTest | 17 | skip/failure/error 0 |
-| EligibilityNotificationMessageFactoryTest | 5 | skip/failure/error 0 |
-| EligibilityOutboxConfigurationTest | 2 | skip/failure/error 0 |
-
-- 신규 56개가 모두 통과했다. 기존 동일 입력 비교·의존성 경계 테스트도 통과했다.
-- backend 전체 테스트·bootJar 성공. 기존 조건부 PostgreSQL 19개는 별도 실행해 skip/failure/error 0 확인.
-- Notification 계약 7개·수신 PostgreSQL 28개가 skip/failure/error 0이며 전체 테스트·bootJar도 성공했다.
-- 별도 리뷰 검증: backend 742개 실패 0·조건부 건너뜀 98, notification-service 95개 실패/건너뜀 0.
-- 속성명 변경 재검증 대상: 기본 비활성화 2개·명시적 활성화를 사용하는 PostgreSQL 통합 테스트 17개.
-- 실제 업무 DB·운영 전달·FCM 발송과 순차 Worker의 검증 완료를 뜻하지 않는다.
 
 ### 최신 프로필·정책 재검증 — 읽기 근거 반환
 
@@ -271,7 +236,7 @@ EligibilityNotificationRevalidationPostgresTest는 일회용 Testcontainers Post
 - 읽기 서비스 단독 호출은 Outbox·이벤트·변경 이력·버전 기록을 생성하지 않음
 - 명시적 저장 경로의 재실행·동시 중복·INSERT 실패 복구와 정책/사용자/저장/프로필 변경의 커밋 대기
 
-동일 통합 테스트 클래스의 총 17개에서 읽기 판정과 Outbox 저장을 검증했다. 실제 업무 DB는 사용하지 않았다.
+이 경로는 실제 판정기와 일회용 PostgreSQL로 검증하며 실제 업무 DB를 사용하지 않는다.
 
 ### 사용자별 Outbox — 잠정 계약의 명시적 저장 경로
 
@@ -304,7 +269,7 @@ Outbox 생성과 근거 보존은 같은 행의 원자적 INSERT다. profile/정
   후보 조회·claim·시도 소진 복구 대상으로 삼으며, 재시도도 같은 허용 목록으로 제한한다.
   ELIGIBILITY_CHANGED / OPPORTUNITY_CREATED는 PENDING 또는 오래된 PROCESSING 상태여도 이 Worker가 변경하지 않는다.
   메시지 생성기의 지원 목록을 공유하며, 지원 목록 고정·직접 점유 방어·외부 유형의 행 보존을 검증하는 테스트를 추가했다.
-  관련 테스트 26개에서 skip/failure/error 0을 확인했다. 아래 명시적 분석 경로의 이벤트 생산과 별개이며 날짜 Worker는 이 이벤트를 소비하지 않는다.
+  아래 명시적 분석 경로의 이벤트 생산과 별개이며 날짜 Worker는 이 이벤트를 소비하지 않는다.
 - **잠정 상태 쌍:** POSSIBLY_ELIGIBLE → ELIGIBLE, NOT_ELIGIBLE → POSSIBLY_ELIGIBLE을 포함한 DEFERRED 쌍의 의미·채널을 팀과 합의한다.
 - **신청 상태 가드:** CLOSED/UNKNOWN 차단 및 UPCOMING 통과 여부를 검토한다. 현재 허용 범위를 확정 정책으로 승격하지 않는다.
 - **나머지:** 아래 명시적 비교·분석·사용자별 순회/lease 복구 외에 자동 스케줄러·초기 적재 계약·정책 보류 재개는 미연결이며 새 경로와 실제 발송은 비활성 상태를 유지한다.
@@ -326,9 +291,6 @@ Outbox 생성과 근거 보존은 같은 행의 원자적 INSERT다. profile/정
   별도 RUNNING 점유 행이 없어 비교 트랜잭션 중단 후 해제해야 할 lease도 없다. 자동 재시도 스케줄·Backoff는 아직 연결하지 않았다.
 - 기준선 대기 정책도 커서를 전진시켜 다른 정책의 처리를 막지 않는다. 여러 실행자는 정책 행 잠금과 기존 UNIQUE로 직렬화한다.
 
-날짜 Worker 타입 분리 테스트 26개는 skip/failure/error 0으로 확인했다.
-순차 비교 경로는 OpportunityVersionWorkerTest 4개·DeadlineExtensionPostgresTest 23개·IngestBoundaryTest 3개에서 skip/failure/error 0을 확인했다.
-그 이후 추가한 아래 분석 완료 경로의 테스트 결과와는 구분한다.
 실제 DB DDL·환경변수·발송 플래그·스케줄 설정은 변경하지 않았다.
 
 ## 버전 분석 근거·후속 작업과 완료의 원자적 저장
@@ -357,10 +319,6 @@ Outbox 생성과 근거 보존은 같은 행의 원자적 INSERT다. profile/정
   현재 분석 규칙은 development-version-analysis-v2이며 호출자가 임의 문자열을 지정하지 않는다.
   보류가 해결되면 PROCESSED로 전환하고, 해결되지 않으면 새 보류 근거와 진행 체크포인트를 유지한다.
   자격조건 이벤트는 버전 쌍 멱등키를 재사용하며 재분석으로 사용자 알림을 복제하거나 만료를 연장하지 않는다.
-
-버전 분석 경로는 DeadlineExtensionPostgresTest 34개·OpportunityVersionAnalysisConfigurationTest 2개·
-OpportunityVersionWorkerTest 4개·IngestBoundaryTest 3개에서 skip/failure/error 0을 확인했다.
-아래 사용자 순회 경로의 신규 테스트 결과와는 구분한다. 실제 활성화 전 팀 계약과 운영 조건을 확인해야 한다.
 
 ## 저장 사용자별 판정·Outbox·중단 복구
 
@@ -392,7 +350,6 @@ EligibilityFanoutCoordinator / Batch / Worker는 `yon.tracking.eligibility-fanou
 - 보류 없이 순회가 끝나면 이벤트 COMPLETED다. 이벤트 만료(발생 후 7일)는 EXPIRED로 종료하고 만료를 연장하지 않는다.
   순회 중 새로 저장한 사용자 포함은 기존 키셋 정책처럼 보장하지 않는다.
 
-리뷰 보완 후 로컬 검증 결과는 문서 마지막 검증 절을 따른다.
 버전 비교 → 명시적 분석 → 명시적 사용자 Worker는 각각 호출 가능하지만 자동 주기 실행·초기 적재 분류는 미연결이다.
 플래그·실제 DB·AWS/FCM·Notification 프로젝트 코드는 변경하지 않았다.
 
@@ -420,8 +377,11 @@ ORDER BY 1, 2;
 5. 기준선 초기화·초기 적재 계약을 먼저 확인한다. 기준선이 없으면 WAITING_FOR_BASELINE인 것이 정상이며 활성화 완료가 아니다.
 6. 비교 → 분석 → 사용자 순회를 7일 만료 내에 실행할 운영 절차를 검증한다. 만료 기점은 비교 기록 시점이며 연장하지 않는다.
 7. 팀 미확정 상태 쌍·UPCOMING 가드·WAITING_POLICY 재개·마감 대응 규칙과 운영 관측을 합의하고 CI 성공 후 배포/활성화를 별도로 승인한다.
+8. 판정과 무관한 변경의 비용을 측정한다. **팀 결정 후보:** 변경 경로가 조건·기간·지역 키 밖인 경우 사용자별 순회를 생략할지 검토한다.
+   실제 판정 입력과 snapshot 경로의 대응 및 미지 경로 처리 기준을 합의하기 전까지 필터를 추가하지 않는다.
+   현재는 제목만 바뀐 버전도 ELIGIBILITY_CHANGED를 만들고 저장 사용자별로 판정한다.
 
-## 리뷰 보완 후 로컬 검증 (2026-10-25)
+## 검증 결과와 범위 (2026-10-25)
 
 | 테스트 | 건수 | 결과 |
 | --- | --- | --- |
@@ -438,7 +398,8 @@ ORDER BY 1, 2;
 - 프로필 없음 건너뜀/다음 사용자 처리, 마감 보류 후 순차 진행, 규칙별 재분석 이력·롤백·멱등성을 검증했다.
 - 전용 페이지 기본값/설정 검증, 민감 메시지가 포함되지 않는 디버그 진단을 확인했다.
 - DB 전환 SQL은 일회용 PostgreSQL에서 CHECK·UNIQUE 전환, 이력 보존, 재적용, 사용자 정의 제약 보호를 검증했다.
-- 보완 후 `./gradlew test bootJar --rerun-tasks`가 성공했다. 전체 테스트에서 조건부 PostgreSQL 19개는 환경변수 미지정으로 건너뛰었다.
+- 로컬 `./gradlew test bootJar --rerun-tasks`가 성공했다. 전체 테스트에서 조건부 PostgreSQL 19개는 환경변수 미지정으로 건너뛰었다.
 - 해당 19개를 테스트 전용 yon_test DB로 별도 재실행했다. EligibilityResultServiceTest 18개와 ConditionSetBackfillTest 1개 모두 skip/failure/error 0이다.
-- 이 결과는 로컬 검증이며 추가 커밋 기준 CI 성공은 별도 확인해야 한다. 실제 DB에 전환 SQL을 적용하지 않았다.
+- PR #70 리뷰 보고 기준 backend 800개 실패 0·조건부 건너뜀 98이며 verify/test CI 성공을 확인했다. 이 문서·주석 추가 커밋의 CI는 별도 확인한다.
+- 실제 DB 전환 SQL 적용·자동 주기 실행·초기 적재 연동·AWS 전달·FCM 발송은 검증 범위가 아니다.
 - 실제 환경변수·자동 실행·전달/푸시 활성화는 변경하지 않았다. 기준선/초기 적재 계약·팀 미확정 정책·운영 배포는 후속이다.
