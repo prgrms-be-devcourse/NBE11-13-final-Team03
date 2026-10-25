@@ -184,11 +184,138 @@ class NotificationSlotPostgresTest {
         clock.now=NOW.plusSeconds(1800); receive(); worker.runOnce(); verify(sender,times(2)).send(any());
     }
 
-    @Test void unattemptedBundleExpiresAtExclusiveWindowEndWithoutCarryInThisPr() {
-        receive(); store.build(7); clock.now=NOW.plusSeconds(1800);
-        assertThat(store.claimNext()).isEmpty(); worker.runOnce(); assertThat(deliveryState()).isEqualTo("SKIPPED");
-        assertThat(usage()).isZero(); clock.now=NOW.plusSeconds(4*3600+30*60);
-        assertThat(store.build(7)).isEmpty(); worker.runOnce(); verifyNoInteractions(sender);
+    @Test void unattemptedBundleCarriesWithoutUsageAndOccupiesNextSlotWithoutNewMembers() {
+        receive(); long bundle=store.build(7).orElseThrow(); clock.now=NOW.plusSeconds(1800);
+        assertThat(store.claimNext()).isEmpty(); worker.runOnce(); assertThat(deliveryState()).isEqualTo("PENDING");
+        assertThat(usage()).isZero(); assertThat(count("notification_push_bundles")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT slot_no FROM notification_push_bundles",Integer.class)).isEqualTo(2);
+        verifyNoInteractions(sender);
+        receive(); clock.now=NOW.plusSeconds(4*3600+30*60); worker.runOnce();
+        verify(sender).send(any()); assertThat(usage()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT bundle_id FROM notification_push_slot_usage",Long.class)).isEqualTo(bundle);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_push_pending WHERE status='PENDING'",Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT slot_no FROM notification_push_slot_usage",Integer.class)).isEqualTo(2);
+    }
+
+    @Test void delayedPollCarriesToCurrentOpenWindowWithoutSendingMissedSlots() {
+        receive(); long bundle=store.build(7).orElseThrow(); clock.now=NOW.plusSeconds(8*3600+30*60);
+        worker.runOnce(); verify(sender).send(any()); assertThat(usage()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT id FROM notification_push_bundles",Long.class)).isEqualTo(bundle);
+        assertThat(jdbc.queryForObject("SELECT slot_no FROM notification_push_slot_usage",Integer.class)).isEqualTo(3);
+    }
+
+    @Test void nextDayCarryCountsOnlyTheAttemptDayAndKeepsBundleIdentity() {
+        clock.now=NOW.plusSeconds(8*3600+30*60); receive(); long bundle=store.build(7).orElseThrow();
+        clock.now=NOW.plusSeconds(9*3600); worker.runOnce(); verifyNoInteractions(sender); assertThat(usage()).isZero();
+        assertThat(jdbc.queryForObject("SELECT kst_date FROM notification_push_bundles",LocalDate.class)).isEqualTo(LocalDate.of(2026,10,24));
+        clock.now=NOW.plus(Duration.ofDays(1)); worker.runOnce(); verify(sender).send(any());
+        assertThat(jdbc.queryForObject("SELECT bundle_id FROM notification_push_slot_usage",Long.class)).isEqualTo(bundle);
+        assertThat(jdbc.queryForObject("SELECT kst_date FROM notification_push_slot_usage",LocalDate.class)).isEqualTo(LocalDate.of(2026,10,24));
+        assertThat(usage()).isEqualTo(1);
+    }
+
+    @Test void carryPrunesExpiredRepresentativeAndNeverExtendsDeadlineExpiry() {
+        receive("DEADLINE_SOON","D-1",NOW.plusSeconds(3600),"expired-first");
+        var valid=receive(); long bundle=store.build(7).orElseThrow(); clock.now=NOW.plusSeconds(1800);
+        worker.runOnce(); assertThat(count("notifications")).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT representative_notification_id FROM notification_push_bundles",Long.class)).isEqualTo(valid.notificationId());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_push_pending WHERE reason='PUSH_EXPIRED'",Long.class)).isEqualTo(1);
+        clock.now=NOW.plusSeconds(4*3600+30*60); var message=store.prepare(store.claimNext().orElseThrow()).orElseThrow();
+        assertThat(message.bundleId()).isEqualTo(bundle); assertThat(message.title()).isEqualTo("opened");
+        assertThat(message.link()).isEqualTo("/opportunities/10");
+    }
+
+    @Test void allMembersExpiredByNextWindowCloseWithoutUsageOrCarry() {
+        receive("DEADLINE_SOON","D-1",NOW.plusSeconds(3600),"expires"); store.build(7);
+        clock.now=NOW.plusSeconds(1800); worker.runOnce();
+        assertThat(deliveryState()).isEqualTo("SKIPPED"); assertThat(usage()).isZero();
+        assertThat(jdbc.queryForObject("SELECT slot_no FROM notification_push_bundles",Integer.class)).isEqualTo(1);
+        verifyNoInteractions(sender);
+    }
+
+    @Test void carryInvalidatesUnpreparedClaimsAcrossAllDevicesAndRejectsOldCallbacks() {
+        users.registerEndpoint(7,new EndpointRequest("device-b")); receive(); store.build(7);
+        var old=store.claimNext().orElseThrow(); clock.now=NOW.plusSeconds(1800); worker.runOnce();
+        assertThat(store.prepare(old)).isEmpty(); assertThat(store.sent(old,"not-started")).isFalse();
+        assertThat(usage()).isZero();
+        assertThat(jdbc.queryForList("SELECT status FROM notification_bundle_deliveries",String.class)).containsOnly("PENDING");
+        clock.now=NOW.plusSeconds(4*3600+30*60); worker.runOnce(); verify(sender,times(2)).send(any());
+        assertThat(usage()).isEqualTo(1); assertThat(count("notification_push_bundles")).isEqualTo(1);
+    }
+
+    @Test void attemptedOrUnknownResultBundleNeverCarriesEvenAfterStaleRecovery() {
+        receive(); store.build(7); var claim=store.claimNext().orElseThrow(); store.prepare(claim).orElseThrow();
+        clock.now=NOW.plusSeconds(181); store.recoverStale(); // Now PENDING but permanent attempt history remains.
+        clock.now=NOW.plusSeconds(1800); worker.runOnce(); assertThat(deliveryState()).isEqualTo("SKIPPED");
+        assertThat(jdbc.queryForObject("SELECT slot_no FROM notification_push_bundles",Integer.class)).isEqualTo(1);
+        assertThat(usage()).isEqualTo(1); clock.now=NOW.plusSeconds(4*3600+30*60); worker.runOnce();
+        verifyNoInteractions(sender);
+    }
+
+    @Test void revokedConsentPreventsCarryWithoutQuota() {
+        receive(); store.build(7); users.updateSettings(7,new SettingsRequest(true,false));
+        clock.now=NOW.plusSeconds(1800); worker.runOnce(); assertThat(deliveryState()).isEqualTo("SKIPPED");
+        assertThat(usage()).isZero(); verifyNoInteractions(sender);
+    }
+
+    @Test void carryDoesNotAddNewEndpointsOrReviveExcludedDeliveries() {
+        receive(); store.build(7); jdbc.update("UPDATE notification_endpoints SET active=false WHERE user_id=7");
+        users.registerEndpoint(7,new EndpointRequest("new-device")); clock.now=NOW.plusSeconds(1800); worker.runOnce();
+        assertThat(deliveryState()).isEqualTo("SKIPPED"); assertThat(count("notification_bundle_deliveries")).isEqualTo(1);
+        assertThat(usage()).isZero(); verifyNoInteractions(sender);
+    }
+
+    @Test void carryAndConcurrentBuilderReserveOneBundleBeforeNewPendingWork() throws Exception {
+        receive(); long bundle=store.build(7).orElseThrow(); receive(); clock.now=NOW.plusSeconds(4*3600+30*60);
+        var gate=new CountDownLatch(1);
+        try(var pool=Executors.newVirtualThreadPerTaskExecutor()) {
+            var expiry=pool.submit(()->{gate.await();store.expire(new NotificationSlotStore.BundleRef(bundle,7));return true;});
+            var builder=pool.submit(()->{gate.await();return store.build(7);}); gate.countDown();
+            expiry.get(10,TimeUnit.SECONDS); builder.get(10,TimeUnit.SECONDS);
+        }
+        assertThat(count("notification_push_bundles")).isEqualTo(1); assertThat(usage()).isZero();
+        assertThat(jdbc.queryForObject("SELECT slot_no FROM notification_push_bundles",Integer.class)).isEqualTo(2);
+        worker.runOnce(); verify(sender).send(any()); assertThat(usage()).isEqualTo(1);
+    }
+
+    @Test void carryReservationAndDeliveryResetRollBackTogetherOnFailure() {
+        receive(); long bundle=store.build(7).orElseThrow(); var old=store.claimNext().orElseThrow();
+        jdbc.execute("ALTER TABLE notification_bundle_deliveries ADD CONSTRAINT reject_carry CHECK(status<>'PENDING')");
+        clock.now=NOW.plusSeconds(1800);
+        try { assertThatThrownBy(()->store.expire(new NotificationSlotStore.BundleRef(bundle,7))).isInstanceOf(RuntimeException.class); }
+        finally { jdbc.execute("ALTER TABLE notification_bundle_deliveries DROP CONSTRAINT reject_carry"); }
+        assertThat(jdbc.queryForObject("SELECT slot_no FROM notification_push_bundles",Integer.class)).isEqualTo(1);
+        assertThat(deliveryState()).isEqualTo("CLAIMED");
+        assertThat(jdbc.queryForObject("SELECT lease_token FROM notification_bundle_deliveries",UUID.class)).isEqualTo(old.token());
+        assertThat(usage()).isZero();
+    }
+
+    @Test void existingTargetReservationIsNotOverwrittenAndCarryWaitsForLaterSlot() {
+        receive(); long bundle=store.build(7).orElseThrow();
+        jdbc.update("""
+                INSERT INTO notification_push_bundles(user_id,kst_date,slot_no,window_start,window_end,
+                  representative_notification_id,policy_version,status,created_at,closed_at)
+                SELECT user_id,kst_date,2,window_start+interval '270 minutes',window_end+interval '270 minutes',
+                  representative_notification_id,policy_version,'SKIPPED',created_at,created_at
+                FROM notification_push_bundles WHERE id=?
+                """,bundle);
+        clock.now=NOW.plusSeconds(1800); store.expire(new NotificationSlotStore.BundleRef(bundle,7));
+        assertThat(jdbc.queryForObject("SELECT slot_no FROM notification_push_bundles WHERE id=?",Integer.class,bundle)).isEqualTo(1);
+        assertThat(usage()).isZero();
+        clock.now=NOW.plusSeconds(5*3600); store.expire(new NotificationSlotStore.BundleRef(bundle,7));
+        assertThat(jdbc.queryForObject("SELECT slot_no FROM notification_push_bundles WHERE id=?",Integer.class,bundle)).isEqualTo(3);
+        assertThat(store.claimNext()).isEmpty(); verifyNoInteractions(sender);
+    }
+
+    @Test void repeatedMissedWindowsKeepOneBundleAndNeverInventAttempts() {
+        receive(); long bundle=store.build(7).orElseThrow();
+        for(long seconds:List.of(1800L,5*3600L,9*3600L)) {
+            clock.now=NOW.plusSeconds(seconds); worker.runOnce();
+            assertThat(count("notification_push_bundles")).isEqualTo(1); assertThat(usage()).isZero();
+        }
+        verifyNoInteractions(sender); clock.now=NOW.plus(Duration.ofDays(1)); worker.runOnce();
+        verify(sender).send(any()); assertThat(usage()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT bundle_id FROM notification_push_slot_usage",Long.class)).isEqualTo(bundle);
     }
 
     @Test void claimAndPrepareAtWindowEndDoNotStartAttempt() {

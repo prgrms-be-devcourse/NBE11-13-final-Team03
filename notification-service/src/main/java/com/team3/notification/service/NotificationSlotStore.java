@@ -28,7 +28,7 @@ public class NotificationSlotStore {
     }
     public record Claim(long id, long bundleId, long userId, UUID token) { }
     public record BundleRef(long id, long userId) { }
-    private record Bundle(long id, long userId, LocalDate date, int slot, Instant start, Instant end, String status) {
+    private record Bundle(long id, long userId, LocalDate date, int slot, Instant start, Instant end, String status, Instant firstAttempt) {
         boolean open(Instant now) { return status.equals("READY") && !now.isBefore(start) && now.isBefore(end); }
     }
     private record Member(long id, String title, String content, String link, Instant expires, UUID message, UUID correlation) { }
@@ -70,6 +70,16 @@ public class NotificationSlotStore {
         if (Boolean.TRUE.equals(jdbc.queryForObject("""
                 SELECT EXISTS(SELECT 1 FROM notification_push_bundles WHERE user_id=? AND kst_date=? AND slot_no=?)
                 """, Boolean.class, userId, window.date(), window.number()))) return Optional.empty();
+        // A builder must not overtake carryover merely because another poll exhausted its expiry budget.
+        var waiting = jdbc.query("""
+                SELECT id FROM notification_push_bundles WHERE user_id=? AND status='READY'
+                  AND first_attempt_at IS NULL AND window_end<=? ORDER BY window_end,id LIMIT 1
+                """, (rs,row)->rs.getLong(1), userId, ts(now));
+        if (!waiting.isEmpty()) {
+            var previous = lock(waiting.getFirst(),userId).orElseThrow();
+            if (carry(previous,window)) return Optional.of(previous.id());
+            return Optional.empty();
+        }
         if (!consent(userId) || !hasEndpoint(userId)) {
             jdbc.update("UPDATE notification_push_pending SET status='SKIPPED',reason='CHANNEL_DISABLED' WHERE user_id=? AND status='PENDING'", userId);
             return Optional.empty();
@@ -127,8 +137,14 @@ public class NotificationSlotStore {
                 """, (rs,row) -> new Endpoint(rs.getLong(1), rs.getString(2), rs.getBoolean(3)),
                 claim.id(),claim.bundleId(),claim.userId(),claim.token());
         if (rows.isEmpty()) return Optional.empty();
-        if (!b.open(now) || guard.isWithdrawn(claim.userId()) || !consent(claim.userId())) {
+        if (guard.isWithdrawn(claim.userId()) || !consent(claim.userId())) {
             close(b, "WINDOW_OR_USER_DISABLED"); return Optional.empty();
+        }
+        if (!b.open(now)) {
+            if (b.status().equals("READY") && !now.isBefore(b.end()) && b.firstAttempt()==null)
+                carry(b,PushSlotPolicy.next(now));
+            else close(b,"WINDOW_OR_USER_DISABLED");
+            return Optional.empty();
         }
         var endpoint = rows.getFirst();
         if (!endpoint.active()) { skip(claim,"ENDPOINT_INACTIVE"); finish(b); return Optional.empty(); }
@@ -205,7 +221,56 @@ public class NotificationSlotStore {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void expire(BundleRef ref) {
         guard.lock(ref.userId()); var b=lock(ref.id(),ref.userId());
-        if (b.isPresent() && !clock.instant().isBefore(b.orElseThrow().end()) && b.orElseThrow().status().equals("READY")) close(b.orElseThrow(),"SLOT_WINDOW_ENDED");
+        if (b.isPresent() && !clock.instant().isBefore(b.orElseThrow().end()) && b.orElseThrow().status().equals("READY")) {
+            if (b.orElseThrow().firstAttempt()==null) carry(b.orElseThrow(),PushSlotPolicy.next(clock.instant()));
+            else close(b.orElseThrow(),"SLOT_WINDOW_ENDED");
+        }
+    }
+
+    /** Caller owns user -> bundle locks. Reservation moves, identity/membership/attempt history never resets. */
+    private boolean carry(Bundle b, PushSlotPolicy.Window target) {
+        if (b.firstAttempt()!=null) return false;
+        // Delivery-only claim/recovery may race this transaction. Lock all deliveries before invalidating tokens.
+        jdbc.queryForList("SELECT id FROM notification_bundle_deliveries WHERE bundle_id=? ORDER BY id FOR UPDATE",Long.class,b.id());
+        if (Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM notification_push_slot_usage WHERE bundle_id=?) OR
+                  EXISTS(SELECT 1 FROM notification_bundle_deliveries WHERE bundle_id=?
+                    AND (status IN ('SENDING','SENT') OR retry_count>0))
+                """,Boolean.class,b.id(),b.id()))) {
+            close(b,"ATTEMPT_HISTORY_PRESENT"); return false;
+        }
+        if (guard.isWithdrawn(b.userId()) || !consent(b.userId())) {
+            close(b,"WINDOW_OR_USER_DISABLED"); return false;
+        }
+        jdbc.update("""
+                UPDATE notification_push_pending q SET status='SKIPPED',reason='PUSH_EXPIRED'
+                FROM notifications n WHERE q.notification_id=n.id AND q.bundle_id=? AND q.status='BUNDLED'
+                  AND LEAST(n.expires_at,COALESCE(n.push_expires_at,n.expires_at))<=?
+                """,b.id(),ts(target.start()));
+        var remaining=members(b.id());
+        if (remaining.isEmpty()) { close(b,"PUSH_EXPIRED"); return false; }
+        jdbc.update("""
+                UPDATE notification_bundle_deliveries d SET status='SKIPPED',last_error='ENDPOINT_INACTIVE',
+                  processing_started_at=NULL,lease_token=NULL
+                WHERE d.bundle_id=? AND d.status IN ('PENDING','CLAIMED') AND NOT EXISTS
+                  (SELECT 1 FROM notification_endpoints e WHERE e.id=d.endpoint_id AND e.user_id=d.user_id AND e.active)
+                """,b.id());
+        if (!Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM notification_bundle_deliveries WHERE bundle_id=? AND status IN ('PENDING','CLAIMED'))
+                """,Boolean.class,b.id()))) { finish(b); return false; }
+        // An existing reservation wins. Keep this unattempted bundle pending until a later free slot; never merge it.
+        if (Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM notification_push_bundles WHERE user_id=? AND kst_date=? AND slot_no=? AND id<>?)
+                """,Boolean.class,b.userId(),target.date(),target.number(),b.id()))) return false;
+        jdbc.update("""
+                UPDATE notification_push_bundles SET kst_date=?,slot_no=?,window_start=?,window_end=?,representative_notification_id=?
+                WHERE id=? AND status='READY' AND first_attempt_at IS NULL
+                """,target.date(),target.number(),ts(target.start()),ts(target.end()),remaining.getFirst().id(),b.id());
+        jdbc.update("""
+                UPDATE notification_bundle_deliveries SET status='PENDING',next_retry_at=?,processing_started_at=NULL,
+                  lease_token=NULL,last_error=NULL WHERE bundle_id=? AND status IN ('PENDING','CLAIMED')
+                """,ts(target.start()),b.id());
+        return true;
     }
 
     /** Lease-only CAS recovery never acquires bundle/user locks after locking a delivery. */
@@ -229,7 +294,8 @@ public class NotificationSlotStore {
     private Optional<Bundle> lock(long id,long userId) {
         return jdbc.query("SELECT * FROM notification_push_bundles WHERE id=? AND user_id=? FOR UPDATE",(rs,row)->
                 new Bundle(rs.getLong("id"),rs.getLong("user_id"),rs.getObject("kst_date",LocalDate.class),rs.getInt("slot_no"),
-                        rs.getTimestamp("window_start").toInstant(),rs.getTimestamp("window_end").toInstant(),rs.getString("status")),id,userId).stream().findFirst();
+                        rs.getTimestamp("window_start").toInstant(),rs.getTimestamp("window_end").toInstant(),rs.getString("status"),
+                        rs.getTimestamp("first_attempt_at")==null?null:rs.getTimestamp("first_attempt_at").toInstant()),id,userId).stream().findFirst();
     }
     private List<Member> members(long id) {
         return jdbc.query("""
