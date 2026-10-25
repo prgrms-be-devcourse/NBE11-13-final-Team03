@@ -1,13 +1,14 @@
 import { Route, Routes } from 'react-router-dom'
 import AppLayout from '../layouts/AppLayout'
 import PlaceholderPage from '../pages/PlaceholderPage'
+import OpportunitiesPage from '../pages/opportunities/OpportunitiesPage'
 
 function AppRoutes() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<PlaceholderPage title="홈" description="청년정책과 직업훈련 기회를 만날 홈 화면을 준비하고 있어요." />} />
-        <Route path="opportunities" element={<PlaceholderPage title="통합 기회 탐색" description="청년정책과 직업훈련을 함께 탐색할 화면을 준비하고 있어요." />} />
+        <Route path="opportunities" element={<OpportunitiesPage />} />
         <Route path="opportunities/:id" element={<PlaceholderPage title="기회 상세" description="기회의 내용과 신청 조건을 확인할 상세 화면을 준비하고 있어요." />} />
         <Route path="saved" element={<PlaceholderPage title="저장한 기회" description="저장한 기회를 모아 볼 화면을 준비하고 있어요." />} />
         <Route path="onboarding" element={<PlaceholderPage title="초기 프로필 설정" description="나에게 맞는 기회를 찾기 위한 프로필 설정 화면을 준비하고 있어요." />} />
