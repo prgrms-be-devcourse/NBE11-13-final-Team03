@@ -13,6 +13,8 @@ on:
     paths:
       - 'notification-service/**'
       - '.github/workflows/notification-service.yml'
+      - 'contracts/collection-completed-v1.json'
+      - 'database/scripts/notification-admin.sql'
   workflow_dispatch:
 
 permissions:
@@ -37,6 +39,21 @@ jobs:
       - name: Test and build Notification independently
         working-directory: notification-service
         run: bash ./gradlew --no-daemon clean test bootJar
+      - name: Require executed administrator SQS PostgreSQL Slack tests
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+          report = pathlib.Path('notification-service/build/test-results/test/TEST-com.team3.notification.admin.AdminNotificationSqsPostgresTest.xml')
+          suite = ET.parse(report).getroot()
+          assert int(suite.attrib['tests']) > 0, 'Administrator SQS/PostgreSQL/Slack tests did not run'
+          for key in ('failures', 'errors', 'skipped'):
+              assert int(suite.attrib[key]) == 0, f'Administrator tests: {key}={suite.attrib[key]}'
+          print(f"Administrator SQS/PostgreSQL/Slack tests passed: {suite.attrib['tests']}")
+          suites = [ET.parse(p).getroot() for p in report.parent.glob('TEST-*.xml')]
+          print('Notification test totals:', {key: sum(int(s.attrib.get(key, 0)) for s in suites) for key in ('tests', 'failures', 'errors', 'skipped')})
+          PY
       - name: Upload executable JAR
         uses: actions/upload-artifact@v4
         with:

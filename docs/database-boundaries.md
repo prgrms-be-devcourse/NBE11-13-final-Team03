@@ -42,6 +42,11 @@ DB_URL=jdbc:postgresql://localhost:5432/yon
 NOTIFICATION_DB_PASSWORD=<notification_user의 실제 비밀번호>
 ```
 
+수집 완료 관리자 큐를 활성화하기 전에 notification_user로 `notification-admin.sql`을 적용한다.
+`notification.admin_consumed_messages`는 JDBC로 접근하는 관리자 전용 소비 기록이며 기존 사용자 `consumed_messages`와 분리한다.
+새 로컬 볼륨 초기화 목록에도 포함되지만, 기존 DB는 별도 수동 적용이 필요하다.
+설정·전달 보장 범위는 [관리자 알림 문서](collection-admin-notifications.md)를 따른다.
+
 계정명은 각 프로젝트 설정에 고정한다. 기존 DB_USERNAME/DB_PASSWORD는 실제 main 실행의
 제한 계정 설정에 사용하지 않는다. SPRING_DATASOURCE_USERNAME 등으로 잘못 덮어쓰면
 기동 검증에서 실패하도록 한다. 비밀번호의 postgres/1234 기본값은 제공하지 않는다.
