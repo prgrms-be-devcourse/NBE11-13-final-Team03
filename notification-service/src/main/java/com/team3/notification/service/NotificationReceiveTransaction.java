@@ -54,6 +54,7 @@ public class NotificationReceiveTransaction {
             boolean inApp = message.channels().contains(NotificationChannel.IN_APP)
                     && setting.map(s -> s.isInAppEnabled()).orElse(true);
             boolean push = message.channels().contains(NotificationChannel.PUSH)
+                    && now.isBefore(message.effectivePushExpiresAt())
                     && setting.map(s -> s.isPushEnabled()).orElse(false)
                     && deliveries.hasActiveEndpoint(message.userId());
             if (!inApp && !push) {

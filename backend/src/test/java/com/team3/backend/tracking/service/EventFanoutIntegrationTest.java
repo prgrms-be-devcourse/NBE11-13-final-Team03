@@ -8,6 +8,7 @@ import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceRepository;
 import com.team3.backend.tracking.config.EventFanoutProperties;
 import com.team3.backend.tracking.domain.entity.*;
+import com.team3.backend.tracking.domain.model.EventFanoutExecution;
 import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
 import com.team3.backend.user.domain.entity.*;
 import com.team3.backend.user.domain.repository.UserRepository;
@@ -256,15 +257,17 @@ class EventFanoutIntegrationTest {
     }
 
     @Test
-    void closedEventRequestsInAppOnlyAndUnsupportedTypesFailExplicitly() {
+    void closedEventRequestsInAppOnlyAndOtherTypesRemainUnclaimed() {
         var closed = event(OpportunityEventType.APPLICATION_CLOSED, true);
         subscriber(closed.policyId(), true, false);
         batch.process(coordinator.claim(closed.eventId()).orElseThrow());
         assertThat(outboxes.findAll().getFirst().getPayload().get("channels")).isEqualTo(List.of("IN_APP"));
         var unsupported = event(OpportunityEventType.ELIGIBILITY_CHANGED, true);
-        assertThat(batch.process(coordinator.claim(unsupported.eventId()).orElseThrow())).isTrue();
-        assertThat(events.findById(unsupported.eventId()).orElseThrow().getLastError())
-                .isEqualTo("UNSUPPORTED_EVENT_TYPE");
+        assertThat(coordinator.claim(unsupported.eventId())).isEmpty();
+        var untouched = events.findById(unsupported.eventId()).orElseThrow();
+        assertThat(untouched.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+        assertThat(untouched.getLastError()).isNull();
+        assertThat(untouched.getRetryCount()).isZero();
     }
 
     @Test
@@ -281,6 +284,61 @@ class EventFanoutIntegrationTest {
         jdbc.update("UPDATE application_windows SET scope = '{\"round\":\"changed\"}'::jsonb WHERE version_id = ?", scoped.versionId());
         assertThat(batch.process(coordinator.claim(scoped.eventId()).orElseThrow())).isTrue();
         assertThat(outboxes.count()).isEqualTo(1);
+    }
+
+    @Test
+    void candidateSelectionAndDirectClaimUseTheSameSupportedTypeSet() {
+        var expected = new ArrayList<Long>();
+        var excluded = new ArrayList<Long>();
+        for (var type : OpportunityEventType.values()) {
+            var fixture = event(type, true);
+            if (DateNotificationMessageFactory.supportedTypes().contains(type)) expected.add(fixture.eventId());
+            else excluded.add(fixture.eventId());
+        }
+        assertThat(coordinator.candidates()).containsExactlyElementsOf(expected);
+        for (Long id : excluded) {
+            assertThat(coordinator.claim(id)).isEmpty();
+            assertThat(events.findById(id).orElseThrow().getRetryCount()).isZero();
+        }
+        for (Long id : expected) assertThat(coordinator.claim(id)).isPresent();
+    }
+
+    @Test
+    void staleOtherTypeCannotBeReclaimedOrRetriedEvenWithItsLeaseToken() {
+        for (var type : List.of(OpportunityEventType.ELIGIBILITY_CHANGED, OpportunityEventType.OPPORTUNITY_CREATED)) {
+            var fixture = event(type, true); var token = UUID.randomUUID();
+            jdbc.update("UPDATE opportunity_events SET processing_status='PROCESSING', retry_count=1, "
+                    + "processing_started_at=?, lease_token=? WHERE id=?", java.sql.Timestamp.from(NOW.minus(Duration.ofMinutes(31))), token, fixture.eventId());
+            var before = jdbc.queryForObject("SELECT to_jsonb(e)::text FROM opportunity_events e WHERE id=?", String.class, fixture.eventId());
+            assertThat(coordinator.candidates()).doesNotContain(fixture.eventId());
+            assertThat(coordinator.claim(fixture.eventId())).isEmpty();
+            assertThat(coordinator.retry(new EventFanoutExecution(fixture.eventId(), token),
+                    new IllegalStateException("foreign worker failure"))).isFalse();
+            assertThat(jdbc.queryForObject("SELECT to_jsonb(e)::text FROM opportunity_events e WHERE id=?", String.class, fixture.eventId()))
+                    .isEqualTo(before);
+        }
+    }
+
+    @Test
+    void exhaustedRecoveryDoesNotFailOtherTypesPendingOrStaleProcessing() {
+        var excluded = new ArrayList<Long>();
+        for (var type : List.of(OpportunityEventType.ELIGIBILITY_CHANGED, OpportunityEventType.OPPORTUNITY_CREATED)) {
+            for (String status : List.of("PENDING", "PROCESSING")) {
+                var fixture = event(type, true); excluded.add(fixture.eventId());
+                jdbc.update("UPDATE opportunity_events SET processing_status=?, retry_count=3, processing_started_at=? WHERE id=?",
+                        status, java.sql.Timestamp.from(NOW.minus(Duration.ofMinutes(31))), fixture.eventId());
+            }
+        }
+        var snapshots = excluded.stream().map(id -> jdbc.queryForObject(
+                "SELECT to_jsonb(e)::text FROM opportunity_events e WHERE id=?", String.class, id)).toList();
+        var date = event(OpportunityEventType.DEADLINE_SOON, true);
+        jdbc.update("UPDATE opportunity_events SET retry_count=3 WHERE id=?", date.eventId());
+        assertThat(coordinator.recoverExhausted()).isEqualTo(1);
+        assertThat(events.findById(date.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.FAILED);
+        for (int i = 0; i < excluded.size(); i++) {
+            assertThat(jdbc.queryForObject("SELECT to_jsonb(e)::text FROM opportunity_events e WHERE id=?", String.class, excluded.get(i)))
+                    .isEqualTo(snapshots.get(i));
+        }
     }
 
     private Fixture event(OpportunityEventType type, boolean eligible) {

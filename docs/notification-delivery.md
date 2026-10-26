@@ -80,11 +80,14 @@ Notification을 중지하고 대상 DB·계정을 확인한다. 기존에 적용
 2. notification-user-api.sql
 3. notification-withdrawal.sql (8단계 Tombstone)
 4. notification-delivery.sql (8단계 Delivery·in_app_visible)
-5. 새 Notification 기동(validate) → 새 Application 적용
+5. 기존 delivery 스키마에 push_expires_at이 없으면 notification-push-expiry.sql 추가 적용(서버 중지·백업·대상 확인 후)
+6. 새 Notification 기동(validate) → 새 Application 적용
 
 빈 로컬 볼륨 초기화에도 이 순서를 사용한다. 기존 볼륨에는 신규 SQL을 수동 적용해야 한다.
 기존 Notification 버전으로 롤백하면 푸시 전용 숨김 행/새 receipt의 호환성을 검토해야 한다.
 서버를 끄고 데이터 백업·대상 확인 없이 스키마를 되돌리거나 신규 테이블을 삭제하지 않는다.
+
+푸시 전용 만료·11단계 잠정 슬롯 정책의 최신 범위와 배포 호환성은 [푸시 슬롯 정책](notification-push-slots.md)을 따른다.
 
 ## 활성화 전제
 

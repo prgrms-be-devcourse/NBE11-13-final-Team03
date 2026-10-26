@@ -7,8 +7,11 @@ import com.google.firebase.messaging.FirebaseMessaging;
 import com.team3.notification.push.*;
 import com.team3.notification.service.NotificationDeliveryStore;
 import com.team3.notification.service.NotificationDeliveryWorker;
+import com.team3.notification.service.NotificationSlotStore;
+import com.team3.notification.service.NotificationSlotWorker;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.*;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
@@ -16,14 +19,21 @@ import java.io.IOException;
 import java.time.Clock;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(NotificationPushProperties.class)
+@EnableConfigurationProperties({NotificationPushProperties.class, NotificationSlotProperties.class})
 @PropertySource("classpath:notification-push.properties")
 public class NotificationPushConfig {
     @Bean
-    @ConditionalOnProperty(name = "yon.notification.push.enabled", havingValue = "true")
+    @ConditionalOnExpression("${yon.notification.push.enabled:false} && !${yon.notification.push.slots.enabled:false}")
     NotificationDeliveryWorker notificationDeliveryWorker(NotificationPushProperties properties,
             NotificationDeliveryStore store, PushSender sender) {
         return new NotificationDeliveryWorker(store, sender, properties);
+    }
+
+    @Bean
+    @ConditionalOnExpression("${yon.notification.push.enabled:false} && ${yon.notification.push.slots.enabled:false}")
+    NotificationSlotWorker notificationSlotWorker(NotificationSlotStore store, PushSender sender,
+            NotificationPushProperties properties, Clock clock) {
+        return new NotificationSlotWorker(store, sender, properties, clock);
     }
 
     @Bean(defaultCandidate = false)

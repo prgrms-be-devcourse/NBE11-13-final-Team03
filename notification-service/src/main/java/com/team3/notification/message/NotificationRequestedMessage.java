@@ -1,6 +1,7 @@
 package com.team3.notification.message;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.validation.constraints.*;
 import java.time.Instant;
 import java.util.*;
@@ -23,12 +24,18 @@ public record NotificationRequestedMessage(
         @NotBlank @Size(max = 2000) String link,
         @NotNull Instant occurredAt,
         @NotNull Instant expiresAt,
-        @NotNull Map<String, Object> payload
+        @NotNull Map<String, Object> payload,
+        @JsonInclude(JsonInclude.Include.NON_NULL) Instant pushExpiresAt
 ) {
     public NotificationRequestedMessage {
         if (channels != null) {
             channels = channels.isEmpty() ? Set.of() : Collections.unmodifiableSet(EnumSet.copyOf(channels));
         }
         if (payload != null) payload = Collections.unmodifiableMap(new LinkedHashMap<>(payload));
+    }
+
+    /** Absent optional field preserves the legacy wire shape and persisted fingerprint. */
+    public Instant effectivePushExpiresAt() {
+        return pushExpiresAt == null || expiresAt.isBefore(pushExpiresAt) ? expiresAt : pushExpiresAt;
     }
 }

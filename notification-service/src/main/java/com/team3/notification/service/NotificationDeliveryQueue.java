@@ -1,6 +1,7 @@
 package com.team3.notification.service;
 
 import com.team3.notification.domain.entity.Notification;
+import com.team3.notification.config.NotificationSlotProperties;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -11,7 +12,11 @@ import java.time.Instant;
 @Component
 public class NotificationDeliveryQueue {
     private final JdbcTemplate jdbc;
-    public NotificationDeliveryQueue(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final NotificationSlotProperties slots;
+    private final NotificationSlotQueue pending;
+    public NotificationDeliveryQueue(JdbcTemplate jdbc, NotificationSlotProperties slots, NotificationSlotQueue pending) {
+        this.jdbc = jdbc; this.slots = slots; this.pending = pending;
+    }
 
     public boolean hasActiveEndpoint(long userId) {
         return Boolean.TRUE.equals(jdbc.queryForObject(
@@ -22,6 +27,7 @@ public class NotificationDeliveryQueue {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Delivery creation requires the receive transaction");
         }
+        if (slots.enabled()) return pending.enqueue(notification, now);
         var timestamp = Timestamp.from(now);
         return jdbc.update("""
                 INSERT INTO notification_deliveries

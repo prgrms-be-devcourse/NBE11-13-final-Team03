@@ -12,6 +12,16 @@ import com.team3.backend.region.domain.entity.Region;
 import com.team3.backend.tracking.domain.model.*;
 import com.team3.backend.tracking.domain.entity.OpportunityEvent;
 import com.team3.backend.tracking.domain.entity.OpportunityEventType;
+import com.team3.backend.tracking.domain.entity.OpportunityEventProcessingStatus;
+import com.team3.backend.tracking.domain.entity.EligibilityEventAssessment;
+import com.team3.backend.tracking.domain.entity.OpportunityVersionTracking;
+import com.team3.backend.tracking.domain.entity.OpportunityVersionTrackingStatus;
+import com.team3.backend.tracking.domain.repository.EligibilityEventAssessmentRepository;
+import com.team3.backend.tracking.domain.repository.OpportunityEventRepository;
+import com.team3.backend.tracking.config.EventFanoutProperties;
+import com.team3.backend.tracking.config.EligibilityFanoutProperties;
+import com.team3.backend.tracking.config.EligibilityFanoutSchedulingProperties;
+import com.team3.backend.tracking.config.VersionTrackingProperties;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.user.domain.entity.User;
@@ -46,14 +56,19 @@ import static org.assertj.core.api.Assertions.*;
 
 /** Real repositories and evaluator. Fixtures use domain rows, not collection/normalization implementation classes. */
 @Testcontainers
-@DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "yon.tracking.eligibility-outbox.enabled=true"})
+@DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "app.scheduling.enabled=false", "yon.tracking.eligibility-outbox.enabled=true",
+        "yon.tracking.eligibility-fanout.enabled=true", "yon.tracking.version.enabled=true", "yon.tracking.version-analysis.enabled=true"})
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import({EligibilityNotificationRevalidationService.class, ProvisionalEligibilityTransitionClassifier.class,
         EligibilityVersionComparisonService.class, EligibilityEvaluator.class, EligibilityEngine.class,
         ApplicationStatusCalculator.class, RegionDirectory.class, EligibilityOutboxTransaction.class,
-        EligibilityNotificationMessageFactory.class, EligibilityNotificationRevalidationPostgresTest.TimeConfig.class})
+        EligibilityNotificationMessageFactory.class, EligibilityFanoutCoordinator.class, EligibilityFanoutBatch.class,
+        EligibilityFanoutWorker.class, EventFanoutCoordinator.class, VersionTrackingPipeline.class,
+        OpportunityVersionWorker.class, OpportunityVersionComparisonTransaction.class, OpportunityVersionAnalysisTransaction.class,
+        OpportunitySnapshotComparator.class, DeadlineExtensionTransaction.class, DeadlineExtensionDetector.class,
+        EligibilityNotificationRevalidationPostgresTest.TimeConfig.class})
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class EligibilityNotificationRevalidationPostgresTest {
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 25);
@@ -63,6 +78,16 @@ class EligibilityNotificationRevalidationPostgresTest {
     @TestConfiguration(proxyBeanMethods = false)
     static class TimeConfig {
         @Bean Clock eligibilityTestClock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
+        @Bean EventFanoutProperties fanoutProperties() {
+            return new EventFanoutProperties(false, 1, 10, Duration.ofMinutes(30), Duration.ofMinutes(1), 5);
+        }
+        @Bean EligibilityFanoutProperties eligibilityFanoutProperties() {
+            return new EligibilityFanoutProperties(true, 1, 10, Duration.ofMinutes(30), Duration.ofMinutes(1), 5);
+        }
+        @Bean VersionTrackingProperties versionTrackingProperties() { return new VersionTrackingProperties(true, 1, 60000); }
+        @Bean EligibilityFanoutSchedulingProperties eligibilitySchedulingProperties() {
+            return new EligibilityFanoutSchedulingProperties(false, 10, 10, 60000);
+        }
     }
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
             .withDatabaseName("eligibility_revalidation_test");
@@ -83,6 +108,13 @@ class EligibilityNotificationRevalidationPostgresTest {
     @Autowired RegionDirectory regions;
     @Autowired EligibilityOutboxTransaction outboxService;
     @Autowired OutboxEventRepository outboxes;
+    @Autowired EligibilityFanoutCoordinator fanout;
+    @Autowired EligibilityFanoutBatch fanoutBatch;
+    @Autowired EligibilityFanoutWorker fanoutWorker;
+    @Autowired EventFanoutCoordinator dateFanout;
+    @Autowired OpportunityEventRepository events;
+    @Autowired EligibilityEventAssessmentRepository assessments;
+    @Autowired VersionTrackingPipeline pipeline;
 
     @BeforeEach
     void resetDisposableContainerDataOnly() {
@@ -310,6 +342,378 @@ class EligibilityNotificationRevalidationPostgresTest {
             } finally { release.countDown(); }
         }
         assertThat(outboxes.count()).isEqualTo(1);
+    }
+
+    @Test
+    void repeatedBudgetYieldsResumeAllUsersWithoutExhaustingFailureAttempts() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        for (int i = 0; i < 6; i++) savedUser(fixture, LocalDate.of(1990, 5, 15));
+        var worker = boundedWorker(1, 1);
+        for (int i = 0; i < 7; i++) {
+            var result = worker.runOnce();
+            assertThat(result.pageCalls()).isEqualTo(1); assertThat(result.yieldedEvents()).isEqualTo(1);
+            var pending = events.findById(request.eventId()).orElseThrow();
+            assertThat(pending.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+            assertThat(pending.getRetryCount()).isZero(); assertThat(pending.getLeaseToken()).isNull();
+            assertThat(pending.getProcessedAt()).isNull();
+            assertThat(pending.getNextRetryAt()).isEqualTo(NOW.plusSeconds(60));
+            assertThat(assessments.count()).isEqualTo(i + 1); assertThat(outboxes.count()).isEqualTo(i + 1);
+            assertThat(fanout.recoverExhausted()).isZero();
+            assertThat(worker.runOnce().pageCalls()).isZero(); // Not due yet, even for manual callers.
+            makeDue(request.eventId());
+        }
+        assertThat(worker.runOnce().pageCalls()).isEqualTo(1); // Terminal empty page also spends budget.
+        var complete = events.findById(request.eventId()).orElseThrow();
+        assertThat(complete.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+        assertThat(complete.getRetryCount()).isEqualTo(1); // Final successful claim retains existing counting convention.
+        assertThat(assessments.count()).isEqualTo(7); assertThat(outboxes.count()).isEqualTo(7);
+    }
+
+    @Test
+    void yieldedEventDoesNotBlockFollowingDueEventWithOnePageBudget() {
+        var firstFixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var first = request(firstFixture, NOW);
+        var secondFixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var second = request(secondFixture, NOW);
+        var worker = boundedWorker(1, 1);
+        worker.runOnce();
+        assertThat(fanout.candidates()).containsExactly(second.eventId());
+        worker.runOnce();
+        assertThat(assessments.findByEventIdAndUserId(first.eventId(), USER)).isPresent();
+        assertThat(assessments.findByEventIdAndUserId(second.eventId(), USER)).isPresent();
+        assertThat(outboxes.count()).isEqualTo(2);
+    }
+
+    @Test
+    void yieldingRejectsOldOwnerAndPreservesPreviouslyConsumedFailureAttempts() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        jdbc.update("UPDATE opportunity_events SET retry_count=2 WHERE id=?", request.eventId());
+        var first = fanout.claim(request.eventId()).orElseThrow();
+        assertThat(fanoutBatch.process(first)).isFalse();
+        assertThat(fanout.yieldExecution(first)).isTrue();
+        var pending = events.findById(request.eventId()).orElseThrow();
+        assertThat(pending.getRetryCount()).isEqualTo(2); assertThat(pending.getLastUserId()).isEqualTo(USER);
+        assertThat(fanout.yieldExecution(first)).isFalse();
+        assertThat(fanout.retry(first, new IllegalStateException("old lease"))).isFalse();
+        makeDue(request.eventId());
+        var recovered = fanout.claim(request.eventId()).orElseThrow();
+        assertThat(recovered.leaseToken()).isNotEqualTo(first.leaseToken());
+        assertThat(fanout.yieldExecution(first)).isFalse();
+        assertThatThrownBy(() -> fanoutBatch.process(first)).isInstanceOf(IllegalStateException.class);
+        assertThat(fanoutBatch.process(recovered)).isTrue();
+        assertThat(outboxes.count()).isEqualTo(1); assertThat(assessments.count()).isEqualTo(1);
+    }
+
+    @Test
+    void boundedWorkerFailureRetainsPriorPageAndConsumesOnlyItsFailedClaim() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW); var second = savedUser(fixture, LocalDate.of(1990, 5, 15));
+        var worker = boundedWorker(3, 3);
+        jdbc.execute("ALTER TABLE eligibility_event_assessments ADD CONSTRAINT reject_budget_second CHECK (user_id <> " + second + ")");
+        try {
+            var result = worker.runOnce();
+            assertThat(result.failures()).isEqualTo(1); assertThat(result.pageCalls()).isEqualTo(2);
+            assertThat(result.yieldedEvents()).isZero();
+        } finally { jdbc.execute("ALTER TABLE eligibility_event_assessments DROP CONSTRAINT reject_budget_second"); }
+        var pending = events.findById(request.eventId()).orElseThrow();
+        assertThat(pending.getLastUserId()).isEqualTo(USER); assertThat(pending.getRetryCount()).isEqualTo(1);
+        assertThat(pending.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+        assertThat(pending.getLastError()).isNotBlank();
+        assertThat(assessments.count()).isEqualTo(1); assertThat(outboxes.count()).isEqualTo(1);
+        makeDue(request.eventId());
+        assertThat(worker.runOnce().failures()).isZero();
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+        assertThat(assessments.count()).isEqualTo(2); assertThat(outboxes.count()).isEqualTo(2);
+    }
+
+    private EligibilityFanoutWorker boundedWorker(int total, int perEvent) {
+        return new EligibilityFanoutWorker(fanout, fanoutBatch, new EligibilityFanoutSchedulingProperties(false, total, perEvent, 60000));
+    }
+
+    @Test
+    void deferredEvidenceRemainsPendingAcrossBudgetsUntilTerminalPageMovesToPolicyHold() {
+        var text = Map.<String, Object>of("status", "UNSTRUCTURED");
+        var fixture = fixture(age(39), text, text, ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        var older = savedUser(fixture, LocalDate.of(1980, 5, 15));
+        var worker = boundedWorker(1, 1);
+        worker.runOnce(); makeDue(request.eventId()); worker.runOnce();
+        assertThat(assessments.findByEventIdAndUserId(request.eventId(), older).orElseThrow().getStatus())
+                .isEqualTo(EligibilityEventAssessment.Status.DEFERRED);
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+        makeDue(request.eventId()); worker.runOnce();
+        var held = events.findById(request.eventId()).orElseThrow();
+        assertThat(held.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.WAITING_POLICY);
+        assertThat(held.getProcessedAt()).isNull(); assertThat(held.getLeaseToken()).isNull();
+        assertThat(worker.runOnce().pageCalls()).isZero();
+        assertThat(assessments.count()).isEqualTo(2); assertThat(outboxes.count()).isEqualTo(1);
+    }
+
+    private void makeDue(Long id) {
+        // Only disposable test rows: simulate reaching the due time without sleeping or changing event expiry.
+        jdbc.update("UPDATE opportunity_events SET next_retry_at=? WHERE id=?", java.sql.Timestamp.from(NOW), id);
+    }
+
+    @Test
+    void dedicatedConsumerCreatesOneAssessmentAndOutboxForSavedHiddenUser() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        fanoutWorker.runOnce(); fanoutWorker.runOnce();
+        assertThat(outboxes.count()).isEqualTo(1); assertThat(assessments.count()).isEqualTo(1);
+        var assessed = assessments.findByEventIdAndUserId(request.eventId(), USER).orElseThrow();
+        assertThat(assessed.getStatus()).isEqualTo(EligibilityEventAssessment.Status.OUTBOX_CREATED);
+        assertThat(assessed.getEvidence()).containsKeys("source", "fresh", "latest", "revalidatedVersionId");
+        assertThat(assessed.getEvidence()).doesNotContainKeys("birthDate", "residenceRegion");
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+    }
+
+    @Test
+    void noChangeIsDurablyRecordedWithoutOutbox() {
+        var fixture = fixture(age(39), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW); fanoutWorker.runOnce();
+        assertThat(outboxes.count()).isZero();
+        assertThat(assessments.findByEventIdAndUserId(request.eventId(), USER).orElseThrow().getStatus())
+                .isEqualTo(EligibilityEventAssessment.Status.NO_CHANGE);
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+    }
+
+    @Test
+    void mixedCandidateAndDeferredUsersCommitSeparatelyWithoutCallingDeferredComplete() {
+        var text = Map.<String, Object>of("status", "UNSTRUCTURED");
+        var fixture = fixture(age(39), text, text, ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        var older = savedUser(fixture, LocalDate.of(1980, 5, 15));
+        fanoutWorker.runOnce();
+        assertThat(outboxes.count()).isEqualTo(1); assertThat(assessments.count()).isEqualTo(2);
+        assertThat(assessments.findByEventIdAndUserId(request.eventId(), older).orElseThrow().getStatus())
+                .isEqualTo(EligibilityEventAssessment.Status.DEFERRED);
+        var event = events.findById(request.eventId()).orElseThrow();
+        assertThat(event.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.WAITING_POLICY);
+        assertThat(event.getProcessedAt()).isNull(); assertThat(event.getLeaseToken()).isNull();
+        assertThat(event.getLastUserId()).isEqualTo(older);
+        assertThat(fanout.claim(request.eventId())).isEmpty();
+        assertThat(fanout.recoverExhausted()).isZero();
+        fanoutWorker.runOnce();
+        assertThat(assessments.count()).isEqualTo(2); assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(events.findById(request.eventId()).orElseThrow().getRetryCount()).isEqualTo(1);
+    }
+
+    @Test
+    void missingProfileIsSkippedWithoutPuttingTheEventOnPolicyHold() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        jdbc.update("DELETE FROM eligibility_profiles WHERE user_id=?", USER);
+        fanoutWorker.runOnce();
+        var result = assessments.findByEventIdAndUserId(request.eventId(), USER).orElseThrow();
+        assertThat(result.getStatus()).isEqualTo(EligibilityEventAssessment.Status.SKIPPED);
+        assertThat(result.getReason()).isEqualTo("PROFILE_MISSING");
+        assertThat(result.getEvidence()).doesNotContainKey("source");
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+        assertThat(outboxes.count()).isZero();
+    }
+
+    @Test
+    void latestUnknownEvidenceIsDeferredAndNotConvertedIntoUserNotification() {
+        var fixture = fixture(age(34), age(39), Map.of("status", "UNKNOWN"), ValidationStatus.DATA_CONFLICT, "v1");
+        var request = request(fixture, NOW); fanoutWorker.runOnce();
+        var result = assessments.findByEventIdAndUserId(request.eventId(), USER).orElseThrow();
+        assertThat(result.getStatus()).isEqualTo(EligibilityEventAssessment.Status.DEFERRED);
+        assertThat(result.getEvidence()).containsEntry("revalidationOutcome", "LATEST_STATUS_CHANGED");
+        assertThat(outboxes.count()).isZero();
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.WAITING_POLICY);
+    }
+
+    @Test
+    void latestProfileIsReadUnderLockAndCanTurnOriginalCandidateIntoNoChange() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        jdbc.update("UPDATE eligibility_profiles SET birth_date=?, profile_version=2 WHERE user_id=?", LocalDate.of(2000, 5, 15), USER);
+        fanoutWorker.runOnce();
+        var result = assessments.findByEventIdAndUserId(request.eventId(), USER).orElseThrow();
+        assertThat(result.getStatus()).isEqualTo(EligibilityEventAssessment.Status.NO_CHANGE);
+        assertThat(((Map<?, ?>) result.getEvidence().get("source")).get("profileVersion").toString()).isEqualTo("2");
+        assertThat(outboxes.count()).isZero();
+    }
+
+    @Test
+    void pageFailureRollsBackOnlyThatPageAndStaleLeaseResumesFromCommittedCursor() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW); var secondUser = savedUser(fixture, LocalDate.of(1990, 5, 15));
+        var first = fanout.claim(request.eventId()).orElseThrow();
+        assertThat(fanoutBatch.process(first)).isFalse();
+        assertThat(events.findById(request.eventId()).orElseThrow().getLastUserId()).isEqualTo(USER);
+        jdbc.execute("ALTER TABLE eligibility_event_assessments ADD CONSTRAINT reject_second_user CHECK (user_id <> " + secondUser + ")");
+        try {
+            assertThatThrownBy(() -> fanoutBatch.process(first)).isInstanceOf(RuntimeException.class);
+        } finally {
+            jdbc.execute("ALTER TABLE eligibility_event_assessments DROP CONSTRAINT reject_second_user");
+        }
+        assertThat(assessments.count()).isEqualTo(1); assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(events.findById(request.eventId()).orElseThrow().getLastUserId()).isEqualTo(USER);
+        jdbc.update("UPDATE opportunity_events SET processing_started_at=? WHERE id=?", java.sql.Timestamp.from(NOW.minus(Duration.ofMinutes(31))), request.eventId());
+        var recovered = fanout.claim(request.eventId()).orElseThrow();
+        assertThat(recovered.leaseToken()).isNotEqualTo(first.leaseToken());
+        assertThatThrownBy(() -> fanoutBatch.process(first)).isInstanceOf(IllegalStateException.class);
+        assertThat(fanout.retry(first, new IllegalStateException("old owner"))).isFalse();
+        assertThat(fanoutBatch.process(recovered)).isFalse();
+        assertThat(fanoutBatch.process(recovered)).isTrue();
+        assertThat(assessments.count()).isEqualTo(2); assertThat(outboxes.count()).isEqualTo(2);
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+    }
+
+    @Test
+    void existingExplicitOutboxIsNotDuplicatedByNewConsumer() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        var original = outboxService.create(request.eventId(), request.source()).outboxId();
+        fanoutWorker.runOnce();
+        var result = assessments.findByEventIdAndUserId(request.eventId(), USER).orElseThrow();
+        assertThat(result.getStatus()).isEqualTo(EligibilityEventAssessment.Status.OUTBOX_EXISTING);
+        assertThat(result.getOutboxId()).isEqualTo(original); assertThat(outboxes.count()).isEqualTo(1);
+    }
+
+    @Test
+    void dateAndEligibilityClaimsAreMutuallyExclusiveIncludingExhaustionRecovery() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW);
+        var dateId = tx(() -> {
+            var to = em.find(OpportunityVersion.class, fixture.toId());
+            var date = OpportunityEvent.create(to.getOpportunity(), to, OpportunityEventType.DEADLINE_SOON,
+                    TODAY, "DEADLINE_SOON:test", Map.of(), true, null, NOW);
+            em.persist(date); em.flush(); return date.getId();
+        });
+        assertThat(dateFanout.candidates()).containsExactly(dateId);
+        assertThat(fanout.candidates()).containsExactly(request.eventId());
+        assertThat(dateFanout.claim(request.eventId())).isEmpty(); assertThat(fanout.claim(dateId)).isEmpty();
+        jdbc.update("UPDATE opportunity_events SET retry_count=5 WHERE id=?", dateId);
+        assertThat(fanout.recoverExhausted()).isZero();
+        assertThat(events.findById(dateId).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+    }
+
+    @Test
+    void expiredEventDoesNotEvaluateUsersOrRenewExpiry() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW.minus(Duration.ofDays(8))); fanoutWorker.runOnce();
+        assertThat(assessments.count()).isZero(); assertThat(outboxes.count()).isZero();
+        assertThat(events.findById(request.eventId()).orElseThrow().getFanoutSkipReason()).isEqualTo("EXPIRED");
+    }
+
+    @Test
+    void withdrawnUserEvidenceIsDeletedByUserForeignKeyCascade() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        request(fixture, NOW); fanoutWorker.runOnce(); assertThat(assessments.count()).isEqualTo(1);
+        jdbc.update("DELETE FROM user_opportunity_preferences WHERE user_id=?", USER);
+        jdbc.update("DELETE FROM eligibility_profiles WHERE user_id=?", USER);
+        jdbc.update("DELETE FROM users WHERE id=?", USER);
+        assertThat(assessments.count()).isZero();
+    }
+
+    @Test
+    void concurrentEligibilityClaimsGrantOneLeaseOnly() throws Exception {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW); var start = new CountDownLatch(1);
+        Callable<Boolean> claim = () -> { await(start); return fanout.claim(request.eventId()).isPresent(); };
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = pool.submit(claim); var second = pool.submit(claim); start.countDown();
+            assertThat(List.of(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(true, false);
+        }
+        assertThat(events.findById(request.eventId()).orElseThrow().getRetryCount()).isEqualTo(1);
+    }
+
+    @Test
+    void failedPageRetryUsesDelayAndExhaustedRecoveryDoesNotConsumeOtherTypes() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW); var execution = fanout.claim(request.eventId()).orElseThrow();
+        assertThat(fanout.retry(execution, new IllegalStateException("retry"))).isTrue();
+        var retried = events.findById(request.eventId()).orElseThrow();
+        assertThat(retried.getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.PENDING);
+        assertThat(retried.getNextRetryAt()).isEqualTo(NOW.plus(Duration.ofMinutes(1)));
+        assertThat(fanout.claim(request.eventId())).isEmpty();
+        jdbc.update("UPDATE opportunity_events SET retry_count=5, next_retry_at=? WHERE id=?", java.sql.Timestamp.from(NOW), request.eventId());
+        assertThat(fanout.recoverExhausted()).isEqualTo(1);
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.FAILED);
+        assertThat(assessments.count()).isZero(); assertThat(outboxes.count()).isZero();
+    }
+
+    @Test
+    void missingProfileDoesNotPreventFollowingSavedUserFromReceivingTheirCandidate() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var request = request(fixture, NOW); var following = savedUser(fixture, LocalDate.of(1990, 5, 15));
+        jdbc.update("DELETE FROM eligibility_profiles WHERE user_id=?", USER);
+        fanoutWorker.runOnce();
+        assertThat(assessments.findByEventIdAndUserId(request.eventId(), USER).orElseThrow().getStatus())
+                .isEqualTo(EligibilityEventAssessment.Status.SKIPPED);
+        assertThat(assessments.findByEventIdAndUserId(request.eventId(), following).orElseThrow().getStatus())
+                .isEqualTo(EligibilityEventAssessment.Status.OUTBOX_CREATED);
+        assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(events.findById(request.eventId()).orElseThrow().getProcessingStatus()).isEqualTo(OpportunityEventProcessingStatus.COMPLETED);
+    }
+
+    @Test
+    void pipelineConnectsComparisonAndAnalysisThenManualUserConsumerCreatesOneOutbox() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        baselineAndSave(fixture);
+        var first = pipeline.runOnce();
+        assertThat(first.visitedPolicies()).isEqualTo(1); assertThat(first.failures()).isZero();
+        assertThat(events.findAll()).extracting(OpportunityEvent::getEventType).containsExactly(OpportunityEventType.ELIGIBILITY_CHANGED);
+        assertThat(outboxes.count()).isZero(); // Pipeline never publishes or automatically starts user fan-out.
+        fanoutWorker.runOnce();
+        assertThat(outboxes.count()).isEqualTo(1); assertThat(assessments.count()).isEqualTo(1);
+        pipeline.runOnce(); // v3 has the same snapshot: NO_CHANGE and no new event.
+        fanoutWorker.runOnce();
+        assertThat(events.count()).isEqualTo(1); assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM opportunity_version_tracking WHERE opportunity_version_id=?", String.class, fixture.currentId()))
+                .isEqualTo("NO_CHANGE");
+    }
+
+    @Test
+    void pipelineWithoutExplicitBaselineDoesNotGuessInitialIngestionOrCreateEvents() {
+        fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        var result = pipeline.runOnce();
+        assertThat(result.analysisCalls()).isZero(); assertThat(result.failures()).isZero();
+        assertThat(events.count()).isZero(); assertThat(outboxes.count()).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM opportunity_version_tracking", Long.class)).isZero();
+    }
+
+    @Test
+    void pipelineRetainsCommittedComparisonWhenAnalysisFailsAndRetriesReadyVersion() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+        baselineAndSave(fixture);
+        jdbc.execute("ALTER TABLE opportunity_version_analysis ADD CONSTRAINT reject_pipeline_analysis CHECK (completed_at IS NULL)");
+        try { assertThat(pipeline.runOnce().failures()).isEqualTo(1); }
+        finally { jdbc.execute("ALTER TABLE opportunity_version_analysis DROP CONSTRAINT reject_pipeline_analysis"); }
+        assertThat(jdbc.queryForObject("SELECT status FROM opportunity_version_tracking WHERE opportunity_version_id=?", String.class, fixture.toId()))
+                .isEqualTo(OpportunityVersionTrackingStatus.READY_FOR_EVENT_ANALYSIS.name());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM opportunity_changes", Long.class)).isEqualTo(1);
+        assertThat(events.count()).isZero();
+        assertThat(pipeline.runOnce().failures()).isZero();
+        assertThat(events.count()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM opportunity_changes", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM opportunity_version_tracking WHERE opportunity_version_id=?", String.class, fixture.toId()))
+                .isEqualTo("PROCESSED");
+    }
+
+    private void baselineAndSave(Fixture fixture) {
+        tx(() -> {
+            var from = em.find(OpportunityVersion.class, fixture.fromId());
+            em.persist(OpportunityVersionTracking.baseline(from, NOW));
+            var saved = UserOpportunityPreference.builder().user(em.find(User.class, USER)).opportunity(from.getOpportunity()).build();
+            saved.markSaved(); em.persist(saved); return null;
+        });
+    }
+
+    private Long savedUser(Fixture fixture, LocalDate birthDate) {
+        return tx(() -> {
+            var user = User.builder().nickname("Additional saved user").role(Role.USER).build(); em.persist(user);
+            em.persist(EligibilityProfile.builder().userId(user.getId()).birthDate(birthDate).residenceRegion(em.find(Region.class, REGION))
+                    .employmentStatus(EmploymentStatus.UNEMPLOYED).educationLevel(EducationLevel.UNIVERSITY).build());
+            var preference = UserOpportunityPreference.builder().user(user)
+                    .opportunity(em.find(OpportunityVersion.class, fixture.toId()).getOpportunity()).build();
+            preference.markSaved(); em.persist(preference); em.flush(); return user.getId();
+        });
     }
 
     private Request request(Fixture fixture, Instant occurredAt) {

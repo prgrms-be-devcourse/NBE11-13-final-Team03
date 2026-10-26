@@ -244,6 +244,19 @@ public class OpportunityEvent {
         fanoutSkipReason = Objects.requireNonNull(reason);
     }
 
+    /** Preserve the cursor and pending user evidence without turning policy deferral into success or a retry failure. */
+    public void waitForPolicy(String reason) {
+        if (processingStatus != OpportunityEventProcessingStatus.PROCESSING || eventType != OpportunityEventType.ELIGIBILITY_CHANGED) {
+            throw new IllegalStateException("Claimed eligibility event required");
+        }
+        processingStatus = OpportunityEventProcessingStatus.WAITING_POLICY;
+        processingStartedAt = null;
+        leaseToken = null;
+        processedAt = null;
+        lastError = null;
+        fanoutSkipReason = Objects.requireNonNull(reason);
+    }
+
     public void advanceFanout(long userId, Instant now) {
         if (userId < lastUserId) throw new IllegalArgumentException("Cursor cannot move backwards");
         lastUserId = userId;
@@ -261,6 +274,20 @@ public class OpportunityEvent {
             lastError = error;
         }
         leaseToken = null;
+    }
+
+    /** Successful bounded work yields its lease, refunding this claim rather than spending failure attempts. */
+    public void yieldEligibilityFanout(UUID token, Instant resumeAt) {
+        if (eventType != OpportunityEventType.ELIGIBILITY_CHANGED || !ownedBy(token) || retryCount < 1) {
+            throw new IllegalStateException("Owned eligibility claim required for yield");
+        }
+        nextRetryAt = Objects.requireNonNull(resumeAt, "resumeAt");
+        processingStatus = OpportunityEventProcessingStatus.PENDING;
+        processingStartedAt = null;
+        leaseToken = null;
+        processedAt = null;
+        lastError = null;
+        retryCount--;
     }
 
     /** Set once before persistence; historical events keep their original occurrence time. */

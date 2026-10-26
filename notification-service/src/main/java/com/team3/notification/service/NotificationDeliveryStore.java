@@ -1,6 +1,7 @@
 package com.team3.notification.service;
 
 import com.team3.notification.config.NotificationPushProperties;
+import com.team3.notification.config.NotificationSlotProperties;
 import com.team3.notification.push.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -17,13 +18,16 @@ public class NotificationDeliveryStore {
     private final Clock clock;
     private final NotificationUserGuard guard;
     private final NotificationPushProperties properties;
-    public NotificationDeliveryStore(JdbcTemplate jdbc, Clock clock, NotificationUserGuard guard, NotificationPushProperties properties) {
-        this.jdbc = jdbc; this.clock = clock; this.guard = guard; this.properties = properties;
+    private final NotificationSlotProperties slots;
+    public NotificationDeliveryStore(JdbcTemplate jdbc, Clock clock, NotificationUserGuard guard, NotificationPushProperties properties,
+            NotificationSlotProperties slots) {
+        this.jdbc = jdbc; this.clock = clock; this.guard = guard; this.properties = properties; this.slots = slots;
     }
     public record Claim(long id, long userId, UUID leaseToken) { }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Optional<Claim> claimNext() {
+        if (slots.enabled()) return Optional.empty();
         var token = UUID.randomUUID(); var now = Timestamp.from(clock.instant());
         return jdbc.query("""
                 WITH candidate AS (
@@ -38,10 +42,11 @@ public class NotificationDeliveryStore {
     /** User lock precedes Delivery row lock, same as withdrawal and setting/Endpoint mutations. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Optional<PushMessage> prepare(Claim claim) {
+        if (slots.enabled()) return Optional.empty();
         guard.lock(claim.userId());
         var rows = jdbc.query("""
                 SELECT d.notification_id, d.endpoint_id, e.fcm_token, e.active, n.title, n.content, n.link,
-                  n.expires_at, n.message_id, n.correlation_id,
+                  LEAST(n.expires_at, COALESCE(n.push_expires_at, n.expires_at)) AS expires_at, n.message_id, n.correlation_id,
                   COALESCE((SELECT s.push_enabled FROM notification_settings s WHERE s.user_id = d.user_id), false) AS consent
                 FROM notification_deliveries d JOIN notifications n ON n.id = d.notification_id
                 JOIN notification_endpoints e ON e.id = d.endpoint_id AND e.user_id = d.user_id
@@ -100,6 +105,7 @@ public class NotificationDeliveryStore {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public int recoverStale() {
+        if (slots.enabled()) return 0;
         return jdbc.update("""
                 WITH stale AS (
                   SELECT id FROM notification_deliveries WHERE status = 'SENDING' AND processing_started_at < ?

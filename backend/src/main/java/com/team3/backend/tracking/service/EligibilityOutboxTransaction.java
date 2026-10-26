@@ -20,7 +20,7 @@ import java.util.*;
 import static com.team3.backend.tracking.config.DateTrackingConfig.KST;
 import static com.team3.backend.opportunity.domain.status.ApplicationStatus.*;
 
-/** Explicit per-user path only. No event producer or Worker is connected; disabled unless deliberately opted in. */
+/** Per-user revalidation/write path, reused by the separately opted-in eligibility consumer. */
 @Service
 @ConditionalOnProperty(name = "yon.tracking.eligibility-outbox.enabled", havingValue = "true")
 @RequiredArgsConstructor
