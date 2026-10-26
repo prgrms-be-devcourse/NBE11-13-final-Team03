@@ -57,6 +57,8 @@ yon:
       batch-size: 100
       # 트랜잭션 1개로 묶는 원본 수 (커밋 대기를 줄이기 위해, 벤치마크로 결정)
       transaction-size: 100
+      # 정규화 트랜잭션의 커밋이 WAL fsync를 기다리지 않음 (SET LOCAL synchronous_commit=off). 벤치 E2에서 효과 확인 후 기본값 결정
+      async-commit: ${YON_NORMALIZATION_INGEST_ASYNC_COMMIT:false}
       poll-interval-ms: 60000
       reconcile-interval-ms: 3600000
     # 기동 시 조건 묶음 백필. 메인 서비스와 동시에 켜면 묶음 생성이 경합하므로 한쪽에서만 true (README 실행 플래그 표)

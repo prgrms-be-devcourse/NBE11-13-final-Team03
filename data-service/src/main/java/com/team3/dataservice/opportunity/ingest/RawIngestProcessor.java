@@ -43,6 +43,7 @@ public class RawIngestProcessor {
     private final TransactionTemplate recordTx;
     private final int batchSize;
     private int transactionSize;
+    private final boolean asyncCommit;
     private final ReentrantLock lock = new ReentrantLock();
 
     @PersistenceContext
@@ -51,7 +52,8 @@ public class RawIngestProcessor {
     public RawIngestProcessor(RawRecordReader reader, RawRecordNormalizer normalizer,
                               PlatformTransactionManager transactionManager,
                               @Value("${yon.normalization.ingest.batch-size:100}") int batchSize,
-                              @Value("${yon.normalization.ingest.transaction-size:100}") int transactionSize) {
+                              @Value("${yon.normalization.ingest.transaction-size:100}") int transactionSize,
+                              @Value("${yon.normalization.ingest.async-commit:false}") boolean asyncCommit) {
         this.reader = reader;
         this.normalizer = normalizer;
         this.claimTx = new TransactionTemplate(transactionManager);
@@ -59,6 +61,14 @@ public class RawIngestProcessor {
         this.recordTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.batchSize = Math.max(1, batchSize);
         this.transactionSize = Math.max(1, transactionSize);
+        this.asyncCommit = asyncCommit;
+    }
+
+    /** async-commit이 켜져 있으면 현재 트랜잭션의 커밋이 WAL fsync를 기다리지 않게 한다 (RawRecordReader.relaxCommitDurability) */
+    private void relaxCommit() {
+        if (asyncCommit) {
+            reader.relaxCommitDurability();
+        }
     }
 
     /** 벤치마크에서 트랜잭션 크기를 바꿔 비교할 때만 쓴다 */
@@ -79,7 +89,10 @@ public class RawIngestProcessor {
         do {
             lock.lock();
             try {
-                Integer count = claimTx.execute(status -> processClaimedBatch(limit));
+                Integer count = claimTx.execute(status -> {
+                    relaxCommit();
+                    return processClaimedBatch(limit);
+                });
                 claimed = count == null ? 0 : count;
             } finally {
                 lock.unlock();
@@ -150,7 +163,10 @@ public class RawIngestProcessor {
 
     private List<Boolean> processChunk(List<RawRecordRow> chunk) {
         try {
-            return recordTx.execute(status -> chunk.stream().map(this::normalizeAndRecord).toList());
+            return recordTx.execute(status -> {
+                relaxCommit();
+                return chunk.stream().map(this::normalizeAndRecord).toList();
+            });
         } catch (RuntimeException e) {
             log.warn("Raw record chunk failed, retrying one by one: size={}, cause={}", chunk.size(), e.toString());
             return chunk.stream().map(this::processOne).toList();
@@ -160,7 +176,10 @@ public class RawIngestProcessor {
     /** 원본 한 건을 트랜잭션 1개로 처리한다. 예외로 실패하면 처리 상태를 남기지 않아 다음 대조 때 다시 시도된다 */
     private boolean processOne(RawRecordRow row) {
         try {
-            Boolean normalized = recordTx.execute(status -> normalizeAndRecord(row));
+            Boolean normalized = recordTx.execute(status -> {
+                relaxCommit();
+                return normalizeAndRecord(row);
+            });
             return Boolean.TRUE.equals(normalized);
         } catch (RuntimeException e) {
             log.warn("Raw record normalization failed: rawRecordId={}, source={}, externalId={}",

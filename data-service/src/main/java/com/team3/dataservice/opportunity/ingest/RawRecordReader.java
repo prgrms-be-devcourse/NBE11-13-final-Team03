@@ -105,6 +105,15 @@ public class RawRecordReader {
                 .addValue("limit", limit), ROW);
     }
 
+    /**
+     * 현재 트랜잭션만 커밋 때 WAL 디스크 기록(fsync)을 기다리지 않게 한다 (SET LOCAL, 트랜잭션이 끝나면 원래대로).
+     * DB가 비정상 종료되면 마지막 수백 ms의 커밋이 사라질 수 있지만, 정규화 결과와 처리 상태(raw_ingest_states)가 같은 트랜잭션이라
+     * 함께 사라지고 원본은 남으므로 다음 대조가 다시 정규화한다. 요청 상태 변경이 사라지면 PENDING으로 남아 다시 처리된다 (이미 처리한 해시는 건너뜀).
+     */
+    public void relaxCommitDurability() {
+        jdbc.getJdbcTemplate().execute("SET LOCAL synchronous_commit = off");
+    }
+
     public void markStatus(Collection<Long> requestIds, String status) {
         if (requestIds.isEmpty()) {
             return;
