@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.*;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ClassPathResource;
@@ -108,7 +109,7 @@ class AdminNotificationSqsPostgresTest {
     private static String url(String name) { return endpoint() + "/000000000000/" + name; }
     private static String arn(String name) { return "arn:aws:sqs:ap-northeast-2:000000000000:" + name; }
 
-    @Configuration(proxyBeanMethods = false)
+    @TestConfiguration(proxyBeanMethods = false)
     @EnableTransactionManagement
     static class Beans {
         @Bean DataSource dataSource(Environment environment) {
