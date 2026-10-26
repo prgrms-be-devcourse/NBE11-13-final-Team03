@@ -3,6 +3,7 @@ package com.team3.backend.preference.service;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.global.exception.GlobalErrorCode;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
+import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceRepository;
 import com.team3.backend.preference.dto.SavedOpportunitiesResponseDto;
@@ -43,7 +44,7 @@ public class PreferenceService {
         if (existing.isPresent()) {
             UserOpportunityPreference preference = existing.get();
             if (!preference.isSaved()) {
-                preference.markSaved();
+                preference.markSaved(currentVersionId(opportunity));
                 return true;
             }
             return false;
@@ -53,7 +54,7 @@ public class PreferenceService {
                 .user(user)
                 .opportunity(opportunity)
                 .build();
-        preference.markSaved();
+        preference.markSaved(currentVersionId(opportunity));
         preferenceRepository.save(preference);
         return true;
     }
@@ -185,6 +186,11 @@ public class PreferenceService {
             throw new BusinessException(PreferenceErrorCode.OPPORTUNITY_NOT_FOUND);
         }
         return opportunity;
+    }
+
+    private Long currentVersionId(Opportunity opportunity) {
+        OpportunityVersion version = opportunity.getCurrentVersion();
+        return version == null ? null : version.getId();
     }
 
     private void deleteIfInactive(UserOpportunityPreference preference) {

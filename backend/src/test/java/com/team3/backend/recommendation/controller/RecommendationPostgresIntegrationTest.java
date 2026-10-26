@@ -472,7 +472,7 @@ class RecommendationPostgresIntegrationTest {
     private void preference(User owner, Opportunity opportunity, boolean saved, boolean hidden) {
         UserOpportunityPreference preference = UserOpportunityPreference.builder()
                 .user(owner).opportunity(opportunity).build();
-        if (saved) preference.markSaved();
+        if (saved) preference.markSaved(opportunity.getCurrentVersion().getId());
         if (hidden) preference.markHidden();
         entityManager.persist(preference);
     }

@@ -2,6 +2,8 @@ package com.team3.backend.preference.service;
 
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
+import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
+import com.team3.backend.opportunity.domain.entity.PersonalizationStatus;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceRepository;
 import com.team3.backend.user.domain.entity.Role;
@@ -11,6 +13,7 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -20,6 +23,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -64,6 +68,45 @@ class PreferencePostgresConcurrencyTest {
 
     @Autowired
     private TransactionTemplate transactionTemplate;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void postgresPersistsNullableSavedVersionIdWithoutVersionForeignKey() {
+        String columnType = jdbcTemplate.queryForObject("""
+                select data_type from information_schema.columns
+                where table_schema = current_schema()
+                  and table_name = 'user_opportunity_preferences'
+                  and column_name = 'saved_version_id'
+                """, String.class);
+        String nullable = jdbcTemplate.queryForObject("""
+                select is_nullable from information_schema.columns
+                where table_schema = current_schema()
+                  and table_name = 'user_opportunity_preferences'
+                  and column_name = 'saved_version_id'
+                """, String.class);
+        Long foreignKeys = jdbcTemplate.queryForObject("""
+                select count(*) from pg_constraint fk
+                join pg_attribute attribute on attribute.attrelid = fk.conrelid
+                  and attribute.attnum = any(fk.conkey)
+                where fk.conrelid = 'user_opportunity_preferences'::regclass
+                  and fk.contype = 'f' and attribute.attname = 'saved_version_id'
+                """, Long.class);
+        assertEquals("bigint", columnType);
+        assertEquals("YES", nullable);
+        assertEquals(0L, foreignKeys);
+
+        Long userId = createUser(403L);
+        Long versionedId = createOpportunity("Versioned PostgreSQL save");
+        Long versionId = createVersion(versionedId);
+        preferenceService.save(userId, versionedId);
+        assertEquals(versionId, storedVersionId(userId, versionedId));
+
+        Long unversionedId = createOpportunity("Unversioned PostgreSQL save");
+        preferenceService.save(userId, unversionedId);
+        assertNull(storedVersionId(userId, unversionedId));
+    }
 
     @Test
     void concurrentSaveAndHidePreserveBothStatesAndDeleteWhenCleared()
@@ -142,6 +185,30 @@ class PreferencePostgresConcurrencyTest {
             entityManager.flush();
             return opportunity.getId();
         });
+    }
+
+    private Long createVersion(Long opportunityId) {
+        return transactionTemplate.execute(status -> {
+            Opportunity opportunity = entityManager.find(Opportunity.class, opportunityId);
+            OpportunityVersion version = OpportunityVersion.builder()
+                    .opportunity(opportunity)
+                    .versionNo(1)
+                    .normalizationVersion("test")
+                    .normalizedSnapshot(Map.of("title", opportunity.getTitle()))
+                    .personalizationStatus(PersonalizationStatus.UNKNOWN)
+                    .build();
+            entityManager.persist(version);
+            opportunity.changeCurrentVersion(version);
+            entityManager.flush();
+            return version.getId();
+        });
+    }
+
+    private Long storedVersionId(Long userId, Long opportunityId) {
+        return jdbcTemplate.queryForObject("""
+                select saved_version_id from user_opportunity_preferences
+                where user_id = ? and opportunity_id = ?
+                """, Long.class, userId, opportunityId);
     }
 
     private UserOpportunityPreference findPreference(

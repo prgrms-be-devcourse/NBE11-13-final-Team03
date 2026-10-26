@@ -278,7 +278,7 @@ class OpportunityEligibilityBatchIntegrationTest {
             UserOpportunityPreference preference = UserOpportunityPreference.builder()
                     .user(entityManager.getReference(User.class, userId))
                     .opportunity(entityManager.getReference(Opportunity.class, opportunityId)).build();
-            preference.markSaved();
+            preference.markSaved(entityManager.find(Opportunity.class, opportunityId).getCurrentVersion().getId());
             entityManager.persist(preference);
         });
     }

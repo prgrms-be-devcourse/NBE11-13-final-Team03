@@ -701,7 +701,7 @@ class EligibilityNotificationRevalidationPostgresTest {
             var from = em.find(OpportunityVersion.class, fixture.fromId());
             em.persist(OpportunityVersionTracking.baseline(from, NOW));
             var saved = UserOpportunityPreference.builder().user(em.find(User.class, USER)).opportunity(from.getOpportunity()).build();
-            saved.markSaved(); em.persist(saved); return null;
+            saved.markSaved(from.getOpportunity().getCurrentVersion().getId()); em.persist(saved); return null;
         });
     }
 
@@ -712,7 +712,7 @@ class EligibilityNotificationRevalidationPostgresTest {
                     .employmentStatus(EmploymentStatus.UNEMPLOYED).educationLevel(EducationLevel.UNIVERSITY).build());
             var preference = UserOpportunityPreference.builder().user(user)
                     .opportunity(em.find(OpportunityVersion.class, fixture.toId()).getOpportunity()).build();
-            preference.markSaved(); em.persist(preference); em.flush(); return user.getId();
+            preference.markSaved(fixture.currentId()); em.persist(preference); em.flush(); return user.getId();
         });
     }
 
@@ -721,7 +721,7 @@ class EligibilityNotificationRevalidationPostgresTest {
         return tx(() -> {
             var to = em.find(OpportunityVersion.class, fixture.toId());
             var preference = UserOpportunityPreference.builder().user(em.find(User.class, USER)).opportunity(to.getOpportunity()).build();
-            preference.markSaved(); preference.markHidden(); em.persist(preference);
+            preference.markSaved(to.getOpportunity().getCurrentVersion().getId()); preference.markHidden(); em.persist(preference);
             var event = OpportunityEvent.create(to.getOpportunity(), to, OpportunityEventType.ELIGIBILITY_CHANGED,
                     LocalDate.ofInstant(occurredAt, ZoneId.of("Asia/Seoul")), "ELIGIBILITY_CHANGED:" + fixture.fromId() + ":" + fixture.toId(),
                     Map.of("fromVersionId", fixture.fromId(), "toVersionId", fixture.toId()), true, null, occurredAt);

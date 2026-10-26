@@ -247,7 +247,7 @@ class OpportunityDetailControllerTest {
         profile(other, seoul);
         UserOpportunityPreference preference = UserOpportunityPreference.builder()
                 .user(owner).opportunity(policy).build();
-        preference.markSaved();
+        preference.markSaved(policy.getCurrentVersion().getId());
         preference.markHidden();
         entityManager.persist(preference);
         result(owner, policy, EligibilityStatus.UNKNOWN, EligibilityResultService.RULE_VERSION,

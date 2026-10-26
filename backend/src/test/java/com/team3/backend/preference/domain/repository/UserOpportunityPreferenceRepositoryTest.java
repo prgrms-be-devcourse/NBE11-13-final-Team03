@@ -82,14 +82,14 @@ class UserOpportunityPreferenceRepositoryTest {
         UserOpportunityPreference savedPreference =
                 UserOpportunityPreference.builder()
                         .user(user).opportunity(saved).build();
-        savedPreference.markSaved();
+        savedPreference.markSaved(null);
         preferenceRepository.save(savedPreference);
 
         UserOpportunityPreference bothPreference =
                 UserOpportunityPreference.builder()
                         .user(user).opportunity(savedAndHidden)
                         .build();
-        bothPreference.markSaved();
+        bothPreference.markSaved(null);
         bothPreference.markHidden();
         preferenceRepository.save(bothPreference);
 
@@ -100,7 +100,7 @@ class UserOpportunityPreferenceRepositoryTest {
 
         UserOpportunityPreference otherPreference = UserOpportunityPreference.builder()
                 .user(otherUser).opportunity(saved).build();
-        otherPreference.markSaved();
+        otherPreference.markSaved(null);
         preferenceRepository.save(otherPreference);
         preferenceRepository.flush();
         entityManager.clear();
@@ -151,7 +151,7 @@ class UserOpportunityPreferenceRepositoryTest {
         preference = preferenceRepository.findById(preference.getId()).orElseThrow();
         LocalDateTime createdAt = preference.getCreatedAt();
 
-        preference.markSaved();
+        preference.markSaved(null);
         preference.markHidden();
         preferenceRepository.flush();
         entityManager.clear();
@@ -168,7 +168,7 @@ class UserOpportunityPreferenceRepositoryTest {
         LocalDateTime savedAt = found.getSavedAt();
         LocalDateTime hiddenAt = found.getHiddenAt();
         LocalDateTime updatedAt = found.getUpdatedAt();
-        found.markSaved();
+        found.markSaved(null);
         found.markHidden();
         preferenceRepository.flush();
         assertEquals(savedAt, found.getSavedAt());
