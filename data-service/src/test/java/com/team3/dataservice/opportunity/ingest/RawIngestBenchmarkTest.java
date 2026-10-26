@@ -79,7 +79,8 @@ import java.util.List;
         "yon.normalization.ingest.batch-size=${YON_INGEST_BENCH_BATCH_SIZE:100}",
         "yon.normalization.ingest.async-commit=${YON_INGEST_BENCH_ASYNC_COMMIT:false}"
 })
-@Import({RawIngestBenchmarkTest.TimedDataSourceConfig.class, com.team3.dataservice.config.PostgresJdbcTuning.class,
+@Import({com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache.class,
+        com.team3.dataservice.opportunity.service.OpportunitySourceLookup.class,RawIngestBenchmarkTest.TimedDataSourceConfig.class, com.team3.dataservice.config.PostgresJdbcTuning.class,
         RawIngestProcessor.class, RawRecordReader.class, RawRecordNormalizer.class,
         TrainingCourseNormalizationService.class, YouthPolicyNormalizationService.class,
         AgeNormalizer.class, ApplicationPeriodNormalizer.class, RegionNormalizer.class, RegionDirectory.class,
@@ -301,24 +302,32 @@ class RawIngestBenchmarkTest {
                 .stream().mapToLong(Long::longValue).toArray();
     }
 
-    /** 원본 count건에 새 스냅샷(내용 변경)과 정제 요청을 넣는다 */
+    /** 원본 count건에 새 스냅샷(내용 변경)과 정제 요청을 넣는다 (측정 밖 준비라 SQL 두 문장으로 한 번에) */
     private void addChanges(long[] ids, int count) {
+        StringBuilder targets = new StringBuilder();
         for (int k = 0; k < count; k++) {
-            long id = ids[(int) ((long) k * ids.length / count)];
-            jdbc.update("""
-                    INSERT INTO raw_external_record (source_id, sync_id, external_id, payload_hash, payload, first_seen_at, last_seen_at)
-                    SELECT source_id, sync_id, external_id, payload_hash || ':v2',
-                           jsonb_set(payload, '{title}', to_jsonb(coalesce(payload->>'title', '') || ' (변경)'))
-                             || jsonb_build_object('plcyNm', coalesce(payload->>'plcyNm', '') || ' (변경)'),
-                           first_seen_at, last_seen_at + interval '1 day'
-                    FROM raw_external_record WHERE id = ?
-                    """, id);
-            jdbc.update("""
-                    INSERT INTO raw_normalization_request (raw_record_id, previous_raw_record_id, event_type, status, created_at)
-                    SELECT max(id), ?, 'UPDATED', 'PENDING', now() FROM raw_external_record
-                    WHERE external_id = (SELECT external_id FROM raw_external_record WHERE id = ?)
-                    """, id, id);
+            if (k > 0) {
+                targets.append(',');
+            }
+            targets.append(ids[(int) ((long) k * ids.length / count)]);
         }
+        Long before = jdbc.queryForObject("SELECT coalesce(max(id), 0) FROM raw_external_record", Long.class);
+        jdbc.update("""
+                INSERT INTO raw_external_record (source_id, sync_id, external_id, payload_hash, payload, first_seen_at, last_seen_at)
+                SELECT source_id, sync_id, external_id, payload_hash || ':v2',
+                       jsonb_set(payload, '{title}', to_jsonb(coalesce(payload->>'title', '') || ' (변경)'))
+                         || jsonb_build_object('plcyNm', coalesce(payload->>'plcyNm', '') || ' (변경)'),
+                       first_seen_at, last_seen_at + interval '1 day'
+                FROM raw_external_record WHERE id IN (%s) ORDER BY id
+                """.formatted(targets));
+        jdbc.update("""
+                INSERT INTO raw_normalization_request (raw_record_id, previous_raw_record_id, event_type, status, created_at)
+                SELECT n.id, o.id, 'UPDATED', 'PENDING', now()
+                FROM raw_external_record n
+                JOIN raw_external_record o ON o.source_id = n.source_id AND o.external_id = n.external_id AND o.id IN (%s)
+                WHERE n.id > ?
+                ORDER BY n.id
+                """.formatted(targets), before);
         jdbc.execute("ANALYZE");
     }
 

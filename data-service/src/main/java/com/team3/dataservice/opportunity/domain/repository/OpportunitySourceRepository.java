@@ -1,7 +1,9 @@
 package com.team3.dataservice.opportunity.domain.repository;
 
 import jakarta.persistence.QueryHint;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.QueryHints;
+import org.springframework.data.repository.query.Param;
 
 import com.team3.dataservice.opportunity.domain.entity.OpportunitySource;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -20,4 +22,10 @@ public interface OpportunitySourceRepository extends JpaRepository<OpportunitySo
     Optional<OpportunitySource> findBySourceIdAndExternalId(Long sourceId, String externalId);
 
     List<OpportunitySource> findByOpportunityIdOrderByIdAsc(Long opportunityId);
+
+    /** 정규화 묶음 미리 조회 (OpportunitySourceLookup). 공고까지 함께 읽는다. 자동 flush 안 함 (위와 같은 이유) */
+    @QueryHints(@QueryHint(name = org.hibernate.jpa.HibernateHints.HINT_FLUSH_MODE, value = "COMMIT"))
+    @Query("select s from OpportunitySource s join fetch s.opportunity where s.sourceId = :sourceId and s.externalId in :externalIds")
+    List<OpportunitySource> findAllForLookup(@Param("sourceId") Long sourceId,
+                                             @Param("externalIds") java.util.Collection<String> externalIds);
 }

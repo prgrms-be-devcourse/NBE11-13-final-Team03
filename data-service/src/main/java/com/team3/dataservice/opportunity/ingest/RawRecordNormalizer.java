@@ -46,6 +46,29 @@ public class RawRecordNormalizer {
     private final TrainingCourseNormalizationService trainingService;
     private final YouthPolicyNormalizationService youthPolicyService;
 
+    /**
+     * 정규화가 opportunity_sources에서 찾을 외부 ID (출처마다 원본 external_id와 형식이 다름: 고용24는 과정ID:회차).
+     * 처리기가 묶음 시작에 기존 출처를 한 번에 조회할 때 쓴다. 읽을 수 없는 원본은 빈 값 (정규화가 INVALID로 처리).
+     */
+    public java.util.Optional<String> sourceExternalId(RawRecordRow row) {
+        try {
+            JsonNode payload = MAPPER.readTree(row.payload());
+            return switch (row.sourceCode()) {
+                case EMPLOYMENT24 -> {
+                    TrainingCourseRaw raw = MAPPER.treeToValue(payload, TrainingCourseRaw.class);
+                    yield raw == null || raw.trprId() == null || raw.trprDegr() == null
+                            ? java.util.Optional.empty()
+                            : java.util.Optional.of(TrainingCourseNormalizationService.externalId(raw));
+                }
+                case YOUTH_POLICY -> java.util.Optional.ofNullable(
+                        MAPPER.treeToValue(withSBizCd(payload), YouthPolicyRaw.class).plcyNo());
+                default -> java.util.Optional.empty();
+            };
+        } catch (RuntimeException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
     public Outcome normalize(RawRecordRow row) {
         LocalDateTime seenAt = row.lastSeenAt().atZoneSameInstant(KST).toLocalDateTime();
         JsonNode payload;

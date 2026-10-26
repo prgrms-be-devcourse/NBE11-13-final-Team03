@@ -123,6 +123,25 @@ public class RawRecordReader {
                 .addValue("ids", requestIds));
     }
 
+    /** 처리 상태 여러 건을 한 번에 기록한다 (묶음 끝). saveState와 같은 규칙 */
+    public void saveStates(List<RawRecordRow> rows, List<String> outcomes, OffsetDateTime processedAt) {
+        if (rows.isEmpty()) {
+            return;
+        }
+        MapSqlParameterSource[] params = new MapSqlParameterSource[rows.size()];
+        for (int i = 0; i < rows.size(); i++) {
+            RawRecordRow row = rows.get(i);
+            params[i] = new MapSqlParameterSource()
+                    .addValue("sourceId", row.sourceId())
+                    .addValue("externalId", row.externalId())
+                    .addValue("rawRecordId", row.rawRecordId())
+                    .addValue("payloadHash", row.payloadHash())
+                    .addValue("outcome", outcomes.get(i))
+                    .addValue("processedAt", processedAt);
+        }
+        jdbc.batchUpdate(UPSERT_STATE, params);
+    }
+
     public void saveState(RawRecordRow row, String outcome, OffsetDateTime processedAt) {
         jdbc.update(UPSERT_STATE, new MapSqlParameterSource()
                 .addValue("sourceId", row.sourceId())

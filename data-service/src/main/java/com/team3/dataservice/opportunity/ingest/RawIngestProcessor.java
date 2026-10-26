@@ -40,6 +40,7 @@ public class RawIngestProcessor {
 
     private final RawRecordReader reader;
     private final RawRecordNormalizer normalizer;
+    private final com.team3.dataservice.opportunity.service.OpportunitySourceLookup sourceLookup;
     private final TransactionTemplate claimTx;
     private final TransactionTemplate recordTx;
     private final int batchSize;
@@ -51,12 +52,14 @@ public class RawIngestProcessor {
     private EntityManager em;
 
     public RawIngestProcessor(RawRecordReader reader, RawRecordNormalizer normalizer,
+                              com.team3.dataservice.opportunity.service.OpportunitySourceLookup sourceLookup,
                               PlatformTransactionManager transactionManager,
                               @Value("${yon.normalization.ingest.batch-size:100}") int batchSize,
                               @Value("${yon.normalization.ingest.transaction-size:100}") int transactionSize,
                               @Value("${yon.normalization.ingest.async-commit:false}") boolean asyncCommit) {
         this.reader = reader;
         this.normalizer = normalizer;
+        this.sourceLookup = sourceLookup;
         this.claimTx = new TransactionTemplate(transactionManager);
         this.recordTx = new TransactionTemplate(transactionManager);
         this.recordTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -170,16 +173,38 @@ public class RawIngestProcessor {
                     // 같은 (출처, 외부 ID)가 묶음에 두 번 있으면 뒤 원본이 앞 원본의 공고를 찾아야 하므로 원본마다 flush한다
                     return chunk.stream().map(this::normalizeAndRecord).toList();
                 }
-                // 원본마다 flush하지 않고 묶음 끝에 한 번 flush해서 같은 테이블 INSERT를 묶어 보낸다 (hibernate.jdbc.batch_size)
-                List<Boolean> results = chunk.stream().map(this::normalize).toList();
-                em.flush();
-                em.clear();
-                return results;
+                // 원본마다 flush하지 않고 묶음 끝에 한 번 flush해서 같은 테이블 INSERT를 묶어 보낸다 (hibernate.jdbc.batch_size).
+                // 기존 출처는 묶음 시작에 한 번에 조회하고, 처리 상태도 묶음 끝에 한 번에 기록한다
+                prefetchSources(chunk);
+                try {
+                    List<Boolean> results = new ArrayList<>(chunk.size());
+                    List<String> outcomes = new ArrayList<>(chunk.size());
+                    for (RawRecordRow row : chunk) {
+                        boolean normalized = normalizer.normalize(row) == RawRecordNormalizer.Outcome.NORMALIZED;
+                        results.add(normalized);
+                        outcomes.add(normalized ? NORMALIZED : INVALID);
+                    }
+                    reader.saveStates(chunk, outcomes, OffsetDateTime.now(KST));
+                    em.flush();
+                    em.clear();
+                    return results;
+                } finally {
+                    sourceLookup.clear();
+                }
             });
         } catch (RuntimeException e) {
             log.warn("Raw record chunk failed, retrying one by one: size={}, cause={}", chunk.size(), e.toString());
             return chunk.stream().map(this::processOne).toList();
         }
+    }
+
+    private void prefetchSources(List<RawRecordRow> chunk) {
+        java.util.Map<Long, List<String>> idsBySource = new java.util.HashMap<>();
+        for (RawRecordRow row : chunk) {
+            normalizer.sourceExternalId(row).ifPresent(id ->
+                    idsBySource.computeIfAbsent(row.sourceId(), k -> new ArrayList<>()).add(id));
+        }
+        sourceLookup.prefetch(idsBySource);
     }
 
     private static boolean distinctRecords(List<RawRecordRow> chunk) {
@@ -203,17 +228,11 @@ public class RawIngestProcessor {
 
     /** 현재 트랜잭션 안에서 정규화하고 처리 상태를 기록한다. @return 정규화했으면 true, 원본 데이터 문제면 false */
     private boolean normalizeAndRecord(RawRecordRow row) {
-        boolean normalized = normalize(row);
-        em.flush();
-        em.clear();
-        return normalized;
-    }
-
-    /** flush 없이 정규화하고 처리 상태를 기록한다. 같은 트랜잭션의 끝에서 flush해야 한다 */
-    private boolean normalize(RawRecordRow row) {
         RawRecordNormalizer.Outcome outcome = normalizer.normalize(row);
         reader.saveState(row, outcome == RawRecordNormalizer.Outcome.NORMALIZED ? NORMALIZED : INVALID,
                 OffsetDateTime.now(KST));
+        em.flush();
+        em.clear();
         return outcome == RawRecordNormalizer.Outcome.NORMALIZED;
     }
 }
