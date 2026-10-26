@@ -89,6 +89,23 @@ backend의 `/api/admin/collection/**` 공개 HTTP API·ADMIN 권한은 유지된
 - 스키마 변경(`ddl-auto: update`)은 테이블을 소유한 서비스가 합니다. 소유 표와 규칙은 `docs/database-boundaries.md`.
 - 테스트는 `main()`을 거치지 않아 테스트용 DB 설정(H2, Testcontainers)을 그대로 씁니다.
 
+## 본문 자격 조건 확인 (`bodyQualification`)
+
+청년정책 본문(설명·지원내용·제출서류 등)에만 적힌 주거·재산·병역 조건은 `BodyConditionDetector`가 키워드로 찾아 원문 확인 조건(`OTHER` / `bodyQualification`, `NEEDS_REVIEW`)으로 저장합니다. 이 조건이 있으면 판정은 최대 `POSSIBLY_ELIGIBLE`입니다.
+
+- 찾지 않는 것: 지식재산권·자산취득비 같은 비자격 표현, 재산세 감면·면제 같은 **혜택 문맥**
+- 일부러 찾는 것: 소득·재산 신고서 같은 **제출서류 문맥** (서류에만 재산 기준이 드러나는 정책이 있음)
+- 키워드 규칙이라 자격이 아닌 문장을 잡을 수 있습니다. 새로 잡힌 정책은 아래 SQL로 근거 줄을 보고, 오탐 표현은 `BodyConditionDetector`의 제외 규칙과 테스트에 추가합니다.
+
+```sql
+select o.id, o.title, c.expression ->> 'kinds' as kinds, c.evidence ->> 'evidenceText' as evidence, c.created_at
+from application.opportunity_conditions c
+join application.opportunities o on o.current_version_id = c.version_id
+where c.condition_field = 'bodyQualification'
+order by c.created_at desc
+limit 50;
+```
+
 ## 테스트
 ```bash
 yon-test data
