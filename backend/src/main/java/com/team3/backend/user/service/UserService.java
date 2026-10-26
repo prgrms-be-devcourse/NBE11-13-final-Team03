@@ -72,7 +72,8 @@ public class UserService {
 
         // User를 직접 참조하는 데이터부터 삭제한다.
         // user_interests, user_opportunity_preferences, user_behavior_events,
-        // eligibility_event_assessments는 DB ON DELETE CASCADE로 삭제된다.
+        // eligibility_event_assessments와 notification_match_pairs는 사용자 삭제 시 DB ON DELETE CASCADE로 삭제된다.
+        // notification_match_candidates는 쌍(notification_match_pairs) 삭제에 이어 CASCADE로 삭제된다.
         refreshTokenRepository.deleteAllByUserId(userId);
 
         // 사용자별 정책 판정 데이터 삭제

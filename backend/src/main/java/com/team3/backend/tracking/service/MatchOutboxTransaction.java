@@ -21,7 +21,7 @@ import java.time.*;
 import java.util.*;
 import static com.team3.backend.tracking.config.DateTrackingConfig.KST;
 
-/** Explicit local commands only. No scheduling or publication; NEW_MATCH receiver support is a separate prerequisite. */
+/** Transactional commands shared by explicit callers and the automatic worker; delivery remains with the publisher. */
 @Service @RequiredArgsConstructor
 @ConditionalOnProperty(name="yon.tracking.match.outbox.enabled",havingValue="true")
 public class MatchOutboxTransaction {
@@ -39,7 +39,7 @@ public class MatchOutboxTransaction {
     private final EntityManager em;
     private final Clock clock;
 
-    public enum Status { ENQUEUED, DUPLICATE, EMPTY, DEFERRED, SKIPPED, BUDGET_EXCEEDED, USER_UNAVAILABLE }
+    public enum Status { ENQUEUED, DUPLICATE, EMPTY, DEFERRED, SKIPPED, USER_UNAVAILABLE }
     public record Result(Status status,Long outboxId,int members) { }
 
     /** runId and expiry are supplied by the logical summary run, never generated anew on retry. */
@@ -48,9 +48,10 @@ public class MatchOutboxTransaction {
         if (userId<1 || runId==null || expiresAt==null) throw new IllegalArgumentException("User, stable run ID and expiry required");
         var existing=existing(userId,runId,"NEW_MATCH");
         if (existing!=null) return existing;
+        // Bound this run, not the user's backlog. Older candidates progress first; the remainder stays pending.
+        // The automatic worker's stable daily run ID prevents a second summary on the same day.
         var cohort=candidates.findByPairUserIdAndReasonAndStatusOrderById(userId,MatchPairState.Reason.FIRST_MATCH,
-                "PENDING",PageRequest.of(0,limits.maxSummaryCandidates()+1));
-        if (cohort.size()>limits.maxSummaryCandidates()) return result(Status.BUDGET_EXCEEDED);
+                "PENDING",PageRequest.of(0,limits.maxSummaryCandidates()));
         if (cohort.isEmpty()) return result(Status.EMPTY);
         // Lock every parent policy before the user, including policies that no longer have a current version.
         for (long id:cohort.stream().map(c->c.getPair().getOpportunity().getId()).distinct().sorted().toList()) {

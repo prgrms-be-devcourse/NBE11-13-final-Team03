@@ -15,7 +15,7 @@ Notification의 NEW_MATCH 수신·슬롯 편입을 연결한다. backend가 대�
 | 기존 찜의 시작점 | 기존 null 행을 현재 버전으로 일괄 채우는 작업은 없음. 배포 시 1회 backfill 여부·시점은 별도 결정 | 미확정 |
 | 첫 정책 버전 | 실제 첫 버전(`versionNo=1`, 이전 버전 없음)만 BASELINE_SKIPPED로 자동 기록. 변경 이력·이벤트·Outbox 생성 없음 | 확정 |
 | 초기 적재 구분 | 전역 초기화·출처별 최초 적재 완료 계약을 이 알림 경로의 선행 조건으로 요구하지 않음. 이력 누락을 첫 버전으로 간주하지 않음 | 확정 |
-| FIRST_MATCH | 사용자·정책별 최초 적합 후보를 기록하고 사용자별 요약 1건에 전건 귀속. 상위 N개만 기록하지 않음 | 확정 |
+| FIRST_MATCH | 사용자·정책별 최초 적합 후보를 전건 기록. 사용자별 하루 요약 1건에 후보 ID 순으로 예산만큼 포함하고 나머지는 다음 회차에서 재검증 | 확정 |
 | TRANSITION | 실제 NOT_ELIGIBLE → ELIGIBLE 발생마다 1회. 같은 발생의 재처리만 중복 차단 | 확정 |
 | 대상 | 청년정책의 ELIGIBLE 또는 기준 통과 POSSIBLY_ELIGIBLE. UNKNOWN·훈련과정 제외 | 확정 |
 | POSSIBLY 기준 | 미해결 조건은 정보 없음 + 확인 필요의 합계. 초기 한도 1, 관심 분야 일치 필수 | 확정 정책의 초기 설정값 |
@@ -51,6 +51,11 @@ TRANSITION의 sourceEventId는 발생별 후보 event_id다. 발생 시각부터
 `match.outbox.enabled=true`이면 기존 명시/자동 자격 Fan-out은 새 BECAME_ELIGIBLE 생성을 MATCH_ROUTE_OWNS_TRANSITION으로 양보한다.
 기존에 생성된 Outbox를 자동 삭제·변환하거나 서로 다른 설정의 혼합 인스턴스 중복을 해결하는 기능은 없다.
 
+긍정 전환 경로를 양보한 뒤에는 판정 배치 → 후보 관측 → 자동 발행 poll → 기존 전달 경로를 거친다.
+판정 배치의 기본 fixedDelay 10분과 자동 발행 기본 fixedDelay 60초에 각 실행·잠금 대기 시간이 더해지므로
+정책 변경 직후 즉시 발행하거나 10분 이내에 전달됨을 보장하지 않는다. FIRST_MATCH는 다음 요약 생성 창까지 기다린다.
+프로필 변경으로 여러 정책이 신청 가능해지면 TRANSITION은 정책별 인앱 알림을 생성한다. 푸시 슬롯 묶음은 인앱 건수를 합치지 않는다.
+
 ## 새 테이블과 멱등성
 
 이름에 notification이 들어가지만 두 테이블 모두 backend 소유의 **application 스키마**에 있다.
@@ -61,7 +66,7 @@ Notification이 직접 읽지 않으며 notification 스키마와 FK를 만들�
 | notification_match_pairs | 사용자·정책의 마지막 판정 상태/입력 키/버전·규칙·프로필, 최초 적합 이력, 전환 발생 번호 | UNIQUE(user_id, opportunity_id). 사용자 삭제 시 CASCADE |
 | notification_match_candidates | FIRST_MATCH/TRANSITION 발생, UUID event_id, 원본 근거 JSON, 후보 상태, outbox_id와 종료 사유 | UNIQUE(pair_id, reason, occurrence_no), UNIQUE(event_id), INDEX(status,id). 쌍 삭제 시 CASCADE |
 
-후보 상태는 PENDING → ENQUEUED 또는 SKIPPED다. DEFERRED·BUDGET_EXCEEDED는 호출 결과이며 후보를 종료하지 않는다.
+후보 상태는 PENDING → ENQUEUED 또는 SKIPPED다. DEFERRED는 호출 결과이며 후보를 종료하지 않는다.
 ENQUEUED는 Outbox 생성 완료를 뜻하고 실제 인앱 저장/FCM 성공을 뜻하지 않는다.
 요약에 포함된 모든 후보가 같은 outbox_id를 참조하며 전체 정책 목록을 Notification DB에 복제하지 않는다.
 기존 Outbox와 수신 측 `(userId, sourceEventId)` 멱등성도 유지한다.
@@ -90,8 +95,11 @@ ENQUEUED는 Outbox 생성 완료를 뜻하고 실제 인앱 저장/FCM 성공을
 
 단일 인스턴스·기본값에서 30분 창 × 분당 25명은 대략 **750 사용자 처리 시도/일** 규모다.
 fixedDelay에 실행 시간이 더해지고, 전환 처리·잠금 대기·DEFERRED/실패 재처리도 시간을 사용하므로 완료 사용자 수 보장은 아니다.
-사용자별 후보가 500개를 초과하면 일부만 발행하지 않고 BUDGET_EXCEEDED로 전건 보류한다.
-다음 날에도 상한을 초과하면 자동 해소되지 않으므로 후보 집계/분할 정책을 정해야 한다.
+사용자별 PENDING 후보를 ID 오름차순으로 최대 max-summary-candidates개 조회해 한 회차로 처리한다.
+기본값에서 620개라면 첫날 최대 500개, 나머지 120개는 다음 날 재검증 후 요약한다. 초과분을 버리거나 SKIPPED로 닫지 않는다.
+같은 날 재호출은 기존 회차 Outbox를 반환하므로 두 번째 요약을 만들지 않는다. 다음 날에는 새 회차 ID와 만료를 사용한다.
+선택된 페이지에 신선한 판정/관측이 필요한 후보가 있으면 그 페이지는 DEFERRED로 보류하며 부분 소비하지 않는다.
+현재 자격을 잃었거나 규칙이 바뀐 후보는 기존 제외 규칙을 적용하므로 실제 요약 건수는 조회한 후보 수보다 작을 수 있다.
 활성화 전 PENDING 사용자 수·후보 수·실제 완료율·poll 시간·다음 날 이월량을 측정해 예산/간격을 조정한다.
 
 ## NEW_MATCH 계약·슬롯 우선순위
@@ -148,17 +156,23 @@ fixedDelay에 실행 시간이 더해지고, 전환 처리·잠금 대기·DEFER
 - 자동 회차 중지는 automatic.scheduler-enabled=false로 제어한다. 관측 중지는 match.enabled도 내려야 하며
   outbox.enabled=true와 match.enabled=false 조합은 기동 가드가 거부한다. 기존 커밋 Outbox/전달 중지는 별도다.
 - outbox.enabled를 끄면 기존 찜 경로가 새 BECAME_ELIGIBLE 생성 책임을 다시 가지므로, 혼합 배포·잔여 후보·Outbox를 검토한 뒤 전환한다.
-- 기존 null 찜의 1회 backfill, 실제 추천 경로, 잠정 회차·만료·NEW_MATCH 순위, 대량 사용자/500개 초과 처리 정책은 별도 확인한다.
+- 기존 null 찜의 1회 backfill, 실제 추천 경로, 잠정 회차·만료·NEW_MATCH 순위, 대량 사용자 처리 예산은 별도 확인한다.
+- 규칙/정규화 버전 변경 관측에서 처음 적합해져도 현재 구현은 후보 없이 everMatched=true를 기록한다.
+  이후 FIRST_MATCH는 다시 만들지 않으며, 나중의 실제 불가→가능 TRANSITION은 별개다. 최초 적합 영구 억제의 정책 의도는 활성화 전 확인한다.
+- 실패 후보의 영속 시도 횟수·backoff·상한은 아직 없다. 매 순회 재호출될 수 있으므로 실패 반복을 관측하고 활성화 전 재시도·수동 복구 방침을 정한다.
+  임의 횟수 초과만으로 후보를 자동 폐기하는 정책은 도입하지 않았다.
 - WAITING_POLICY 재개·보류 마감 자동 재스캔·외부 FCM 전달 검증은 이 문서 추가로 완료되지 않는다.
 
 ## 검증 결과
 
-2026-10-26 PR #80 기능 커밋 `a1711a5`를 최신 main 기반으로 통합한 작업 트리에서 실행한 결과다.
+2026-10-26 검증 결과다. 전체 회귀는 기능 커밋 `a1711a5` 기준이며,
+요약 예산 초과 수정 후에는 영향을 받는 5개 테스트 클래스 50개를 재실행했다.
 
 | 실행 | 결과 |
 | --- | --- |
 | backend: YON_TEST_DB_URL을 테스트 전용 yon_test로 지정해 `test bootJar --rerun-tasks` | 960개 중 958개 통과, 벤치마크 2개 건너뜀, 실패·오류 0. bootJar 성공 |
 | notification-service: `test --rerun-tasks` | 189개 통과, 건너뜀·실패·오류 0 |
+| 요약 예산 초과 수정 후: MatchObservationPostgresTest 39, MatchAutomaticWorkerTest 3, MatchAutomaticSchedulingTest 3, MatchSummaryWindowTest 2, IngestBoundaryTest 3 | 50개 통과, 건너뜀·실패·오류 0. 회차별 분할·당일 중복 차단·다음 날 잔여 처리 및 자격 재검증 확인 |
 
-문서 보완은 코드를 바꾸지 않는다. 실제 업무 DB의 DDL 적용·타이머 장시간 실행·운영 부하·외부 FCM은 미검증이다.
+실제 업무 DB의 DDL 적용·타이머 장시간 실행·운영 부하·외부 FCM은 미검증이다.
 로컬 테스트 통과는 위 관측 비용 P2 해결이나 운영 활성화 승인을 뜻하지 않는다.

@@ -56,10 +56,7 @@ public class MatchAutomaticWorker {
                     if (MatchSummaryWindow.current(clock.instant())==null) break;
                     summaryUserCursor=userId;
                     try {
-                        var result=outbox.summarize(userId,window.runId(userId),window.expiresAt());
-                        if (result.status()==MatchOutboxTransaction.Status.BUDGET_EXCEEDED) {
-                            log.warn("Match summary exceeds per-user candidate budget: userId={}",userId);
-                        }
+                        outbox.summarize(userId,window.runId(userId),window.expiresAt());
                         summaries++;
                     } catch (RuntimeException failure) {
                         failures++;

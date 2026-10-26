@@ -75,7 +75,11 @@ public class MatchObservationTransaction {
                 candidate==null?null:candidate.getId(),notice==null?null:notice.reason());
     }
 
-    /** Read-only business operation under caller's transaction. Aggregate callers prelock all policies before the user. */
+    /**
+     * Read-only business operation under caller's transaction. Aggregate callers prelock all policies before the user.
+     * MANDATORY is enforced for external proxy calls (for example MatchOutboxTransaction).
+     * observe's self-invocation bypasses that interceptor but already runs in its REQUIRES_NEW transaction.
+     */
     @Transactional(propagation=Propagation.MANDATORY)
     public Current current(long userId,long opportunityId) {
         if (userId<1 || opportunityId<1) throw new IllegalArgumentException("Persisted user/policy IDs required");

@@ -59,8 +59,16 @@ class MatchObservationPostgresTest {
         r.add("spring.datasource.password",POSTGRES::getPassword); r.add("spring.datasource.driver-class-name",POSTGRES::getDriverClassName);
     }
     @TestConfiguration(proxyBeanMethods=false) static class Beans {
-        @Bean @Primary Clock matchClock() { return Clock.fixed(NOW,ZoneOffset.UTC); }
+        @Bean @Primary TestClock matchClock() { return new TestClock(); }
     }
+    static class TestClock extends Clock {
+        private volatile Instant now=NOW;
+        void set(Instant value) { now=value; }
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return Clock.fixed(now,zone); }
+        @Override public Instant instant() { return now; }
+    }
+    @Autowired TestClock clock;
     @Autowired MatchObservationTransaction observations;
     @Autowired MatchCandidatePage pages;
     @Autowired MatchPairStateRepository pairs;
@@ -74,6 +82,7 @@ class MatchObservationPostgresTest {
     private long userId;
 
     @BeforeEach void resetDisposableContainer() {
+        clock.set(NOW);
         jdbc.execute("TRUNCATE outbox_events,notification_match_candidates,notification_match_pairs,eligibility_set_results,eligibility_profiles,"
                 +"user_opportunity_preferences,user_interests,application_windows,opportunity_versions,opportunities,users,regions RESTART IDENTITY CASCADE");
         userId=tx(()->{
@@ -358,10 +367,48 @@ class MatchObservationPostgresTest {
         assertThatThrownBy(()->matchOutbox.transition(userId+1,id)).isInstanceOf(IllegalArgumentException.class);
         assertThat(outboxes.count()).isZero();
     }
-    @Test void overBudgetSummaryDoesNotChooseTopNOrConsumeAnyMember() {
-        observations.observe(userId,policy(ELIGIBLE)); observations.observe(userId,policy(ELIGIBLE)); observations.observe(userId,policy(ELIGIBLE));
-        assertThat(matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plusSeconds(3600)).status()).isEqualTo(MatchOutboxTransaction.Status.BUDGET_EXCEEDED);
-        assertThat(outboxes.count()).isZero(); assertThat(candidates.findAll()).allMatch(c->c.getStatus().equals("PENDING"));
+    @Test void overBudgetSummaryProgressesInOrderAcrossDaysWithoutSameDayDuplicate() {
+        clock.set(NOW.minus(Duration.ofMinutes(25)));
+        long first=observations.observe(userId,policy(ELIGIBLE)).candidateId();
+        long second=observations.observe(userId,policy(ELIGIBLE)).candidateId();
+        long remainder=observations.observe(userId,policy(ELIGIBLE)).candidateId();
+        var worker=new MatchAutomaticWorker(jdbc,matchOutbox,
+                new com.team3.backend.tracking.config.MatchAutomaticProperties(true,false,25,25,60000),clock);
+        worker.runOnce();
+        assertThat(outboxes.count()).isEqualTo(1);
+        Long firstOutbox=candidates.findById(first).orElseThrow().getOutboxId();
+        assertThat(candidates.findById(second).orElseThrow().getOutboxId()).isEqualTo(firstOutbox);
+        assertThat(candidates.findById(remainder).orElseThrow().getStatus()).isEqualTo("PENDING");
+        worker.runOnce();
+        assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(candidates.findById(remainder).orElseThrow().getStatus()).isEqualTo("PENDING");
+
+        clock.set(clock.instant().plus(Duration.ofDays(1)));
+        worker.runOnce();
+        assertThat(outboxes.count()).isEqualTo(2);
+        var last=candidates.findById(remainder).orElseThrow();
+        assertThat(last.getStatus()).isEqualTo("ENQUEUED");
+        assertThat(last.getOutboxId()).isNotNull().isNotEqualTo(firstOutbox);
+        assertThat(candidates.findAll()).allMatch(c->c.getStatus().equals("ENQUEUED"));
+        worker.runOnce();
+        assertThat(outboxes.count()).isEqualTo(2);
+    }
+    @Test void nextDaySummaryRevalidatesRemainderInsteadOfSendingOldQualification() {
+        clock.set(NOW.minus(Duration.ofMinutes(25)));
+        observations.observe(userId,policy(ELIGIBLE)); observations.observe(userId,policy(ELIGIBLE));
+        long policyId=policy(ELIGIBLE);
+        long remainder=observations.observe(userId,policyId).candidateId();
+        var worker=new MatchAutomaticWorker(jdbc,matchOutbox,
+                new com.team3.backend.tracking.config.MatchAutomaticProperties(true,false,25,25,60000),clock);
+        worker.runOnce();
+        clock.set(clock.instant().plus(Duration.ofDays(1)));
+        status(policyId,NOT_ELIGIBLE);
+        worker.runOnce(); // A stale observation defers the page without consuming it.
+        assertThat(candidates.findById(remainder).orElseThrow().getStatus()).isEqualTo("PENDING");
+        observations.observe(userId,policyId);
+        worker.runOnce();
+        assertThat(candidates.findById(remainder).orElseThrow().getStatus()).isEqualTo("SKIPPED");
+        assertThat(outboxes.count()).isEqualTo(1);
     }
     @Test void transitionCandidateUpdateFailureRollsBackOutbox() {
         long p=policy(NOT_ELIGIBLE); observations.observe(userId,p); status(p,ELIGIBLE);
