@@ -5,7 +5,7 @@ import { QueryClient, QueryObserver, MutationObserver } from '@tanstack/react-qu
 import { apiClient, endAuthSession } from '../src/api/client.ts'
 import { ApiError } from '../src/api/ApiError.ts'
 import { authQueryKey, authTransitionKey, resetPersonalizedQueries } from '../src/auth/session.ts'
-import { getProfile, getInterests, parseProfile, parseInterests, profileQuery, interestsQuery, saveProfile, saveInterests, interestKey } from '../src/api/profile.ts'
+import { needsProfileSetup, getProfile, getInterests, parseProfile, parseInterests, profileQuery, interestsQuery, saveProfile, saveInterests, interestKey } from '../src/api/profile.ts'
 import { emptyProfile, choices, validateProfile, profilePatch, validateProfileRegions } from '../src/pages/profile/profileModel.ts'
 import { interestOptions, toggleInterest } from '../src/pages/profile/interestModel.ts'
 import { safeReturnPath } from '../src/auth/returnPath.ts'
@@ -194,4 +194,26 @@ test('unavailable regional options still allow a real non-region PATCH while ret
   assert.equal(saved.schoolRegionCode, initial.schoolRegionCode)
   assert.equal(calls, 1)
   client.clear()
+})
+
+test('login sends users without a registered profile to setup, but never blocks login on lookup failures', async () => {
+  const paths = []
+  for (const [reply, expected] of [['missing', true], ['saved', false], ['network', false], ['server', false]]) {
+    const client = makeClient()
+    client.setQueryData(authQueryKey, user)
+    apiClient.defaults.adapter = async (config) => {
+      paths.push(config.url)
+      if (reply === 'missing') return fail(config, 404, 'ELIGIBILITY_001')
+      if (reply === 'network') throw new AxiosError('private', 'ERR_NETWORK', config, {})
+      if (reply === 'server') return fail(config, 500)
+      return response(config, profile)
+    }
+    try { assert.equal(await needsProfileSetup(client), expected, reply) } finally { client.clear() }
+  }
+  assert.ok(paths.every((path) => path === '/users/me/eligibility-profile'))
+  const anonymous = makeClient()
+  anonymous.setQueryData(authQueryKey, null)
+  const before = paths.length
+  assert.equal(await needsProfileSetup(anonymous), false)
+  assert.equal(paths.length, before, '로그인 사용자가 없으면 조회하지 않는다')
 })

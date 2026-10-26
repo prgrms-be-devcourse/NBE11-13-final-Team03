@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../auth/AuthContext'
+import { needsProfileSetup } from '../../api/profile'
 import { consumeLoginReturn, loginPath, peekLoginReturn } from '../../auth/returnPath'
 import { createOAuthCompletionRunner } from '../../auth/oauthCompletion'
 import AsyncState from '../../components/ui/AsyncState'
@@ -11,8 +13,12 @@ function LoginResultPage({ success }: { success: boolean }) {
   const { completeOAuth } = useAuth()
   const navigate = useNavigate()
   const [error, setError] = useState<Error>()
-  const completion = useMemo(() => createOAuthCompletionRunner(completeOAuth,
-    () => navigate(consumeLoginReturn(), { replace: true }), setError), [completeOAuth, navigate])
+  const client = useQueryClient()
+  // 맞춤 조건이 없으면 첫 화면을 맞춤 조건 설정으로 한다. 저장된 복귀 경로는 성공 시 함께 소비한다.
+  const completion = useMemo(() => createOAuthCompletionRunner(
+    async () => { await completeOAuth(); return needsProfileSetup(client) },
+    (setup) => { const returnTo = consumeLoginReturn(); navigate(setup ? '/onboarding' : returnTo, { replace: true }) }, setError,
+  ), [completeOAuth, navigate, client])
   useEffect(() => {
     if (!success) return
     completion.activate()

@@ -215,3 +215,15 @@ test('late failure from an invalidated completion cannot overwrite the successfu
   assert.deepEqual(errors, [])
   runner.deactivate()
 })
+
+test('completion passes its result (such as the profile setup decision) to success only while the page is still active', async () => {
+  const outputs = []
+  const runner = createOAuthCompletionRunner(async () => true, (setup) => outputs.push(setup ? '/onboarding' : '/saved'), () => outputs.push('error'))
+  runner.activate(); await runner.run()
+  assert.deepEqual(outputs, ['/onboarding'])
+  const late = deferred()
+  const leaving = createOAuthCompletionRunner(() => late.promise, (setup) => outputs.push(setup), () => outputs.push('error'))
+  leaving.activate(); const pending = leaving.run(); leaving.deactivate(); late.resolve(true); await pending
+  assert.deepEqual(outputs, ['/onboarding'], '화면을 떠난 뒤 늦게 끝난 판단으로 이동하지 않는다')
+  runner.deactivate()
+})

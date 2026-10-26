@@ -49,6 +49,16 @@ export async function getProfile(signal?: AbortSignal): Promise<Profile | null> 
 export async function getInterests(signal?: AbortSignal): Promise<Interest[]> {
   return parseInterests((await apiClient.get<unknown>(interestsPath, { requiresAuth: true, signal })).data)
 }
+/**
+ * 로그인 직후 맞춤 조건 설정 화면으로 보낼지 판단한다. 신규 가입 여부는 API로 알 수 없으므로
+ * 맞춤 조건 미등록(조회 결과 null)을 기준으로 한다. 조회 실패는 로그인을 막지 않도록 false로 본다.
+ */
+export async function needsProfileSetup(client: QueryClient): Promise<boolean> {
+  const user = client.getQueryData<AuthUser | null>(authQueryKey)
+  if (!user) return false
+  try { return (await client.fetchQuery({ ...profileQuery(user.id), staleTime: 0 })) === null }
+  catch { return false }
+}
 export const profileQuery = (userId: number) => ({ queryKey: ['profile', userId] as const, queryFn: ({ signal }: { signal: AbortSignal }) => getProfile(signal), gcTime: 0 })
 export const interestsQuery = (userId: number) => ({ queryKey: ['user-interests', userId] as const, queryFn: ({ signal }: { signal: AbortSignal }) => getInterests(signal), gcTime: 0 })
 // 인증 확인 객체가 바뀌면 이전 화면의 저장 응답을 현재 사용자에게 반영하지 않는다.
