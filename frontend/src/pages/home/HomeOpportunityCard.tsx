@@ -6,19 +6,12 @@ import PreferenceActions from '../../components/opportunities/PreferenceActions'
 import type { PreferenceSource } from '../../api/preferences'
 import type { EligibilityStatus } from '../../components/ui/StatusBadge'
 import type { OpportunitySearchItem } from '../opportunities/types'
-import { isValidDate, typeLabels } from '../opportunities/searchParams'
+import { classificationLabel, isValidDate, typeLabels } from '../opportunities/searchParams'
 import styles from './HomePage.module.css'
 
 type CardItem = Pick<OpportunitySearchItem, 'opportunityId' | 'type' | 'title' | 'category' | 'subCategory' | 'detailCategory' | 'saved'> & {
   createdAt?: string | null
   eligibilityStatus: EligibilityStatus | null
-}
-
-function classificationLabel(item: CardItem): string {
-  const labels = [item.category, item.subCategory, item.detailCategory]
-    .map(value => value?.trim()).filter((value): value is string => !!value)
-  if (item.type === 'VOCATIONAL_TRAINING') return labels[0] ?? ''
-  return [...new Set(labels)].join(' · ')
 }
 
 // 홈의 공개 목록과 추천 카드가 공유하는 실제 공고 정보만 묶는다.

@@ -2,6 +2,7 @@ import { apiClient } from './client.ts'
 import { ApiError } from './ApiError.ts'
 import type { InterestOptions, OpportunitySearchItem, OpportunitySearchResponse, SearchParams } from '../pages/opportunities/types.ts'
 import { parseSearchParams, serializeSearchParams } from '../pages/opportunities/searchParams.ts'
+import { keepPreviousData } from '@tanstack/react-query'
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -26,9 +27,26 @@ export function isSearchResponse(value: unknown): value is OpportunitySearchResp
 
 export async function searchOpportunities(params: SearchParams, signal?: AbortSignal): Promise<OpportunitySearchResponse> {
   const safe = parseSearchParams(serializeSearchParams(params)).params
-  const response = await apiClient.get<unknown>('/opportunities', { params: serializeSearchParams(safe), signal })
+  const requestParams = serializeSearchParams(safe)
+  // 검색 화면의 기본값(10)은 서버 기본값(20)과 달라 명시적으로 전달한다.
+  requestParams.set('size', String(safe.size))
+  const response = await apiClient.get<unknown>('/opportunities', {
+    params: requestParams, signal,
+    ...(safe.eligibilityStatuses.length > 0 ? { requiresAuth: true } : {}),
+  })
   if (!isSearchResponse(response.data)) throw new ApiError('unknown', '검색 응답 형식을 확인할 수 없어요. 잠시 후 다시 시도해 주세요.')
   return response.data
+}
+
+export function searchQueryOptions(params: SearchParams, userId: number | null, enabled = true) {
+  return {
+    queryKey: ['opportunities', serializeSearchParams(params).toString(), userId] as const,
+    queryFn: ({ signal }: { signal: AbortSignal }) => searchOpportunities(params, signal),
+    enabled,
+    // 페이지·조건 변경에만 이전 결과를 사용하고 계정 변경에는 재사용하지 않는다.
+    placeholderData: (previous: OpportunitySearchResponse | undefined, query: { queryKey: readonly unknown[] } | undefined) =>
+      query?.queryKey[2] === userId ? keepPreviousData(previous) : undefined,
+  }
 }
 
 export async function getInterestOptions(signal?: AbortSignal): Promise<InterestOptions> {

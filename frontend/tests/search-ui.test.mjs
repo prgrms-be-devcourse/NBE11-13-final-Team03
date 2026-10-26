@@ -22,23 +22,28 @@ const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
 const { MemoryRouter } = require('react-router-dom')
 const { QueryClient, QueryClientProvider } = require('@tanstack/react-query')
+const { AuthContext } = require('../src/auth/AuthContext.ts')
 const Page = require('../src/pages/opportunities/OpportunitiesPage.tsx').default
 const Filters = require('../src/pages/opportunities/SearchFilters.tsx').default
+const RegionFilter = require('../src/pages/opportunities/SearchRegionFilter.tsx').default
 const { defaultSearchParams, parseSearchParams, serializeSearchParams } = require('../src/pages/opportunities/searchParams.ts')
 const { ApiError } = require('../src/api/ApiError.ts')
 const { searchErrorMessage } = require('../src/pages/opportunities/searchError.ts')
 
-function renderPage(data, url = '/opportunities', error) {
-  const params = parseSearchParams(new URL(url, 'http://localhost').searchParams).params
+function renderPage(data, url = '/opportunities', error, auth = { status: 'anonymous' }) {
+  let params = parseSearchParams(new URL(url, 'http://localhost').searchParams).params
+  if (auth.status === 'anonymous' && params.eligibilityStatuses.length) params = { ...params, eligibilityStatuses: [], page: 0 }
   const canonical = serializeSearchParams(params).toString()
+  const userId = auth.status === 'authenticated' ? auth.user.id : null
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, gcTime: Infinity, staleTime: Infinity } } })
-  if (data) client.setQueryData(['opportunities', canonical], data)
-  if (error) client.getQueryCache().build(client, { queryKey: ['opportunities', canonical] })
+  if (data) client.setQueryData(['opportunities', canonical, userId], data)
+  if (error) client.getQueryCache().build(client, { queryKey: ['opportunities', canonical, userId] })
     .setState({ status: 'error', error, fetchStatus: 'idle' })
   client.setQueryData(['interest-options'], { categories: [] })
+  client.setQueryData(['regions'], [])
   try {
     return renderToStaticMarkup(React.createElement(MemoryRouter, { initialEntries: [url] },
-      React.createElement(QueryClientProvider, { client }, React.createElement(Page))))
+      React.createElement(QueryClientProvider, { client }, React.createElement(AuthContext.Provider, { value: auth }, React.createElement(Page)))))
   } finally { client.clear() }
 }
 
@@ -46,7 +51,7 @@ const item = { opportunityId: 42, type: 'YOUTH_POLICY', title: '테스트 전용
   subCategory: null, detailCategory: null, createdAt: '2026-10-25T09:00:00', eligibilityStatus: null, saved: false }
 const data = { content: [item], page: 0, size: 20, totalElements: 1, totalPages: 1, hasNext: false }
 
-test('result markup renders only supplied fields, read-only saved state and existing detail link', () => {
+test('result markup renders only supplied fields, accessible bookmark state and existing detail link', () => {
   const html = renderPage(data)
   assert.match(html, /테스트 전용 검색 결과/)
   assert.match(html, /href="\/opportunities\/42"/)
@@ -55,6 +60,61 @@ test('result markup renders only supplied fields, read-only saved state and exis
   assert.doesNotMatch(html, /판정 불가/)
   assert.match(renderPage({ ...data, content: [{ ...item, eligibilityStatus: 'UNKNOWN', saved: true }] }), /판정 불가/)
   assert.match(renderPage({ ...data, content: [{ ...item, saved: true }] }), /저장됨/)
+})
+
+test('search cards follow home type colors and classification rules without visible save labels', () => {
+  const training = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: ' 교육･직업훈련 ', subCategory: '직업훈련', detailCategory: '정보기술' }] })
+  assert.match(training, /class="type" data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
+  assert.match(training, /class="category">교육･직업훈련<\/p>/)
+  assert.doesNotMatch(training, /교육･직업훈련 · 직업훈련|정보기술/)
+  const policy = renderPage({ ...data, content: [{ ...item, category: ' 일자리 ', subCategory: '일자리', detailCategory: ' 취업지원 ' }] })
+  assert.match(policy, /class="category">일자리 · 취업지원<\/p>/)
+  const missing = renderPage({ ...data, content: [{ ...item, category: ' ', subCategory: null, detailCategory: '' }] })
+  assert.doesNotMatch(missing, /class="category"|분류 미확인/)
+  assert.match(policy, /<a(?=[^>]*class="iconButton")(?=[^>]*href="\/login\?returnTo=%2Fopportunities")(?=[^>]*aria-label="테스트 전용 검색 결과 저장 안 함, 저장하려면 로그인")[^>]*>/)
+  const authenticated = renderPage({ ...data, content: [{ ...item, saved: true }] }, '/opportunities', undefined, { status: 'authenticated', user: { id: 11 } })
+  assert.match(authenticated, /aria-label="테스트 전용 검색 결과 저장 해제" aria-pressed="true"/)
+  assert.match(authenticated, /fill="currentColor"/)
+  assert.doesNotMatch(authenticated, />저장됨<|>저장 해제<|>저장 안 함<|>저장하려면 로그인</)
+  const css = fs.readFileSync(new URL('../src/pages/opportunities/OpportunitiesPage.module.css', import.meta.url), 'utf8')
+  assert.match(css, /data-opportunity-type='VOCATIONAL_TRAINING'[\s\S]*?var\(--color-accent-blue\)/)
+})
+
+const regionOptions = [
+  { value: '4100000000', label: '테스트 도', parentValue: null, isLeaf: false },
+  { value: '4111000000', label: '테스트 시', parentValue: '4100000000', isLeaf: false },
+  { value: '4111100000', label: '테스트 구', parentValue: '4111000000', isLeaf: true },
+]
+test('search region selects restore every hierarchy level and distinguish loading, error, empty and missing selections', () => {
+  const render = (source, value = '') => renderToStaticMarkup(React.createElement(RegionFilter, { source, value, onChange: () => {} }))
+  const ready = render({ status: 'ready', options: regionOptions }, '4111000000')
+  assert.match(ready, /value="4100000000" selected=""/)
+  assert.match(ready, /value="4111000000" selected=""/)
+  assert.match(ready, /value="4111100000"/)
+  assert.match(ready, /선택한 상위 지역 전체/)
+  assert.doesNotMatch(ready, /말단 지역만|준비 중|학교 소재지/)
+  assert.match(render({ status: 'loading' }), /지역 목록을 불러오는 중/)
+  assert.match(render({ status: 'error', onRetry: () => {} }), /role="alert"[\s\S]*지역 목록 다시 불러오기/)
+  assert.match(render({ status: 'ready', options: [] }), /선택할 수 있는 지역이 없어요/)
+  const shortCodes = render({ status: 'ready', options: [{ value: '11', label: '서울특별시', parentValue: null, isLeaf: true }] })
+  assert.match(shortCodes, /value="11">서울특별시<\/option>/)
+  assert.doesNotMatch(shortCodes, /지역 코드 형식을 확인할 수 없어요/)
+  assert.match(render({ status: 'ready', options: regionOptions }, '9999999999'), /현재 목록에 없어요/)
+})
+
+test('only verified users see eligibility checkboxes and auth-unresolved URLs do not show cached search data', () => {
+  const auth = { status: 'authenticated', user: { id: 11 } }
+  const html = renderPage(data, '/opportunities?eligibilityStatuses=ELIGIBLE,UNKNOWN', undefined, auth)
+  assert.match(html, /<legend>신청 가능성<\/legend>/)
+  assert.equal((html.match(/type="checkbox"/g) ?? []).length, 4)
+  assert.equal((html.match(/type="checkbox" checked=""/g) ?? []).length, 2)
+  const anonymous = renderPage(data, '/opportunities?eligibilityStatuses=ELIGIBLE')
+  assert.doesNotMatch(anonymous, /<legend>신청 가능성<\/legend>|준비 중|로그인 기능과 함께|초기화한 조건도/)
+  for (const status of ['checking', 'error']) {
+    const pending = renderPage(data, '/opportunities?eligibilityStatuses=ELIGIBLE', undefined, { status, user: { id: 11 } })
+    assert.doesNotMatch(pending, /테스트 전용 검색 결과|<legend>신청 가능성<\/legend>/)
+    assert.match(pending, /로그인 상태/)
+  }
 })
 
 test('loading, no results and server error produce separate accessible states', () => {
@@ -93,7 +153,7 @@ test('applied OPEN label distinguishes policy recruitment from training start-da
   const training = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING' }] },
     '/opportunities?type=VOCATIONAL_TRAINING&applicationStatus=OPEN&startDateFrom=2026-10-25')
   assert.match(training, /aria-label="적용된 검색 조건"><span>직업훈련<\/span><span>개강 예정<\/span><span>교육 시작일 2026-10-25부터<\/span>/)
-  assert.match(training, /실제 모집기간과 별개로/)
+  assert.match(training, /교육 시작일 기준/)
 })
 
 test('mobile filter disclosure points to labelled dialog; pagination presents 0-based page as human page', () => {
@@ -105,6 +165,7 @@ test('mobile filter disclosure points to labelled dialog; pagination presents 0-
 })
 
 const categoryOptions = { categories: [
+  { category: '교육', subCategories: [] },
   { category: '일자리', subCategories: [{ subCategory: '취업지원', detailCategories: [] }] },
   { category: '교육･직업훈련', subCategories: [
     { subCategory: '정보통신', detailCategories: ['정보기술'] },
@@ -120,6 +181,18 @@ function renderFilters(applied = defaultSearchParams(), props = {}) {
 function classificationSelects(html) {
   return [...html.matchAll(/<select\b[^>]*>[\s\S]*?<\/select>/g)].slice(2, 5).map(([markup]) => markup)
 }
+
+test('education label stays distinct from training and category choices follow the selected opportunity type', () => {
+  const all = classificationSelects(renderFilters())[0]
+  assert.match(all, /value="교육">교육 \(정책\)<\/option>/)
+  assert.match(all, /value="교육･직업훈련"/)
+  const policy = classificationSelects(renderFilters({ ...defaultSearchParams(), type: 'YOUTH_POLICY' }))[0]
+  assert.match(policy, /교육 \(정책\)/)
+  assert.doesNotMatch(policy, /교육･직업훈련/)
+  const training = classificationSelects(renderFilters({ ...defaultSearchParams(), type: 'VOCATIONAL_TRAINING' }))[0]
+  assert.match(training, /value="교육･직업훈련"/)
+  assert.doesNotMatch(training, /value="교육"|value="일자리"/)
+})
 
 test('classification selects expose only children of selected parents; policy with no detail disables detail selection', () => {
   const initial = classificationSelects(renderFilters())

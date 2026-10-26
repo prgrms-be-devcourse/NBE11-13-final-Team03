@@ -1,4 +1,30 @@
-import type { ApplicationStatus, SearchParams, SearchSort } from './types.ts'
+import type { ApplicationStatus, OpportunitySearchItem, SearchParams, SearchSort } from './types.ts'
+import type { EligibilityStatus } from '../../components/ui/StatusBadge.tsx'
+
+export const eligibilityStatuses: EligibilityStatus[] = ['ELIGIBLE', 'POSSIBLY_ELIGIBLE', 'NOT_ELIGIBLE', 'UNKNOWN']
+
+export function isSearchRegionCode(value: string): boolean {
+  // 개발 지역 사전의 시·도 코드와 전체 법정동 코드를 원문 그대로 허용한다.
+  return /^(?:\d{2}|\d{10})$/.test(value)
+}
+
+// InterestOptionController의 직업훈련 대분류. 표시 이름과 달리 요청 값은 원문을 유지한다.
+export function categoryMatchesType(category: string, type: SearchParams['type']): boolean {
+  if (!type || !category) return true
+  const training = category === '교육･직업훈련'
+  return type === 'VOCATIONAL_TRAINING' ? training : !training
+}
+
+export function categoryDisplayLabel(category: string): string {
+  return category === '교육' ? '교육 (정책)' : category
+}
+
+export function classificationLabel(item: Pick<OpportunitySearchItem, 'type' | 'category' | 'subCategory' | 'detailCategory'>): string {
+  const labels = [item.category, item.subCategory, item.detailCategory]
+    .map(value => value?.trim()).filter((value): value is string => !!value)
+  if (item.type === 'VOCATIONAL_TRAINING') return labels[0] ?? ''
+  return [...new Set(labels)].join(' · ')
+}
 
 export const typeLabels = { YOUTH_POLICY: '청년정책', VOCATIONAL_TRAINING: '직업훈련' }
 export const statusLabels: Record<ApplicationStatus, string> = {
@@ -17,9 +43,9 @@ export function applicationStatusLabel(status: ApplicationStatus, type: SearchPa
 
 export function defaultSearchParams(): SearchParams {
   return {
-    keyword: '', type: '', category: '', subCategory: '', detailCategory: '', applicationStatus: '',
+    keyword: '', type: '', category: '', subCategory: '', detailCategory: '', region: '', eligibilityStatuses: [], applicationStatus: '',
     deadlineFrom: '', deadlineTo: '', startDateFrom: '', startDateTo: '',
-    sort: 'LATEST', page: 0, size: 20,
+    sort: 'LATEST', page: 0, size: 10,
   }
 }
 
@@ -31,6 +57,7 @@ export function availableSorts(type: SearchParams['type']): SearchSort[] {
 export function changeSearchType(params: SearchParams, type: SearchParams['type']): SearchParams {
   return {
     ...params, type, page: 0,
+    ...(!categoryMatchesType(params.category, type) ? { category: '', subCategory: '', detailCategory: '' } : {}),
     deadlineFrom: type === 'YOUTH_POLICY' ? params.deadlineFrom : '',
     deadlineTo: type === 'YOUTH_POLICY' ? params.deadlineTo : '',
     startDateFrom: type === 'VOCATIONAL_TRAINING' ? params.startDateFrom : '',
@@ -92,21 +119,27 @@ export function parseSearchParams(url: URLSearchParams): { params: SearchParams;
     params.deadlineFrom = params.deadlineTo = params.startDateFrom = params.startDateTo = ''
     invalid()
   }
-  if (url.get('eligibilityStatuses')) notices.push('신청 가능성 필터는 로그인 연동 전이라 적용하지 않았어요.')
-  if (url.get('region')) notices.push('지역 필터는 유효한 지역 목록이 연결되기 전이라 적용하지 않았어요.')
+  const region = url.get('region')
+  if (region && isSearchRegionCode(region)) params.region = region
+  else if (region) invalid()
+  const requestedStatuses = url.getAll('eligibilityStatuses').flatMap(value => value.split(','))
+  params.eligibilityStatuses = eligibilityStatuses.filter(status => requestedStatuses.includes(status))
+  if (requestedStatuses.some(status => !eligibilityStatuses.includes(status as EligibilityStatus))) invalid()
   return { params, notices }
 }
 
 // URL과 API에 같은 직렬화를 사용한다. 기본값·빈 값은 생략한다.
 export function serializeSearchParams(params: SearchParams): URLSearchParams {
   const url = new URLSearchParams()
-  for (const key of ['keyword', 'type', 'category', 'subCategory', 'detailCategory', 'applicationStatus',
+  for (const key of ['keyword', 'type', 'category', 'subCategory', 'detailCategory', 'region', 'applicationStatus',
     'deadlineFrom', 'deadlineTo', 'startDateFrom', 'startDateTo'] as const) {
     if (params[key].trim()) url.set(key, key === 'keyword' ? params[key].trim() : params[key])
   }
+  const selected = eligibilityStatuses.filter(status => params.eligibilityStatuses.includes(status))
+  if (selected.length) url.set('eligibilityStatuses', selected.join(','))
   if (params.sort !== 'LATEST') url.set('sort', params.sort)
   if (params.page !== 0) url.set('page', String(params.page))
-  if (params.size !== 20) url.set('size', String(params.size))
+  if (params.size !== 10) url.set('size', String(params.size))
   return url
 }
 

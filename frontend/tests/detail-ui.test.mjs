@@ -141,7 +141,7 @@ test('detail back link preserves supplied search state and remains usable on dir
 test('search result Link carries the current search URL into detail navigation state', () => {
   const client = new QueryClient()
   const query = 'keyword=test&page=2'
-  client.setQueryData(['opportunities', query], { content: [{ ...policy, eligibilityStatus: null, detailCategory: null }], page: 2, size: 20, totalElements: 60, totalPages: 3, hasNext: false })
+  client.setQueryData(['opportunities', query, null], { content: [{ ...policy, eligibilityStatus: null, detailCategory: null }], page: 2, size: 20, totalElements: 60, totalPages: 3, hasNext: false })
   client.setQueryData(['interest-options'], { categories: [] })
   // DOM 클릭 대신 실제 JSX의 Link에 전달되는 state를 확인한다.
   const originalLink = require('react-router-dom').Link

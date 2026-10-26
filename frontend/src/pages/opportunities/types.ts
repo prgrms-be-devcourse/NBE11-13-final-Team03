@@ -10,6 +10,8 @@ export type SearchParams = {
   category: string
   subCategory: string
   detailCategory: string
+  region: string
+  eligibilityStatuses: EligibilityStatus[]
   applicationStatus: ApplicationStatus | ''
   deadlineFrom: string
   deadlineTo: string

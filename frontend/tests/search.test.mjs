@@ -4,8 +4,9 @@ import { AxiosError } from 'axios'
 import { QueryClient, QueryObserver } from '@tanstack/react-query'
 import { apiClient } from '../src/api/client.ts'
 import { ApiError } from '../src/api/ApiError.ts'
-import { getInterestOptions, isSearchResponse, searchOpportunities } from '../src/api/opportunities.ts'
+import { getInterestOptions, isSearchResponse, searchOpportunities, searchQueryOptions } from '../src/api/opportunities.ts'
 import { availableSorts, changeSearchCategory, changeSearchConditions, changeSearchType, dateRangeError, defaultSearchParams, isValidDate, paginationPages, parseSearchParams, serializeSearchParams } from '../src/pages/opportunities/searchParams.ts'
+import { buildRegionTree, chooseRegionLevel, regionPath } from '../src/pages/profile/regionSelection.ts'
 
 const originalAdapter = apiClient.defaults.adapter
 afterEach(() => { apiClient.defaults.adapter = originalAdapter })
@@ -38,7 +39,7 @@ test('malformed enums, non-integer/overflow pages and sizes normalize safely', (
   for (const page of ['-1', '1.2', 'NaN', 'Infinity', '2147483648', '1e3', '01']) {
     assert.equal(parseSearchParams(new URLSearchParams({ page })).params.page, 0)
   }
-  for (const size of ['0', '-1', '101', '1.2']) assert.equal(parseSearchParams(new URLSearchParams({ size })).params.size, 20)
+  for (const size of ['0', '-1', '101', '1.2']) assert.equal(parseSearchParams(new URLSearchParams({ size })).params.size, 10)
   for (const size of ['1', '100']) assert.equal(parseSearchParams(new URLSearchParams({ size })).params.size, Number(size))
   const parsed = parseSearchParams(new URLSearchParams('type=OTHER&sort=FAST&applicationStatus=ELIGIBLE'))
   assert.equal(parsed.params.type, '')
@@ -75,6 +76,22 @@ test('type changes remove incompatible dates and sorting before sending', () => 
   assert.equal(parsed.params.sort, 'LATEST')
 })
 
+test('type changes clear incompatible classification descendants and keep original education request values', async () => {
+  const policy = { ...defaultSearchParams(), type: 'YOUTH_POLICY', category: '교육', subCategory: '정책 하위 분류', detailCategory: '정책 세부 분류' }
+  const changed = changeSearchType(policy, 'VOCATIONAL_TRAINING')
+  assert.equal(changed.category, '')
+  assert.equal(changed.subCategory, '')
+  assert.equal(changed.detailCategory, '')
+  const training = { ...changed, category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술' }
+  assert.equal(changeSearchType(training, 'YOUTH_POLICY').category, '')
+  assert.equal(changeSearchType(training, '').category, '교육･직업훈련')
+  apiClient.defaults.adapter = async config => {
+    assert.equal(config.params.get('category'), '교육')
+    return response(config, empty())
+  }
+  await searchOpportunities(policy)
+})
+
 test('conditions reset the page; pagination keeps filters; full reset includes keyword', () => {
   const current = { ...defaultSearchParams(), keyword: '청년', category: '취업', page: 5 }
   const next = changeSearchConditions(current, { applicationStatus: 'OPEN' })
@@ -89,10 +106,106 @@ test('conditions reset the page; pagination keeps filters; full reset includes k
   assert.deepEqual(paginationPages(0, 0), [])
 })
 
-test('unsupported region and authenticated eligibility URL filters are removed with notices', () => {
-  const parsed = parseSearchParams(new URLSearchParams('region=1100000000&eligibilityStatuses=ELIGIBLE'))
-  assert.equal(serializeSearchParams(parsed.params).toString(), '')
-  assert.equal(parsed.notices.length, 2)
+test('region codes and multiple eligibility statuses survive canonical URL round trip without shortening codes', () => {
+  const parsed = parseSearchParams(new URLSearchParams('region=1100000000&eligibilityStatuses=UNKNOWN,ELIGIBLE&eligibilityStatuses=ELIGIBLE'))
+  assert.equal(parsed.params.region, '1100000000')
+  assert.deepEqual(parsed.params.eligibilityStatuses, ['ELIGIBLE', 'UNKNOWN'])
+  assert.deepEqual(parseSearchParams(serializeSearchParams(parsed.params)).params, parsed.params)
+  assert.equal(parsed.notices.length, 0)
+  for (const region of ['1100000000x', ' 1100000000', '1', '111']) assert.equal(parseSearchParams(new URLSearchParams({ region })).params.region, '')
+  assert.deepEqual(parseSearchParams(new URLSearchParams('eligibilityStatuses=OTHER,ELIGIBLE')).params.eligibilityStatuses, ['ELIGIBLE'])
+})
+
+test('API-provided two-digit province codes survive URL and request serialization unchanged', async () => {
+  for (const region of ['11', '26', '41', '1100000000']) {
+    const params = parseSearchParams(new URLSearchParams({ region })).params
+    assert.equal(params.region, region)
+    assert.equal(serializeSearchParams(params).get('region'), region)
+    apiClient.defaults.adapter = async config => {
+      assert.equal(config.params.get('region'), region)
+      return response(config, empty())
+    }
+    await searchOpportunities(params)
+  }
+})
+
+test('region hierarchy permits provinces and intermediate cities, clears descendants and sends the exact selected code', async () => {
+  const tree = buildRegionTree([
+    { value: '4100000000', label: '테스트 도', parentValue: null, isLeaf: false },
+    { value: '4111000000', label: '테스트 시', parentValue: '4100000000', isLeaf: false },
+    { value: '4111100000', label: '테스트 구', parentValue: '4111000000', isLeaf: true },
+    { value: '3611000000', label: '세종특별자치시', parentValue: null, isLeaf: true },
+  ])
+  const province = chooseRegionLevel(tree, [], 0, '4100000000', 'school')
+  assert.equal(province.value, '4100000000')
+  const city = chooseRegionLevel(tree, province.path, 1, '4111000000', 'school')
+  assert.equal(city.value, '4111000000')
+  const district = chooseRegionLevel(tree, city.path, 2, '4111100000', 'school')
+  assert.deepEqual(regionPath(tree, district.value), district.path)
+  assert.equal(chooseRegionLevel(tree, district.path, 2, '', 'school').value, city.value)
+  assert.deepEqual(chooseRegionLevel(tree, district.path, 0, '3611000000', 'school'), { path: ['3611000000'], value: '3611000000' })
+  apiClient.defaults.adapter = async config => {
+    assert.equal(config.params.get('region'), city.value)
+    assert.equal(config.requiresAuth, undefined)
+    return response(config, empty())
+  }
+  await searchOpportunities({ ...defaultSearchParams(), region: city.value })
+  const changed = changeSearchConditions({ ...defaultSearchParams(), region: city.value, page: 4 }, { region: province.value })
+  assert.equal(changed.page, 0)
+  assert.equal(changed.region, province.value)
+})
+
+test('eligibility filter sends comma-separated real enums with auth recovery; an empty result triggers no judgment API', async () => {
+  let calls = 0
+  apiClient.defaults.adapter = async config => {
+    calls++
+    assert.equal(config.url, '/opportunities')
+    assert.equal(config.requiresAuth, true)
+    assert.equal(config.params.get('eligibilityStatuses'), 'ELIGIBLE,POSSIBLY_ELIGIBLE,NOT_ELIGIBLE,UNKNOWN')
+    return response(config, empty())
+  }
+  const params = { ...defaultSearchParams(), eligibilityStatuses: ['UNKNOWN', 'NOT_ELIGIBLE', 'ELIGIBLE', 'POSSIBLY_ELIGIBLE'] }
+  assert.deepEqual(await searchOpportunities(params), empty())
+  assert.equal(calls, 1)
+})
+
+test('real search observer isolates accounts, cancels late responses and does not carry authenticated placeholders into public results', async () => {
+  const params = { ...defaultSearchParams(), eligibilityStatuses: ['ELIGIBLE'] }
+  const firstStarted = deferred(), firstFinish = deferred(), secondStarted = deferred(), secondFinish = deferred(), publicStarted = deferred(), publicFinish = deferred()
+  let firstSignal, call = 0
+  apiClient.defaults.adapter = async config => {
+    call++
+    if (call === 1) { firstSignal = config.signal; firstStarted.resolve(); await firstFinish.promise; return response(config, empty(11)) }
+    if (call === 2) { secondStarted.resolve(); await secondFinish.promise; return response(config, empty(22)) }
+    assert.equal(config.params.get('eligibilityStatuses'), null)
+    assert.equal(config.requiresAuth, undefined)
+    publicStarted.resolve(); await publicFinish.promise; return response(config, empty(0))
+  }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
+  const observer = new QueryObserver(client, searchQueryOptions(params, 11))
+  const unsubscribe = observer.subscribe(() => {})
+  try {
+    await firstStarted.promise
+    observer.setOptions(searchQueryOptions(params, 22))
+    await secondStarted.promise
+    assert.equal(firstSignal.aborted, true)
+    assert.equal(observer.getCurrentResult().data, undefined)
+    firstFinish.resolve(); secondFinish.resolve()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(observer.getCurrentResult().data.page, 22)
+    observer.setOptions(searchQueryOptions(defaultSearchParams(), null))
+    await publicStarted.promise
+    assert.equal(observer.getCurrentResult().data, undefined)
+    publicFinish.resolve()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(observer.getCurrentResult().data.page, 0)
+    assert.notDeepEqual(searchQueryOptions(params, 11).queryKey, searchQueryOptions(params, 22).queryKey)
+    const unresolved = new QueryObserver(client, searchQueryOptions(params, null, false))
+    const stop = unresolved.subscribe(() => {})
+    assert.equal(unresolved.getCurrentResult().fetchStatus, 'idle')
+    stop()
+    assert.equal(call, 3)
+  } finally { firstFinish.resolve(); secondFinish.resolve(); publicFinish.resolve(); unsubscribe(); client.clear() }
 })
 
 test('public search uses /api once, a cancellation signal and normalized params without reissue opt-in', async () => {
@@ -106,6 +219,7 @@ test('public search uses /api once, a cancellation signal and normalized params 
     assert.equal(config.signal, controller.signal)
     assert.equal(config.headers.get('X-XSRF-TOKEN'), undefined)
     assert.equal(config.params.get('deadlineFrom'), null)
+    assert.equal(config.params.get('size'), '10')
     return response(config, empty())
   }
   assert.deepEqual(await searchOpportunities({ ...defaultSearchParams(), deadlineFrom: '2026-10-25' }, controller.signal), empty())

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Search, SlidersHorizontal, X } from 'lucide-react'
 import Button from '../../components/ui/Button'
 import TextField from '../../components/ui/TextField'
@@ -10,9 +10,12 @@ import AsyncState from '../../components/ui/AsyncState'
 import StatusBadge from '../../components/ui/StatusBadge'
 import PreferenceActions from '../../components/opportunities/PreferenceActions'
 import { searchErrorMessage } from './searchError'
-import { getInterestOptions, searchOpportunities } from '../../api/opportunities'
+import { getInterestOptions, searchQueryOptions } from '../../api/opportunities'
+import { regionsQuery } from '../../api/regions'
+import type { RegionSource } from '../profile/regionSelection'
+import { AuthContext } from '../../auth/AuthContext'
 import SearchFilters from './SearchFilters'
-import { applicationStatusLabel, availableSorts, changeSearchConditions, defaultSearchParams, paginationPages, parseSearchParams, serializeSearchParams, sortLabels, typeLabels } from './searchParams'
+import { applicationStatusLabel, availableSorts, categoryDisplayLabel, changeSearchConditions, classificationLabel, defaultSearchParams, paginationPages, parseSearchParams, serializeSearchParams, sortLabels, typeLabels } from './searchParams'
 import type { SearchParams, SearchSort } from './types'
 import styles from './OpportunitiesPage.module.css'
 
@@ -25,7 +28,10 @@ function OpportunitiesPage() {
   const [url, setUrl] = useSearchParams()
   const location = useLocation()
   const parsed = useMemo(() => parseSearchParams(url), [url])
-  const { params } = parsed
+  const auth = useContext(AuthContext)
+  const userId = auth?.status === 'authenticated' ? auth.user?.id ?? null : null
+  const params = auth?.status === 'anonymous' && parsed.params.eligibilityStatuses.length
+    ? { ...parsed.params, eligibilityStatuses: [], page: 0 } : parsed.params
   const canonical = serializeSearchParams(params).toString()
   const notices = parsed.notices.length ? parsed.notices : readNotices(location.state)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -50,14 +56,14 @@ function OpportunitiesPage() {
     }
   }, [filtersOpen])
 
-  const results = useQuery({
-    queryKey: ['opportunities', canonical],
-    queryFn: ({ signal }) => searchOpportunities(params, signal),
-    placeholderData: keepPreviousData,
-  })
+  const results = useQuery(searchQueryOptions(params, userId, !params.eligibilityStatuses.length || userId !== null))
   const options = useQuery({
     queryKey: ['interest-options'], queryFn: ({ signal }) => getInterestOptions(signal), staleTime: 5 * 60_000,
   })
+  const regionQuery = useQuery(regionsQuery())
+  const regions: RegionSource = regionQuery.isError
+    ? { status: 'error', onRetry: () => { void regionQuery.refetch() } }
+    : regionQuery.isPending ? { status: 'loading' } : { status: 'ready', options: regionQuery.data }
 
   function apply(next: SearchParams) {
     setUrl(serializeSearchParams(changeSearchConditions(params, next)))
@@ -77,6 +83,7 @@ function OpportunitiesPage() {
   const filterProps = {
     applied: params, options: options.data, optionsLoading: options.isPending, optionsError: options.isError ? options.error : undefined,
     onRetryOptions: () => { void options.refetch() }, onApply: apply,
+    regions, authenticated: userId !== null,
   }
   const data = results.data
   const loading = results.isPending || results.isPlaceholderData
@@ -108,7 +115,7 @@ function OpportunitiesPage() {
       <div className={styles.columns}>
         <aside className={styles.sidebar} aria-labelledby="filters-heading">
           <h2 id="filters-heading">검색 필터</h2>
-          <SearchFilters key={canonical} {...filterProps} />
+          <SearchFilters key={`${userId}:${canonical}`} {...filterProps} />
         </aside>
         <div className={styles.results} aria-busy={results.isFetching}>
           <div className={styles.resultToolbar}>
@@ -121,12 +128,15 @@ function OpportunitiesPage() {
           </div>
           <div className={styles.applied}>
             <div className={styles.chips} aria-label="적용된 검색 조건">
-              {[params.keyword && `‘${params.keyword}’`, params.type ? typeLabels[params.type] : '전체 유형', params.category, params.subCategory, params.detailCategory, params.applicationStatus && applicationStatusLabel(params.applicationStatus, params.type), ...appliedDates].filter(Boolean).map((value, index) => <span key={index}>{value}</span>)}
+              {[params.keyword && `‘${params.keyword}’`, params.type ? typeLabels[params.type] : '전체 유형', categoryDisplayLabel(params.category), params.subCategory, params.detailCategory, params.applicationStatus && applicationStatusLabel(params.applicationStatus, params.type), ...appliedDates].filter(Boolean).map((value, index) => <span key={index}>{value}</span>)}
+              {params.region && <span>{regionQuery.data?.find(region => region.value === params.region)?.label ?? params.region}</span>}
+              {userId !== null && params.eligibilityStatuses.map(status => <StatusBadge key={status} status={status} />)}
             </div>
             <Button variant="ghost" onClick={() => { searchFormRef.current?.reset(); apply(defaultSearchParams()) }}>전체 초기화</Button>
           </div>
           {params.applicationStatus === 'OPEN' && params.type !== 'YOUTH_POLICY' && <p className={styles.help}>직업훈련은 실제 모집기간과 별개로, 교육 시작일 기준의 개강 예정 검색을 포함해요.</p>}
-          {loading ? <AsyncState status="loading" title={results.isPlaceholderData ? '변경한 조건으로 검색하고 있어요' : '검색 결과를 불러오는 중이에요'} />
+          {params.eligibilityStatuses.length > 0 && userId === null ? <AsyncState status={auth?.status === 'error' ? 'error' : 'loading'} title={auth?.status === 'error' ? '로그인 상태를 다시 확인해 주세요' : '로그인 상태를 확인하고 있어요'} />
+            : loading ? <AsyncState status="loading" title={results.isPlaceholderData ? '변경한 조건으로 검색하고 있어요' : '검색 결과를 불러오는 중이에요'} />
             : results.isError ? <AsyncState status="error" {...searchErrorMessage(results.error)} onRetry={() => { void results.refetch() }} />
               : data && data.content.length === 0 ? <>
                 <AsyncState status="empty" title={data.totalElements > 0 ? '이 페이지에는 결과가 없어요' : '조건에 맞는 기회를 찾지 못했어요'}
@@ -137,9 +147,9 @@ function OpportunitiesPage() {
                 <ul className={styles.resultList}>
                   {data.content.map((item) => <li key={item.opportunityId}>
                     <Card className={styles.resultCard}>
-                      <div className={styles.cardMeta}><span className={styles.type}>{typeLabels[item.type]}</span><PreferenceActions opportunityId={item.opportunityId} title={item.title} saved={item.saved} source="SEARCH" disabled={results.isFetching} /></div>
+                      <div className={styles.cardMeta}><span className={styles.type} data-opportunity-type={item.type}>{typeLabels[item.type]}</span><PreferenceActions opportunityId={item.opportunityId} title={item.title} saved={item.saved} source="SEARCH" disabled={results.isFetching} iconOnly /></div>
                       <h3><Link to={`/opportunities/${item.opportunityId}`} state={{ searchReturn: `/opportunities${canonical ? `?${canonical}` : ''}` }}>{item.title || '제목 미확인'}</Link></h3>
-                      <p className={styles.category}>{[item.category, item.subCategory, item.detailCategory].filter(Boolean).join(' · ') || '분류 미확인'}</p>
+                      {classificationLabel(item) && <p className={styles.category}>{classificationLabel(item)}</p>}
                       <div className={styles.cardFooter}>
                         {/^\d{4}-\d{2}-\d{2}T/.test(item.createdAt) && <span>최초 등록일 <time dateTime={item.createdAt}>{item.createdAt.slice(0, 10)}</time></span>}
                         {item.eligibilityStatus !== null && <StatusBadge status={item.eligibilityStatus} />}
@@ -162,7 +172,7 @@ function OpportunitiesPage() {
       <dialog id="search-filter-dialog" ref={dialogRef} className={styles.dialog} aria-labelledby="mobile-filter-title"
         onClose={() => { setFiltersOpen(false); filterButtonRef.current?.focus() }}>
         <div className={styles.dialogHeader}><h2 id="mobile-filter-title">검색 필터</h2><Button variant="ghost" onClick={() => setFiltersOpen(false)} aria-label="검색 필터 닫기"><X size={20} aria-hidden="true" /></Button></div>
-        {filtersOpen && <SearchFilters key={canonical} {...filterProps} />}
+        {filtersOpen && <SearchFilters key={`${userId}:${canonical}`} {...filterProps} />}
       </dialog>
     </section>
   )

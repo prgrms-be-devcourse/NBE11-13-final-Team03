@@ -71,6 +71,11 @@
   min-inline-size: 0;
 }
 
+.resetFilters { align-self: flex-end; }
+.checkbox { display: flex; align-items: center; gap: var(--space-2); min-block-size: 2.75rem; cursor: pointer; }
+.checkbox input { inline-size: 1.1rem; block-size: 1.1rem; accent-color: var(--color-primary); }
+.srOnly { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
 .field {
   display: flex;
   flex-direction: column;
@@ -208,6 +213,7 @@
 
 .resultCard {
   padding: var(--space-4);
+  box-shadow: none;
 }
 
 .cardMeta,
@@ -222,15 +228,25 @@
   background: var(--color-primary-soft);
   color: var(--color-primary);
   font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.type[data-opportunity-type='VOCATIONAL_TRAINING'] {
+  background: var(--color-accent-blue);
+  color: var(--color-status-info-text);
 }
 
 .resultCard h3 {
-  margin: var(--space-3) 0 var(--space-2);
+  margin: var(--space-2) 0;
   font-size: 1.125rem;
   line-height: var(--line-height-body);
 }
 
 .resultCard h3 a {
+  display: block;
+  min-block-size: 2.75rem;
+  padding-block: var(--space-2);
+  overflow-wrap: anywhere;
   color: var(--color-text-primary);
   text-decoration: none;
 }
@@ -242,6 +258,7 @@
 
 .resultCard .category {
   font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
 }
 
 .cardFooter {
