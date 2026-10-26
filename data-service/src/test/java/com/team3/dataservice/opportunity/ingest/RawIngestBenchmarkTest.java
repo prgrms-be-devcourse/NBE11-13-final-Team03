@@ -115,6 +115,8 @@ class RawIngestBenchmarkTest {
     @Autowired
     private RegionDirectory regionDirectory;
     @Autowired
+    private com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache conditionSetIds;
+    @Autowired
     private PlatformTransactionManager transactionManager;
     @Autowired
     private DataSource dataSource;
@@ -253,6 +255,8 @@ class RawIngestBenchmarkTest {
                     + schema + ".regions ORDER BY parent_code NULLS FIRST, region_code");
         }
         regionDirectory.refresh();
+        // condition_sets를 비웠으므로 조건 묶음 ID 캐시도 비운다 (안 비우면 회차 2부터 지워진 ID를 쓰고 묶음 INSERT도 건너뜀)
+        conditionSetIds.clear();
         long[] syncIds = new long[2];
         long[] sourceIds = new long[2];
         tx.executeWithoutResult(s -> {

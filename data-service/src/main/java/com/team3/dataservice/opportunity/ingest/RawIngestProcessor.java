@@ -85,21 +85,31 @@ public class RawIngestProcessor {
         return Math.max(batchSize, transactionSize);
     }
 
-    /** PENDING 요청이 없을 때까지 묶음 단위로 처리한다. @return 처리한 요청 수 */
+    /**
+     * PENDING 요청이 없을 때까지 묶음 단위로 처리한다. @return 처리한 요청 수
+     * 한 번 호출 안에서는 마지막으로 선점한 요청 ID 뒤만 찾는다 (RawRecordReader.claimPending). 그보다 앞에서 다른 처리기가 잡고 있어
+     * 건너뛴 요청은 다음 호출(알림·폴링)이 처음부터 다시 찾는다.
+     */
     public int processQueue() {
         int total = 0;
         int claimed;
         int limit = fetchSize();
+        long afterId = 0;
         do {
             lock.lock();
+            Claimed result;
             try {
-                Integer count = claimTx.execute(status -> {
+                long from = afterId;
+                result = claimTx.execute(status -> {
                     relaxCommit();
-                    return processClaimedBatch(limit);
+                    return processClaimedBatch(from, limit);
                 });
-                claimed = count == null ? 0 : count;
             } finally {
                 lock.unlock();
+            }
+            claimed = result == null ? 0 : result.count();
+            if (result != null && result.lastRequestId() != null) {
+                afterId = result.lastRequestId();
             }
             total += claimed;
         } while (claimed == limit);
@@ -109,8 +119,11 @@ public class RawIngestProcessor {
         return total;
     }
 
-    private int processClaimedBatch(int limit) {
-        List<RawRecordRow> rows = reader.claimPending(limit);
+    private record Claimed(int count, Long lastRequestId) {
+    }
+
+    private Claimed processClaimedBatch(long afterId, int limit) {
+        List<RawRecordRow> rows = reader.claimPending(afterId, limit);
         List<Long> succeeded = new ArrayList<>();
         List<Long> failed = new ArrayList<>();
         List<RawRecordRow> targets = new ArrayList<>();
@@ -127,7 +140,7 @@ public class RawIngestProcessor {
         }
         reader.markStatus(succeeded, RawRecordReader.SUCCESS);
         reader.markStatus(failed, RawRecordReader.FAILED);
-        return rows.size();
+        return new Claimed(rows.size(), rows.isEmpty() ? null : rows.getLast().requestId());
     }
 
     /** 처리 기록이 없거나 해시가 다른 최신 원본을 모두 정규화한다. @return 정규화를 시도한 원본 수 */

@@ -33,7 +33,7 @@ public class RawRecordReader {
             JOIN raw_external_record r ON r.id = q.raw_record_id
             JOIN external_source s ON s.id = r.source_id
             LEFT JOIN raw_ingest_states st ON st.source_id = r.source_id AND st.raw_external_id = r.external_id
-            WHERE q.status = :pending
+            WHERE q.status = :pending AND q.id > :afterId
             ORDER BY q.id
             LIMIT :limit
             FOR UPDATE OF q SKIP LOCKED
@@ -93,8 +93,18 @@ public class RawRecordReader {
 
     /** PENDING 정제 요청을 id 순으로 선점한다. 호출 트랜잭션이 끝날 때까지 다른 처리기는 이 요청을 건너뛴다 */
     public List<RawRecordRow> claimPending(int limit) {
+        return claimPending(0, limit);
+    }
+
+    /**
+     * afterId보다 큰 요청만 선점한다. 한 번의 요청 처리 안에서 이미 처리한 구간을 다시 훑지 않게 한다:
+     * 처리한 요청은 status를 바꾸므로 (status, id) 인덱스에 vacuum 전까지 죽은 항목이 쌓이고, 매번 처음부터 찾으면 그 항목을 계속 지나친다
+     * (실데이터 14만 건 적재에서 선점 1회 평균 12ms, 처리량에 비례해 늘어남 — ingest 튜닝 E3).
+     */
+    public List<RawRecordRow> claimPending(long afterId, int limit) {
         return jdbc.query(CLAIM_PENDING, new MapSqlParameterSource()
                 .addValue("pending", PENDING)
+                .addValue("afterId", afterId)
                 .addValue("limit", limit), ROW);
     }
 
