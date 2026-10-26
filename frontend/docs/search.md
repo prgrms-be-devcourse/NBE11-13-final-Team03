@@ -7,7 +7,7 @@
 ## 실제 계약과 데이터
 
 - [검색 Controller](../../backend/src/main/java/com/team3/backend/search/controller/OpportunitySearchController.java)와 [Service](../../backend/src/main/java/com/team3/backend/search/service/OpportunitySearchService.java)의 최신 로컬 구현 및 관련 Controller 테스트를 확인했다. `GET /api/opportunities`는 `apiClient.get('/opportunities')`로 호출한다. 공개 요청이며 `requiresAuth`를 지정하지 않는다. 기존 인증·CSRF·재발급 코드는 변경하지 않았다.
-- [목록 DTO](../../backend/src/main/java/com/team3/backend/search/dto/OpportunitySearchItemDto.java)의 유형·ID·제목·대/중/세부 분류·최초 등록일·nullable 신청 가능성·저장 여부만 표시한다. null 판정과 실제 `UNKNOWN` 판정을 구분하고 저장 여부는 읽기 전용으로 표시한다. 숨김 공고도 검색에 포함된다.
+- [목록 DTO](../../backend/src/main/java/com/team3/backend/search/dto/OpportunitySearchItemDto.java)의 유형·ID·제목·대/중/세부 분류·최초 등록일·nullable 신청 가능성·저장 여부를 표시한다. null 판정과 실제 `UNKNOWN` 판정을 구분한다. [저장·해제](preferences.md)는 SEARCH 출처로 연결하며 숨김 공고도 검색에 포함된다.
 - [페이지 DTO](../../backend/src/main/java/com/team3/backend/search/dto/OpportunitySearchResponseDto.java)의 `page`, `size`, `totalElements`, `totalPages`, `hasNext`를 사용한다. API의 0-based 페이지를 화면에서 1-based 번호로 표시한다. 범위를 벗어난 빈 페이지에서는 첫 페이지로 돌아갈 수 있다.
 - 제목은 부분 일치, 분류는 정확히 일치한다. 실제 공개 `GET /api/interests/options`와 [분류 DTO](../../backend/src/main/java/com/team3/backend/interest/dto/InterestOptionsResponse.java)의 계층을 TanStack Query로 조회해 종속 선택형 필터를 제공한다. 이 목록은 유형별로 구분되지 않은 통합 목록이다. 대분류 선택 시 해당 중분류만, 중분류 선택 시 해당 세부 분류만 표시한다. 상위 분류 변경 시 하위 선택을 초기화하고 하위 목록이 없으면 선택을 비활성화한다. 분류 문자열의 공백·특수문자는 변경하지 않고 URL과 요청에 그대로 전달한다.
 - 분류 목록의 로딩·조회 실패·성공한 빈 목록을 구분한다. 조회 실패 시 선택을 비활성화하고 재시도 버튼을 제공하며 자유 입력이나 임의 목록으로 대체하지 않는다. URL에서 복원한 기존 조건은 유지한다. 옵션 조회 성공 후 해당 조건이 목록에 없거나 계층과 맞지 않으면 안내하고, 다시 선택하거나 초기화하기 전까지 필터 적용을 막는다.
@@ -30,7 +30,7 @@
 - 지역: [RegionDirectory](../../backend/src/main/java/com/team3/backend/region/directory/RegionDirectory.java)는 DB에 존재하는 코드로 유효성을 판단한다. 현재 공개 지역 옵션 API 또는 신뢰할 수 있는 고정 코드 목록이 없다. 지역명을 보고 코드를 추정하거나 임의 문자열을 전송하지 않는다. 화면에는 비활성 선택과 이유를 표시하고 URL의 `region`도 안내 후 제외한다. 후속 지역 검색을 위해 서버의 실제 유효 코드·이름·상위 코드 목록을 제공하는 공개 옵션 API가 필요하다.
 - 신청 가능성 필터: 신뢰할 수 있는 인증 상태가 없어 비노출로 유지한다. URL의 `eligibilityStatuses`도 안내 후 제외한다. 응답에 실제 판정이 있는 경우에만 배지를 표시하며 이를 로그인 상태 판정에 사용하지 않는다.
 - 목록의 모집 상태·신청 마감일·교육 시작일·지역명: 현재 목록 DTO에 없다. 등록일로 계산하거나 개별 상세 API를 다건 호출하지 않는다. 후속 카드에서 필요하면 해당 필드와 미확인 값의 의미를 목록 계약에 추가해야 한다.
-- 제목은 [기회 상세 화면](detail.md)으로 연결하며 현재 검색 조건과 페이지를 이동 state에 담는다. 로그인, 저장·숨김 변경, 추천·행동 이벤트·알림은 검색 구현에 포함하지 않는다.
+- 제목은 [기회 상세 화면](detail.md)으로 연결하며 현재 검색 조건과 페이지를 이동 state에 담는다. 후속 저장·해제와 로그인 복귀는 [저장·숨김 문서](preferences.md)를 따른다. 추천·행동 이벤트·알림은 검색 화면에서 구현하지 않는다.
 
 ## 검증 범위
 

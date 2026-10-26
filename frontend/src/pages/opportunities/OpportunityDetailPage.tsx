@@ -7,6 +7,7 @@ import type { ConditionType, RequirementType } from '../../api/opportunityDetail
 import Card from '../../components/ui/Card'
 import AsyncState from '../../components/ui/AsyncState'
 import StatusBadge from '../../components/ui/StatusBadge'
+import PreferenceActions from '../../components/opportunities/PreferenceActions'
 import { statusLabels, typeLabels } from './searchParams'
 import { applicationWindowText, conditionLabels, conditionPresentation, conditionResultLabels, dateRange, regionText, requirementLabels, safeExternalUrl, searchReturnPath, validationLabel } from './detailPresentation'
 import styles from './OpportunityDetailPage.module.css'
@@ -52,7 +53,7 @@ function OpportunityDetailPage() {
     <article className={styles.page} aria-labelledby="detail-title" aria-busy={query.isFetching}>
       {backLink}
       <Card className={styles.hero}>
-        <div className={styles.meta}><span className={styles.type}>{typeLabels[data.type]}</span><span>{data.saved ? '저장됨' : '저장 안 함'} · 읽기 전용</span></div>
+        <div className={styles.meta}><span className={styles.type}>{typeLabels[data.type]}</span><PreferenceActions opportunityId={data.opportunityId} title={data.title} saved={data.saved} source="OTHER" disabled={query.isFetching} /></div>
         <h1 id="detail-title">{data.title || '제목 미확인'}</h1>
         <p className={styles.muted}>{[data.category, data.subCategory].filter(Boolean).join(' · ') || '분류 정보 미제공'}</p>
         <div className={styles.statuses}>

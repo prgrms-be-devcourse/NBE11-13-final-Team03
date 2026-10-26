@@ -35,17 +35,25 @@ frontend/
 │   ├── favicon.png
 │   └── logo/yon-symbol.png
 ├── src/
-│   ├── api/            # apiClient, ApiError, queryClient, 인증·조회 API
-│   ├── auth/           # 사용자 Query·인증 전환·안전한 복귀 경로
-│   ├── components/ui/  # Button, Card, TextField, StatusBadge, AsyncState
-│   ├── layouts/        # AppLayout, Header 및 CSS Modules
-│   ├── pages/          # home, auth, opportunities 검색·상세, profile 설정, PlaceholderPage
-│   ├── routes/         # AppRoutes
+│   ├── api/                      # 공통 클라이언트·오류·Query 설정 및 화면별 API
+│   ├── auth/                     # 사용자 Query·인증 전환·복귀 경로
+│   ├── components/
+│   │   ├── ui/                   # Button, Card, TextField, StatusBadge, AsyncState
+│   │   └── opportunities/        # PreferenceActions·공통 저장·숨김 UI
+│   ├── layouts/                  # AppLayout·Header 및 CSS Modules
+│   ├── pages/
+│   │   ├── home/                 # 홈·개인화 추천
+│   │   ├── auth/                 # 로그인·OAuth 완료 화면
+│   │   ├── opportunities/        # 통합 검색·기회 상세
+│   │   ├── profile/              # 마이페이지·맞춤 조건·관심 분야·온보딩
+│   │   ├── saved/                # SavedOpportunitiesPage·저장 목록
+│   │   └── PlaceholderPage.tsx   # 미구현 화면·404 안내
+│   ├── routes/                   # AppRoutes
 │   ├── App.tsx
-│   ├── main.tsx        # BrowserRouter, QueryClientProvider
+│   ├── main.tsx                  # BrowserRouter·QueryClientProvider
 │   ├── tokens.css
 │   └── index.css
-├── tests/              # API 클라이언트 및 개발 프록시 테스트
+├── tests/              # API·화면·브라우저 모의·개발 프록시 테스트
 ├── .env.example
 ├── index.html
 ├── login-success.html
@@ -75,9 +83,25 @@ await apiClient.get('/opportunities')
 await apiClient.get('/users/me', { requiresAuth: true })
 ```
 
-## 현재 미구현 사항
+## 구현 현황 및 검증 범위
 
-저장·숨김 변경, 신청 가능성 검색 필터, 알림 기능은 구현하지 않았다. 공개 지역 API를 연결해 시·도부터 말단 지역까지 선택하고 프로필을 등록·수정할 수 있다. 지역 조회 실패·빈 목록에서는 신규 등록을 막고, 기존 지역을 유지한 다른 항목 수정과 관심 분야 설정은 허용한다. 현재 지역 DB는 개발용 임시 데이터 약 10건으로 구성되어 일부 지역만 반환되는 것이 예상된 동작이다. 전국 지역 데이터 적재 후 전체 선택과 실제 프로필 저장을 추가 검증한다. 저장 여부는 응답에 따른 읽기 전용 표시이며 저장 목록·알림 화면은 플레이스홀더다. 실제 카카오·인증된 서버 저장·배포 통합은 미검증이다.
+**구현 완료**
+
+검색·상세·홈에서 저장·해제, 개인화 추천에서 숨김, `/saved`에서 저장 목록을 제공한다.
+
+공개 지역 API를 연결해 시·도부터 말단 지역까지 선택하고 프로필을 등록·수정할 수 있다. 지역 조회 실패·빈 목록에서는 신규 등록을 막고, 기존 지역을 유지한 다른 항목 수정과 관심 분야 설정은 허용한다.
+
+**미구현**
+
+숨김 해제는 조회 API 부재로 UI를 제공하지 않는다. 신청 가능성 검색 필터와 알림은 미구현이다.
+
+**실서버 미검증**
+
+현재 지역 DB는 개발용 임시 데이터 약 10건으로 구성되어 일부 지역만 반환되는 것이 예상된 동작이다. 전국 지역 데이터 적재 후 전체 선택과 실제 프로필 저장을 추가 검증한다.
+
+실제 카카오 로그인과 배포 통합은 미검증이다. 허용된 테스트 세션이 없어 인증된 저장·해제·숨김 요청과 DB 반영은 검증하지 않았다. 모의 테스트 통과는 실제 서버 인증 통합 성공을 의미하지 않는다.
+
+저장·숨김 계약과 캐시 동기화·검증 범위는 [저장·숨김 문서](docs/preferences.md)를 참고한다.
 
 맞춤 조건·관심 분야 계약, 입력 정책과 지역 데이터 제한은 [프로필 문서](docs/profile.md)를 참고한다.
 

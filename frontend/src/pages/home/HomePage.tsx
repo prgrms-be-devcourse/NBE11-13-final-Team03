@@ -43,7 +43,7 @@ function HomePage() {
         : latest.isError ? <AsyncState status="error" {...homeErrorMessage(latest.error)} onRetry={() => { void latest.refetch() }} />
           : latest.data.content.length === 0 ? <AsyncState status="empty" title="아직 등록된 기회가 없어요" description="새로운 공고가 등록되면 이곳에서 확인할 수 있어요." />
             : <>{latest.isFetching && <p role="status" className={styles.help}>최근 등록된 기회를 새로 확인하고 있어요.</p>}
-              <ul className={styles.grid}>{latest.data.content.map((item) => <li key={item.opportunityId}><HomeOpportunityCard item={item} /></li>)}</ul></>}
+              <ul className={styles.grid}>{latest.data.content.map((item) => <li key={item.opportunityId}><HomeOpportunityCard item={item} disabled={latest.isFetching} /></li>)}</ul></>}
     </section>
     <RecommendationsSection confirmedUserId={auth.user?.id} authStatus={auth.status} />
   </div>

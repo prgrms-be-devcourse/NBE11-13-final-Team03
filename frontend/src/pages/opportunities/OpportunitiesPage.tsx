@@ -8,6 +8,7 @@ import TextField from '../../components/ui/TextField'
 import Card from '../../components/ui/Card'
 import AsyncState from '../../components/ui/AsyncState'
 import StatusBadge from '../../components/ui/StatusBadge'
+import PreferenceActions from '../../components/opportunities/PreferenceActions'
 import { searchErrorMessage } from './searchError'
 import { getInterestOptions, searchOpportunities } from '../../api/opportunities'
 import SearchFilters from './SearchFilters'
@@ -132,7 +133,7 @@ function OpportunitiesPage() {
                 <ul className={styles.resultList}>
                   {data.content.map((item) => <li key={item.opportunityId}>
                     <Card className={styles.resultCard}>
-                      <div className={styles.cardMeta}><span className={styles.type}>{typeLabels[item.type]}</span><span>{item.saved ? '저장됨' : '저장 안 함'}</span></div>
+                      <div className={styles.cardMeta}><span className={styles.type}>{typeLabels[item.type]}</span><PreferenceActions opportunityId={item.opportunityId} title={item.title} saved={item.saved} source="SEARCH" disabled={results.isFetching} /></div>
                       <h3><Link to={`/opportunities/${item.opportunityId}`} state={{ searchReturn: `/opportunities${canonical ? `?${canonical}` : ''}` }}>{item.title || '제목 미확인'}</Link></h3>
                       <p className={styles.category}>{[item.category, item.subCategory, item.detailCategory].filter(Boolean).join(' · ') || '분류 미확인'}</p>
                       <div className={styles.cardFooter}>

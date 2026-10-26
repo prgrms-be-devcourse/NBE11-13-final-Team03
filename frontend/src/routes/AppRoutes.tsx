@@ -8,6 +8,7 @@ import AuthProvider from '../auth/AuthProvider'
 import LoginPage from '../pages/auth/LoginPage'
 import LoginResultPage from '../pages/auth/LoginResultPage'
 import { MyPage, OnboardingPage, ProfileSettingsPage } from '../pages/profile/ProfilePages'
+import SavedOpportunitiesPage from '../pages/saved/SavedOpportunitiesPage'
 
 function AppRoutes() {
   return (
@@ -19,7 +20,7 @@ function AppRoutes() {
         <Route path="login-failure.html" element={<LoginResultPage success={false} />} />
         <Route path="opportunities" element={<OpportunitiesPage />} />
         <Route path="opportunities/:id" element={<OpportunityDetailPage />} />
-        <Route path="saved" element={<PlaceholderPage title="저장한 기회" description="저장한 기회를 모아 볼 화면을 준비하고 있어요." />} />
+        <Route path="saved" element={<SavedOpportunitiesPage />} />
         <Route path="onboarding" element={<OnboardingPage />} />
         <Route path="mypage" element={<MyPage />} />
         <Route path="mypage/profile" element={<ProfileSettingsPage kind="profile" />} />

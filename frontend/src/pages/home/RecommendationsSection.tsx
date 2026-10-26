@@ -12,10 +12,10 @@ import { isValidDate, statusLabels } from '../opportunities/searchParams'
 import { regionText } from '../opportunities/detailPresentation'
 import styles from './HomePage.module.css'
 
-function RecommendationCard({ item }: { item: RecommendationItem }) {
+function RecommendationCard({ item, disabled }: { item: RecommendationItem; disabled: boolean }) {
   const training = item.type === 'VOCATIONAL_TRAINING'
   const date = training ? item.trainingStartDate : item.applicationEndDate
-  return <HomeOpportunityCard item={item}>
+  return <HomeOpportunityCard item={item} source="RECOMMENDATION" allowHide disabled={disabled}>
     <div className={styles.recommendationInfo}>
       <p>모집 상태: {statusLabels[item.applicationStatus]}</p>
       {date && isValidDate(date) && <p>{training ? '교육 시작일' : '신청기간 마감일'} <time dateTime={date}>{date}</time></p>}
@@ -63,7 +63,7 @@ function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUser
   } else {
     content = <><p className={styles.help}>저장된 최신 판정과 실제 추천 근거를 바탕으로 제공해요.</p>
       {result.isFetching && <p role="status" className={styles.help}>추천 정보를 새로 확인하고 있어요.</p>}
-      <ul className={styles.grid}>{result.data.map((item) => <li key={item.opportunityId}><RecommendationCard item={item} /></li>)}</ul>
+      <ul className={styles.grid}>{result.data.map((item) => <li key={item.opportunityId}><RecommendationCard item={item} disabled={result.isFetching} /></li>)}</ul>
     </>
   }
   return <section id="recommendations" className={styles.section} aria-labelledby="recommendations-heading">
