@@ -34,6 +34,11 @@ public final class RegionIndex {
         this.topLevel = Collections.unmodifiableSet(tops);
     }
 
+    /** 모든 지역 (순서 없음) */
+    public Collection<Entry> entries() {
+        return byCode.values();
+    }
+
     public boolean contains(String code) {
         return byCode.containsKey(code);
     }

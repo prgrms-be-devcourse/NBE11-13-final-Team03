@@ -8,6 +8,7 @@ import com.team3.dataservice.opportunity.normalization.dto.NormalizationResult;
 import com.team3.dataservice.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.dataservice.opportunity.normalization.AgeNormalization;
 import com.team3.dataservice.opportunity.normalization.AgeNormalizer;
+import com.team3.dataservice.opportunity.normalization.BodyConditionDetector;
 import com.team3.dataservice.opportunity.domain.status.ApplicationPeriod;
 import com.team3.dataservice.opportunity.normalization.ApplicationPeriodNormalizer;
 import com.team3.dataservice.opportunity.normalization.CodeConditionNormalizer;
@@ -36,6 +37,7 @@ import java.util.*;
  *    지역은 zipCd(정책거주지역코드)를 지역 사전으로 매핑해 거주지(RESIDENCE) 조건으로 저장한다.
  *    코드 필드(혼인·취업·학력·전공·특화)는 코드표로, 소득은 코드·금액·텍스트로 정규화한다.
  *    추가 자격(addAplyQlfcCndCn)·참여 제한(ptcpPrpTrgtCn) 원문은 구조화하지 않고 검토 대상 조건으로 보존한다.
+ *    본문(설명·지원내용·제출서류 등)에만 적힌 주거·재산·병역 자격 표현도 원문 확인 조건으로 저장한다 (BodyConditionDetector).
  * 2. 출처 매핑: (sourceId, plcyNo)로 기존 Opportunity를 찾고, 없으면 새로 만든다
  * 3. 버전: 정규화 스냅샷이 현재 버전과 같으면 새 버전을 만들지 않는다. 다르면 새 버전과 조건·신청기간을 저장한다.
  * 4. 상세: 지원 내용·기관·신청 방법·URL·사업기간 등 화면용 정보를 버전별 YouthPolicyDetail에 저장한다.
@@ -48,7 +50,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class YouthPolicyNormalizationService {
 
-    public static final String NORMALIZATION_VERSION = "0.3.0";
+    public static final String NORMALIZATION_VERSION = "0.4.0";
 
     /** 코드 필드 → (조건 분류, 조건 필드명) */
     private static final List<CodeField> CODE_FIELDS = List.of(
@@ -294,6 +296,11 @@ public class YouthPolicyNormalizationService {
         putIfNotNull(text, "addAplyQlfcCndCn", normalizedText(raw.addAplyQlfcCndCn()));
         putIfNotNull(text, "ptcpPrpTrgtCn", normalizedText(raw.ptcpPrpTrgtCn()));
         snapshot.put("textConditions", text);
+        // 본문 조건은 찾았을 때만 넣는다 (없는 정책의 스냅샷은 그대로라 새 버전이 생기지 않는다)
+        BodyConditionDetector.Detection body = BodyConditionDetector.detect(raw);
+        if (!body.isEmpty()) {
+            snapshot.put("bodyConditions", body.kindNames());
+        }
 
         List<String> reasons = (List<String>) ((Map<String, Object>) snapshot.get("usage")).get("exclusionReasons");
         codes.forEach((field, c) -> {
@@ -304,7 +311,7 @@ public class YouthPolicyNormalizationService {
         if (income.validationStatus() != ValidationStatus.VALID && income.validationStatus() != ValidationStatus.UNKNOWN) {
             reasons.add("INCOME_" + income.validationStatus().name());
         }
-        if (!text.isEmpty()) {
+        if (!text.isEmpty() || !body.isEmpty()) {
             reasons.add("UNSTRUCTURED_CONDITION_TEXT");
         }
     }
@@ -358,6 +365,7 @@ public class YouthPolicyNormalizationService {
                 "addAplyQlfcCndCn", raw.addAplyQlfcCndCn()).ifPresent(list::add);
         textCondition(version, ConditionType.OTHER, RequirementType.EXCLUSION, "participationRestriction",
                 "ptcpPrpTrgtCn", raw.ptcpPrpTrgtCn()).ifPresent(list::add);
+        bodyCondition(version, BodyConditionDetector.detect(raw)).ifPresent(list::add);
         return list;
     }
 
@@ -486,6 +494,36 @@ public class YouthPolicyNormalizationService {
                 .requirementType(requirement)
                 .conditionField(conditionField)
                 .expression(Map.of("status", "UNSTRUCTURED"))
+                .evidence(evidence)
+                .validationStatus(ValidationStatus.NEEDS_REVIEW)
+                .build());
+    }
+
+    /**
+     * 본문에만 적힌 판정하지 않는 자격 조건(주거·재산·병역). 찾았을 때만 원문 확인 조건 한 건을 만든다.
+     * expression의 kinds는 찾은 종류라 조건 묶음 키에 들어간다 (종류가 바뀌면 다른 묶음)
+     */
+    private static Optional<OpportunityCondition> bodyCondition(OpportunityVersion version,
+                                                                BodyConditionDetector.Detection body) {
+        if (body.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<String, Object> evidence = new HashMap<>();
+        evidence.put("sourceType", SourceType.API_TEXT.name());
+        evidence.put("confidence", SourceType.API_TEXT.confidence().name());
+        evidence.put("sourceFields", body.sourceFields());
+        evidence.put("evidenceText", body.evidenceText());
+        evidence.put("reason", "본문에 판정하지 않는 자격 조건(주거·재산·병역) 표현이 있음 — 원문 확인 필요");
+
+        Map<String, Object> expression = new LinkedHashMap<>();
+        expression.put("status", "UNSTRUCTURED");
+        expression.put("kinds", body.kindNames());
+        return Optional.of(OpportunityCondition.builder()
+                .version(version)
+                .conditionType(ConditionType.OTHER)
+                .requirementType(RequirementType.REQUIRED)
+                .conditionField("bodyQualification")
+                .expression(expression)
                 .evidence(evidence)
                 .validationStatus(ValidationStatus.NEEDS_REVIEW)
                 .build());
