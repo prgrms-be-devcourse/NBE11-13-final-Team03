@@ -13,6 +13,17 @@
 - DB는 메인 서비스와 공유합니다 (설계: 수집·정규화 서비스 분리 설계 문서). 접속 계정·스키마는 아래 DB 경계를 따릅니다.
 - `db/scripts/normalization-notifications.sql`: 정규화 요청 NOTIFY 트리거. 배포·초기화 계정으로 한 번 실행합니다 (앱이 자동 실행하지 않음).
 
+## 수집 완료 관리자 알림 (1단계)
+
+정기·수동 수집과 수동 전체 재시도는 100건 단위 저장·최대 3회 일시 오류 재시도 후
+실행당 한 건을 `collection_outbox_events`에 저장합니다. 같은 날 후속 실행도 별도 알립니다.
+v2 본문에 실행 종류·최종 상태·페이지 실패 수·소요시간을 포함합니다.
+수동 재시도는 `POST /api/admin/collection/syncs/{jobId}/retry`로 전체 출처를 새 실행으로 수집합니다.
+**새 버전 기동 전에 application_user로 `database/scripts/collection-outbox.sql`을 적용해야 합니다. 새 DB도 포함합니다.**
+기존 SQL 설치 DB는 `collection-outbox-per-job.sql`을 먼저 적용합니다. 이전 메시지는 유지합니다.
+현재는 PENDING 보존까지만 구현됐고 SQS 발행은 후속 PR입니다. 외부 전송·관리자 큐 소비·Slack은 아직 동작하지 않습니다.
+자세한 계약과 운영 절차는 [완료 알림 문서](../docs/collection-completed-notifications.md)를 확인합니다.
+
 ## 내부 API
 
 수집 내부 수신 경로는 gRPC `yon.collection.v1.CollectionService`만 제공한다.

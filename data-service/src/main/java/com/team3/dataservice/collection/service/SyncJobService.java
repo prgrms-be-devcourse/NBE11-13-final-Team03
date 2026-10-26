@@ -15,6 +15,7 @@ import jakarta.persistence.EntityNotFoundException;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +31,7 @@ public class SyncJobService {
     private static final List<SyncJobStatus> ACTIVE = List.of(SyncJobStatus.PENDING, SyncJobStatus.RUNNING);
     private final ExternalSourceRepository sources;
     private final SyncHistoryRepository histories;
+    private final CollectionCompletionOutbox completionOutbox;
     private final OffsetDateTime applicationStartedAt = OffsetDateTime.now();
 
     @Value("${collection.youth-policy.url}")
@@ -48,6 +50,20 @@ public class SyncJobService {
         return create(sourceType, "SCHEDULED");
     }
 
+    @Transactional
+    public SyncStartResponse createRetry(Long jobId) {
+        if (jobId == null || jobId < 1) {
+            throw new IllegalArgumentException("수집 실행 ID는 1 이상이어야 합니다.");
+        }
+        var previous = histories.findById(jobId)
+                .orElseThrow(() -> new EntityNotFoundException("수집 실행을 찾을 수 없습니다."));
+        if (!List.of(SyncJobStatus.FAILED, SyncJobStatus.PARTIAL_SUCCESS, SyncJobStatus.INTERRUPTED)
+                .contains(previous.getStatus())) {
+            throw new IllegalStateException("실패·부분 성공·중단된 수집만 재시도할 수 있습니다.");
+        }
+        return create(CollectionSource.valueOf(previous.getSource().getSourceCode()), "MANUAL_RETRY");
+    }
+
     private SyncStartResponse create(CollectionSource sourceType, String syncType) {
         boolean youth = sourceType == CollectionSource.YOUTH_POLICY;
         sources.registerIfAbsent(sourceType.name(), youth ? "온통청년" : "고용24",
@@ -62,7 +78,11 @@ public class SyncJobService {
         }
         var history = histories.save(SyncHistory.pending(source, syncType, OffsetDateTime.now()));
         return new SyncStartResponse(history.getId(), sourceType.name(), history.getStatus(),
-                "MANUAL".equals(syncType) ? "수동 최신화 요청을 접수했습니다." : "정기 최신화 요청을 접수했습니다.");
+                switch (syncType) {
+                    case "MANUAL" -> "수동 최신화 요청을 접수했습니다.";
+                    case "MANUAL_RETRY" -> "전체 수집 재시도 요청을 접수했습니다.";
+                    default -> "정기 최신화 요청을 접수했습니다.";
+                });
     }
 
     @Transactional(readOnly = true)
@@ -112,12 +132,21 @@ public class SyncJobService {
 
     @Transactional
     public void complete(Long jobId, boolean completed) {
-        locked(jobId).finish(completed, OffsetDateTime.now());
+        var history = locked(jobId);
+        if (history.getStatus() != SyncJobStatus.RUNNING) return;
+        // PostgreSQL timestamps have microsecond precision; keep occurredAt identical to finished_at.
+        history.finish(completed, OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS));
+        completionOutbox.recordIfCompletion(history);
     }
 
     @Transactional
     public void fail(Long jobId, String safeReason, boolean interrupted) {
-        locked(jobId).fail(safeReason, interrupted, OffsetDateTime.now());
+        var history = locked(jobId);
+        if (!ACTIVE.contains(history.getStatus())) {
+            return;
+        }
+        history.fail(safeReason, interrupted, OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS));
+        completionOutbox.recordIfCompletion(history);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -126,7 +155,9 @@ public class SyncJobService {
     public void recoverInterrupted() {
         // ponytail: 단일 앱 인스턴스의 재시작 복구다. 다중 인스턴스 전환 시 소유권·임대 기반 복구가 필요하다.
         for (var history : histories.findByStatusInAndStartedAtBefore(ACTIVE, applicationStartedAt)) {
-            history.fail("애플리케이션 재시작으로 수집 실행이 중단되었습니다.", true, OffsetDateTime.now());
+            history.fail("애플리케이션 재시작으로 수집 실행이 중단되었습니다.", true,
+                    OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS));
+            completionOutbox.recordIfCompletion(history);
         }
     }
 

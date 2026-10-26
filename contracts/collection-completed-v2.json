@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "messageId": "4be9056a-9cb5-4ff2-a526-ef175061079c",
+  "eventType": "COLLECTION_COMPLETED",
+  "correlationId": "7c1f637f-59d2-42ad-9e21-32e2fe583510",
+  "occurredAt": "2026-10-27T00:37:00Z",
+  "payload": {
+    "collectedDate": "2026-10-27",
+    "dataSource": "EMPLOYMENT24",
+    "newCount": 1203,
+    "updatedCount": 88,
+    "unchangedCount": 139201,
+    "failedCount": 4,
+    "jobId": 7,
+    "syncType": "MANUAL_RETRY",
+    "status": "PARTIAL_SUCCESS",
+    "failedPageCount": 1,
+    "durationMillis": 420000
+  }
+}

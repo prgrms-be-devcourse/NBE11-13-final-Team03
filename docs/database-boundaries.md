@@ -83,6 +83,9 @@ update가 먼저 실행되면 다음 문제가 생긴다.
 [event-fanout-outbox.md](event-fanout-outbox.md), [notification-user-api.md](notification-user-api.md),
 [notification-withdrawal.md](notification-withdrawal.md), [notification-delivery.md](notification-delivery.md))를 따른다.
 Application 테이블이 없는 새 로컬 DB는 첫 기동의 update가 테이블을 만들므로 SQL을 실행하지 않는다.
+단, `collection-outbox.sql`은 CHECK·기본값이 필요하므로 **새 DB도 계정·스키마 준비 후 첫 data-service 기동 전에 적용**한다.
+이전 완료 Outbox SQL 설치 DB는 실행별 알림 버전으로 올리기 전에 `collection-outbox-per-job.sql`을 application_user로 적용한다.
+기존 메시지·본문을 유지하며 sync_job_id 유일성을 추가한다.
 
 ### data-service (backend와 DB 공유 1단계)
 
@@ -94,7 +97,7 @@ data-service/.env에는 DB_URL과 APPLICATION_DB_PASSWORD(backend와 같은 값)
 
 | 소유 | 테이블 |
 | --- | --- |
-| data-service | 수집 원본·정규화 요청·수집 이력(external_source, raw_external_record, raw_normalization_request, raw_ingest_states, sync_history), 공고·버전·출처·조건·지역·신청기간·조건 묶음·상세(opportunities, opportunity_*, application_windows, condition_sets, training_course_details, youth_policy_details), regions |
+| data-service | 수집 원본·정규화 요청·수집 이력·수집 완료 Outbox(external_source, raw_external_record, raw_normalization_request, raw_ingest_states, sync_history, collection_outbox_events), 공고·버전·출처·조건·지역·신청기간·조건 묶음·상세(opportunities, opportunity_*, application_windows, condition_sets, training_course_details, youth_policy_details), regions |
 | backend | 회원·인증, 판정 프로필·판정 결과, 관심·선호 등 그 밖의 테이블 |
 
 - backend에 남는 공고·지역 엔티티는 판정·검색용 읽기 엔티티다. 컬럼을 추가·변경하지 않고 data-service 엔티티를 따라간다.

@@ -8,6 +8,7 @@ import "google/protobuf/timestamp.proto";
 
 service CollectionService {
   rpc StartSync(StartSyncRequest) returns (SyncStartResponse);
+  rpc RetrySync(RetrySyncRequest) returns (SyncStartResponse);
   rpc ListSyncJobsByDate(ListSyncJobsByDateRequest) returns (ListSyncJobsResponse);
   rpc GetSyncJob(GetSyncJobRequest) returns (SyncJob);
   rpc SaveRawRecord(SaveRawRecordRequest) returns (RawRecord);
@@ -19,6 +20,8 @@ enum SyncJobStatus { SYNC_JOB_STATUS_UNSPECIFIED = 0; PENDING = 1; RUNNING = 2; 
                      PARTIAL_SUCCESS = 4; FAILED = 5; INTERRUPTED = 6; }
 
 message StartSyncRequest { CollectionSource source = 1; int32 page_size = 2; int32 max_pages = 3; }
+// Recollects the entire source as a new MANUAL_RETRY job, with the standard 100/1000 limits.
+message RetrySyncRequest { int64 job_id = 1; }
 message SyncStartResponse { int64 job_id = 1; CollectionSource source = 2; SyncJobStatus status = 3; string message = 4; }
 message ListSyncJobsByDateRequest { string date = 1; }
 message ListSyncJobsResponse { repeated SyncJob jobs = 1; }

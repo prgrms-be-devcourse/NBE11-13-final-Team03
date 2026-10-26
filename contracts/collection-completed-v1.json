@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "messageId": "4be9056a-0ecf-4aef-8fd9-f9f65fc8c1a1",
+  "eventType": "COLLECTION_COMPLETED",
+  "correlationId": "7c1d2b1e-5f1a-4c6e-9a1d-2d3f4e5a6b7c",
+  "occurredAt": "2026-10-27T00:37:12Z",
+  "payload": {
+    "collectedDate": "2026-10-27",
+    "dataSource": "EMPLOYMENT24",
+    "newCount": 1203,
+    "updatedCount": 88,
+    "unchangedCount": 139201,
+    "failedCount": 4
+  }
+}

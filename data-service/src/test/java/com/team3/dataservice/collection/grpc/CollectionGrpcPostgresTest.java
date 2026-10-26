@@ -114,6 +114,21 @@ class CollectionGrpcPostgresTest {
     }
 
     @Test
+    void retryRpcValidatesTargetAndReturnsANewPendingJob() {
+        var source = sources.save(new ExternalSource("YOUTH_POLICY", "youth", "https://example.test", true, OffsetDateTime.now()));
+        var failed = history(source, SyncJobStatus.FAILED, OffsetDateTime.now().minusMinutes(1));
+        var retry = client().retrySync(RetrySyncRequest.newBuilder().setJobId(failed.getId()).build());
+        assertNotEquals(failed.getId(), retry.getJobId());
+        assertEquals(SyncJobStatus.PENDING, retry.getStatus());
+        assertEquals("MANUAL_RETRY", histories.findById(retry.getJobId()).orElseThrow().getSyncType());
+        error(() -> client().retrySync(RetrySyncRequest.newBuilder().setJobId(failed.getId()).build()),
+                Status.Code.FAILED_PRECONDITION, "COLLECTION_005");
+        error(() -> client().retrySync(RetrySyncRequest.newBuilder().setJobId(999999).build()),
+                Status.Code.NOT_FOUND, "COLLECTION_004");
+        error(() -> client().retrySync(RetrySyncRequest.getDefaultInstance()), Status.Code.INVALID_ARGUMENT, "COLLECTION_003");
+    }
+
+    @Test
     void rejectsStaleObservationWithoutChangingStoredSnapshot() {
         long id = start(); jobs.start(id);
         var at = OffsetDateTime.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MICROS);

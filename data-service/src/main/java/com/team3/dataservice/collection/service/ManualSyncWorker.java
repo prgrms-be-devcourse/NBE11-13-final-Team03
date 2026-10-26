@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 
@@ -79,7 +80,7 @@ public class ManualSyncWorker {
                 continue;
             }
             try {
-                rawRecords.saveBatchForSync(List.copyOf(requests.values()));
+                saveBatchWithRetry(List.copyOf(requests.values()));
             } catch (IllegalArgumentException | DataAccessException exception) {
                 log.warn("jobId={} source={} offset={} exceptionType={} retry=individual",
                         jobId, source, offset + start, exception.getClass().getSimpleName());
@@ -94,11 +95,35 @@ public class ManualSyncWorker {
             checkInterrupted();
             var request = entry.getValue();
             try {
-                rawRecords.saveForSync(request);
+                saveOneWithRetry(request);
             } catch (IllegalArgumentException exception) {
                 jobs.recordFailure(jobId, entry.getKey(), request.externalId(), "INVALID_RECORD");
             } catch (DataAccessException exception) {
                 jobs.recordFailure(jobId, entry.getKey(), request.externalId(), "STORAGE_FAILED");
+            }
+        }
+    }
+
+    private void saveBatchWithRetry(List<RawRecordSaveRequest> requests) {
+        for (int attempt = 1; ; attempt++) {
+            CollectionRetry.beforeAttempt(attempt);
+            try {
+                rawRecords.saveBatchForSync(requests);
+                return;
+            } catch (TransientDataAccessException failure) {
+                if (attempt >= CollectionRetry.MAX_ATTEMPTS) throw failure;
+            }
+        }
+    }
+
+    private void saveOneWithRetry(RawRecordSaveRequest request) {
+        for (int attempt = 1; ; attempt++) {
+            CollectionRetry.beforeAttempt(attempt);
+            try {
+                rawRecords.saveForSync(request);
+                return;
+            } catch (TransientDataAccessException failure) {
+                if (attempt >= CollectionRetry.MAX_ATTEMPTS) throw failure;
             }
         }
     }

@@ -8,6 +8,7 @@ import com.team3.contracts.collection.v1.ListSyncJobsResponse;
 import com.team3.contracts.collection.v1.RawRecord;
 import com.team3.contracts.collection.v1.SaveRawRecordRequest;
 import com.team3.contracts.collection.v1.StartSyncRequest;
+import com.team3.contracts.collection.v1.RetrySyncRequest;
 import com.team3.contracts.collection.v1.SyncJob;
 import com.team3.contracts.collection.v1.SyncStartResponse;
 import com.team3.dataservice.collection.domain.CollectionSource;
@@ -40,6 +41,12 @@ public class CollectionGrpcService extends CollectionServiceGrpc.CollectionServi
         var response = manualSync.start(source, request.getPageSize() == 0 ? 100 : request.getPageSize(),
                 request.getMaxPages() == 0 ? 1000 : request.getMaxPages());
         observer.onNext(mapper.start(response));
+        observer.onCompleted();
+    }
+
+    @Override
+    public void retrySync(RetrySyncRequest request, StreamObserver<SyncStartResponse> observer) {
+        observer.onNext(mapper.start(manualSync.retry(request.getJobId())));
         observer.onCompleted();
     }
 
