@@ -4,8 +4,7 @@ import { AxiosError } from 'axios'
 import { QueryClient, QueryObserver } from '@tanstack/react-query'
 import { apiClient } from '../src/api/client.ts'
 import { getRecommendations, isRecommendations, recommendationsQuery } from '../src/api/recommendations.ts'
-import { homeLatestQuery, homeSearchPath } from '../src/pages/home/homeQueries.ts'
-import { parseSearchParams } from '../src/pages/opportunities/searchParams.ts'
+import { homeLatestQuery } from '../src/pages/home/homeQueries.ts'
 import { latestResponse, policyRecommendation, trainingRecommendation } from './home-fixtures.mjs'
 import { authQueryKey } from '../src/auth/session.ts'
 import { runPreferenceChange } from '../src/api/preferences.ts'
@@ -42,17 +41,6 @@ test('home latest query reuses public search, requests six latest items, forward
   assert.deepEqual(options.queryKey, ['home', 'opportunities', 'size=6'])
   assert.deepEqual(await options.queryFn({ signal: controller.signal }), latestResponse)
   assert.equal(calls, 1)
-})
-
-test('hero search uses existing canonical keyword encoding, trims whitespace and starts without other filters', () => {
-  const path = homeSearchPath('  청년 & 훈련 / 지원?  ')
-  assert.equal(new URL(path, 'https://example.org').pathname, '/opportunities')
-  const parsed = parseSearchParams(new URL(path, 'https://example.org').searchParams)
-  assert.equal(parsed.params.keyword, '청년 & 훈련 / 지원?')
-  assert.equal(parsed.params.page, 0)
-  assert.equal(parsed.params.type, '')
-  assert.deepEqual(parsed.notices, [])
-  assert.equal(homeSearchPath('   '), '/opportunities')
 })
 
 test('recommendation request requires auth, forwards cancellation and preserves backend order and reasons', async () => {

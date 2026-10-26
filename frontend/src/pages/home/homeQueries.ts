@@ -1,6 +1,6 @@
 import { searchOpportunities } from '../../api/opportunities.ts'
 import { ApiError } from '../../api/ApiError.ts'
-import { changeSearchConditions, defaultSearchParams, serializeSearchParams } from '../opportunities/searchParams.ts'
+import { defaultSearchParams, serializeSearchParams } from '../opportunities/searchParams.ts'
 
 export function homeLatestQuery() {
   const params = { ...defaultSearchParams(), size: 6 }
@@ -8,11 +8,6 @@ export function homeLatestQuery() {
     queryKey: ['home', 'opportunities', serializeSearchParams(params).toString()],
     queryFn: ({ signal }: { signal: AbortSignal }) => searchOpportunities(params, signal),
   }
-}
-
-export function homeSearchPath(keyword: string): string {
-  const query = serializeSearchParams(changeSearchConditions(defaultSearchParams(), { keyword })).toString()
-  return `/opportunities${query ? `?${query}` : ''}`
 }
 
 export function homeErrorMessage(error: Error): { title: string; description: string } {

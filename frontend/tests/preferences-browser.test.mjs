@@ -72,6 +72,14 @@ test('Chrome verifies saved paging/removal, detail and search save changes, reco
       action(policy.title+' 저장').click();await wait(()=>action(policy.title+' 저장 해제')&&!action(policy.title+' 저장 해제').disabled);
       ensure(calls.some(call=>call.url==='/opportunities/42/save'&&call.method==='post'&&call.params.source==='OTHER'),'detail save source');
       menu('홈').click();await wait(()=>action(recommendation.title+' 추천에서 숨기기')&&!action(recommendation.title+' 추천에서 숨기기').disabled);
+      await wait(()=>action(latest.title+' 저장 해제')&&!action(latest.title+' 저장 해제').disabled);
+      const bookmark=action(latest.title+' 저장 해제');
+      ensure(bookmark.textContent.trim()===''&&bookmark.getAttribute('aria-pressed')==='true','home uses accessible icon-only saved bookmark');
+      const beforeHomeUnsave=calls.filter(call=>call.url==='/opportunities/42/save'&&call.method==='delete').length;
+      bookmark.click();bookmark.click();await wait(()=>action(latest.title+' 저장')&&!action(latest.title+' 저장').disabled);
+      ensure(calls.filter(call=>call.url==='/opportunities/42/save'&&call.method==='delete').length===beforeHomeUnsave+1,'home duplicate unsave prevention');
+      action(latest.title+' 저장').click();await wait(()=>action(latest.title+' 저장 해제')&&!action(latest.title+' 저장 해제').disabled);
+      ensure(calls.some(call=>call.url==='/opportunities/42/save'&&call.method==='post'&&call.params.source==='OTHER'),'home existing save source');
       action(recommendation.title+' 추천에서 숨기기').click();await wait(()=>document.body.textContent.includes('아직 보여드릴 추천 결과가 없어요'));
       ensure(saved.has(42)&&hidden.has(42),'hide must preserve saved state');
       ensure(calls.some(call=>call.url==='/opportunities/42/hide'&&call.params.source==='RECOMMENDATION'),'hide source');

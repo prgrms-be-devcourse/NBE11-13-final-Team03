@@ -4,15 +4,22 @@ import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-quer
 import { AuthContext } from '../../auth/AuthContext'
 import { loginPath } from '../../auth/returnPath'
 import { ApiError } from '../../api/ApiError'
-import { preferenceMutationKey, refreshPreferenceQueries, runPreferenceChange } from '../../api/preferences'
+import { PreferenceRefreshError, preferenceMutationKey, refreshPreferenceQueries, runPreferenceChange } from '../../api/preferences'
 import type { PreferenceChange, PreferenceSource } from '../../api/preferences'
 import Button from '../ui/Button'
+import { Bookmark, RefreshCw } from 'lucide-react'
 import styles from './PreferenceActions.module.css'
 
 function errorMessage(error: Error): string {
+  if (error instanceof PreferenceRefreshError) return error.message
   if (error instanceof ApiError) {
     if (error.status === 401) return '로그인 상태를 다시 확인해 주세요.'
-    if (error.status === 404) return error.code === 'USER_001' ? '사용자 정보를 확인하지 못했어요. 다시 로그인해 주세요.' : '공고를 찾을 수 없어요. 목록을 다시 확인해 주세요.'
+    if (error.status === 404) {
+      if (error.code === 'USER_001') return '사용자 정보를 확인하지 못했어요. 다시 로그인해 주세요.'
+      if (error.code === 'PREFERENCE_001') return '공고를 찾을 수 없어요. 목록을 다시 확인해 주세요.'
+      return '요청 경로나 대상 정보를 확인하지 못했어요. 상태를 다시 조회해 주세요.'
+    }
+    if (error.status === 409) return '다른 변경과 충돌했어요. 최신 상태를 다시 확인해 주세요.'
     if (error.status === 403 || error.kind === 'csrf') return '요청이 거부됐어요. 인증·보안 토큰 상태를 확인해 주세요.'
     if (error.status === 400) return '공고 번호와 요청 조건을 확인해 주세요.'
     if (error.kind === 'cancelled') return '인증 상태나 화면이 변경되어 결과 확인을 중단했어요.'
@@ -20,8 +27,8 @@ function errorMessage(error: Error): string {
   }
   return '변경 또는 최신 상태 조회에 실패했어요. 상태를 다시 조회해 주세요.'
 }
-type PreferenceActionsProps = { opportunityId: number; title: string; saved: boolean; source: PreferenceSource; allowHide?: boolean; disabled?: boolean }
-function PreferenceActions({ opportunityId, title, saved, source, allowHide = false, disabled = false }: PreferenceActionsProps) {
+type PreferenceActionsProps = { opportunityId: number; title: string; saved: boolean; source: PreferenceSource; allowHide?: boolean; disabled?: boolean; iconOnly?: boolean }
+function PreferenceActions({ opportunityId, title, saved, source, allowHide = false, disabled = false, iconOnly = false }: PreferenceActionsProps) {
   const auth = useContext(AuthContext)
   const owner = auth?.status === 'authenticated' ? auth.user : undefined
   const client = useQueryClient()
@@ -41,18 +48,29 @@ function PreferenceActions({ opportunityId, title, saved, source, allowHide = fa
     void mutation.mutateAsync(change).catch(() => {}).finally(() => { running.current = false })
   }
   const returnTo = loginPath(location.pathname + location.search)
+  const retry = () => {
+    if (!owner || running.current || pending || disabled) return
+    running.current = true
+    void refreshPreferenceQueries(client, owner, opportunityId, mutation.variables ?? 'save')
+      .then(() => mutation.reset()).catch(() => {}).finally(() => { running.current = false })
+  }
+  const icon = <Bookmark size={20} aria-hidden="true" fill={saved ? 'currentColor' : 'none'} />
   return <div className={styles.actions}>
-    <span>{saved ? '저장됨' : '저장 안 함'}</span>
-    {auth?.status === 'anonymous' ? <Link to={returnTo} aria-label={`${title} 저장하려면 로그인`}>저장하려면 로그인</Link>
+    {!iconOnly && <span>{saved ? '저장됨' : '저장 안 함'}</span>}
+    {auth?.status === 'anonymous' ? <Link className={iconOnly ? styles.iconButton : undefined} to={returnTo} aria-label={iconOnly ? `${title} ${saved ? '저장됨' : '저장 안 함'}, 저장하려면 로그인` : `${title} 저장하려면 로그인`}>{iconOnly ? icon : '저장하려면 로그인'}</Link>
       : owner ? <>
-        <Button variant="secondary" disabled={disabled || pending} loading={pending} aria-label={`${title} ${saved ? '저장 해제' : '저장'}`} aria-pressed={saved} onClick={() => run(saved ? 'unsave' : 'save')}>{saved ? '저장 해제' : '저장'}</Button>
-        {allowHide && <Button variant="ghost" disabled={disabled || pending} aria-label={`${title} 추천에서 숨기기`} onClick={() => run('hide')}>추천에서 숨기기</Button>}
+        <Button className={iconOnly ? styles.iconButton : undefined} variant={iconOnly ? 'ghost' : 'secondary'} disabled={disabled || pending} loading={pending} aria-label={`${title} ${saved ? '저장 해제' : '저장'}`} aria-pressed={saved} onClick={() => run(saved ? 'unsave' : 'save')}>{iconOnly ? icon : saved ? '저장 해제' : '저장'}</Button>
+        {allowHide && <Button variant="ghost" disabled={disabled || pending} aria-label={`${title} 추천에서 숨기기`} onClick={() => run('hide')}>{iconOnly ? '숨기기' : '추천에서 숨기기'}</Button>}
       </> : auth?.status === 'error' ? <><span>인증 확인 실패</span>{auth.retry && <Button variant="ghost" onClick={auth.retry}>로그인 상태 다시 확인</Button>}</>
-        : <Button variant="secondary" disabled>로그인 확인 중</Button>}
-    {mutation.isError && owner && <div className={styles.error} role="alert"><p>{errorMessage(mutation.error)}</p>
+        : <Button className={iconOnly ? styles.iconButton : undefined} variant="secondary" disabled aria-label={iconOnly ? `${title} 로그인 확인 중` : undefined} aria-pressed={iconOnly ? saved : undefined}>{iconOnly ? icon : '로그인 확인 중'}</Button>}
+    {mutation.isError && owner && (iconOnly ? <span className={styles.compactError} role="alert">
+      <span>확인 필요</span><span className={styles.srOnly}>{errorMessage(mutation.error)}</span>
+      {mutation.error instanceof ApiError && mutation.error.status === 401 ? <Link to={returnTo} aria-label={`${title} 다시 로그인하기`}>로그인</Link>
+        : <Button className={styles.iconButton} variant="ghost" disabled={pending || disabled} onClick={retry} aria-label={`${title} 상태 다시 조회`} title={errorMessage(mutation.error)}><RefreshCw size={16} aria-hidden="true" /></Button>}
+    </span> : <div className={styles.error} role="alert"><p>{errorMessage(mutation.error)}</p>
       {mutation.error instanceof ApiError && mutation.error.status === 401 && <Link to={returnTo}>다시 로그인하기</Link>}
-      <Button variant="ghost" disabled={pending} onClick={() => { void refreshPreferenceQueries(client, owner, opportunityId, mutation.variables ?? 'save').then(() => mutation.reset()).catch(() => {}) }}>상태 다시 조회</Button>
-    </div>}
+      <Button variant="ghost" disabled={pending || disabled} onClick={retry}>상태 다시 조회</Button>
+    </div>)}
   </div>
 }
 export default PreferenceActions

@@ -20,12 +20,12 @@ const user = { id: 11, nickname: '테스트 회원', email: null, role: 'USER' }
 const base = { status: 'authenticated', user, logoutPending: false, logoutError: null, retry: () => {}, completeOAuth: async () => {}, logout: async () => {} }
 const item = { opportunityId: 42, type: 'YOUTH_POLICY', title: '테스트 저장 공고', category: '일자리', subCategory: '취업지원', savedAt: '2026-10-26T09:12:34' }
 const data = { content: [item], page: 0, size: 20, totalElements: 1, totalPages: 1, hasNext: false }
-function render({ auth = base, saved = data, error, actions = false, allowHide = false, value = false } = {}) {
+function render({ auth = base, saved = data, error, actions = false, allowHide = false, value = false, iconOnly = false } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, gcTime: Infinity, staleTime: Infinity } } })
   client.setQueryData(['auth', 'user'], auth.user ?? null)
   if (saved !== undefined) client.setQueryData(['saved-opportunities', 11, 0, 20], saved)
   if (error) client.getQueryCache().build(client, { queryKey: ['saved-opportunities', 11, 0, 20] }).setState({ status: 'error', error, fetchStatus: 'idle' })
-  try { return renderToStaticMarkup(e(QueryClientProvider, { client }, e(MemoryRouter, { initialEntries: [actions ? '/opportunities?keyword=test&page=2' : '/saved'] }, e(AuthContext.Provider, { value: auth }, actions ? e(Actions, { opportunityId: 42, title: item.title, saved: value, source: 'SEARCH', allowHide }) : e(SavedPage))))) }
+  try { return renderToStaticMarkup(e(QueryClientProvider, { client }, e(MemoryRouter, { initialEntries: [actions ? '/opportunities?keyword=test&page=2' : '/saved'] }, e(AuthContext.Provider, { value: auth }, actions ? e(Actions, { opportunityId: 42, title: item.title, saved: value, source: 'SEARCH', allowHide, iconOnly }) : e(SavedPage))))) }
   finally { client.clear() }
 }
 test('saved page gates on verified authentication and never renders old-account saved data while anonymous/checking/error', () => {
@@ -61,6 +61,7 @@ test('anonymous save action preserves canonical public search return; authentica
   const authenticated = render({ actions: true, allowHide: true })
   assert.match(authenticated, /aria-label="테스트 저장 공고 저장" aria-pressed="false"/)
   assert.match(authenticated, /aria-label="테스트 저장 공고 추천에서 숨기기"/)
+  assert.match(render({ actions: true, allowHide: true, iconOnly: true }), />숨기기<\/button>/)
   assert.doesNotMatch(authenticated, /숨김 해제/)
   assert.doesNotMatch(render({ actions: true }), /추천에서 숨기기/)
 })

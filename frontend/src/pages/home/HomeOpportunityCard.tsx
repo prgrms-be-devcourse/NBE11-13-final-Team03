@@ -14,17 +14,26 @@ type CardItem = Pick<OpportunitySearchItem, 'opportunityId' | 'type' | 'title' |
   eligibilityStatus: EligibilityStatus | null
 }
 
+function classificationLabel(item: CardItem): string {
+  const labels = [item.category, item.subCategory, item.detailCategory]
+    .map(value => value?.trim()).filter((value): value is string => !!value)
+  if (item.type === 'VOCATIONAL_TRAINING') return labels[0] ?? ''
+  return [...new Set(labels)].join(' · ')
+}
+
 // 홈의 공개 목록과 추천 카드가 공유하는 실제 공고 정보만 묶는다.
-function HomeOpportunityCard({ item, children, source = 'OTHER', allowHide = false, disabled = false }: { item: CardItem; children?: ReactNode; source?: PreferenceSource; allowHide?: boolean; disabled?: boolean }) {
+function HomeOpportunityCard({ item, children, source = 'OTHER', allowHide = false, disabled = false, recommendation = false }: { item: CardItem; children?: ReactNode; source?: PreferenceSource; allowHide?: boolean; disabled?: boolean; recommendation?: boolean }) {
   const registeredDate = item.createdAt?.slice(0, 10)
-  return <Card className={styles.opportunityCard}>
-    <div className={styles.cardMeta}><span className={styles.type}>{typeLabels[item.type]}</span><PreferenceActions opportunityId={item.opportunityId} title={item.title} saved={item.saved} source={source} allowHide={allowHide} disabled={disabled} /></div>
+  const validRegisteredDate = !recommendation && registeredDate && isValidDate(registeredDate)
+  const classification = classificationLabel(item)
+  return <Card className={`${styles.opportunityCard} ${recommendation ? styles.recommendationCard : ''}`}>
+    <div className={styles.cardMeta}><span className={styles.type} data-opportunity-type={item.type}>{typeLabels[item.type]}</span><PreferenceActions opportunityId={item.opportunityId} title={item.title} saved={item.saved} source={source} allowHide={allowHide} disabled={disabled} iconOnly /></div>
     <h3><Link to={`/opportunities/${item.opportunityId}`}>{item.title || '제목 미확인'}</Link></h3>
-    <p className={styles.classification}>{[item.category, item.subCategory, item.detailCategory].filter(Boolean).join(' · ') || '분류 미확인'}</p>
-    <div className={styles.cardFooter}>
-      {registeredDate && isValidDate(registeredDate) && <span>최초 등록일 <time dateTime={registeredDate}>{registeredDate}</time></span>}
+    {classification && <p className={styles.classification}>{classification}</p>}
+    {(validRegisteredDate || item.eligibilityStatus !== null) && <div className={styles.cardFooter}>
+      {validRegisteredDate && <span>최초 등록일 <time dateTime={registeredDate}>{registeredDate}</time></span>}
       {item.eligibilityStatus !== null && <StatusBadge status={item.eligibilityStatus} />}
-    </div>
+    </div>}
     {children}
   </Card>
 }

@@ -25,6 +25,7 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
     import {MemoryRouter,Routes,Route} from 'react-router-dom';
     import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
     import {AuthContext} from '/src/auth/AuthContext.ts'; import {apiClient} from '/src/api/client.ts';
+    import {AxiosError} from 'axios';
     import AppLayout from '/src/layouts/AppLayout.tsx';
     import HomePage from '/src/pages/home/HomePage.tsx';
     import OpportunitiesPage from '/src/pages/opportunities/OpportunitiesPage.tsx';
@@ -36,7 +37,7 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
     import {PrivacyPage,TermsPage} from '/src/pages/legal/LegalPages.tsx'; import '/src/index.css';
     const user=${JSON.stringify(user)},profile=${JSON.stringify(profile)},options=${JSON.stringify(options)},regions=${JSON.stringify(regionRows)};
     const latest=${JSON.stringify(latestItem)},detail=${JSON.stringify(policy)},recommendations=${JSON.stringify([policyRecommendation, trainingRecommendation])};
-    const params=new URLSearchParams(location.search), route=params.get('route')||'/', anonymous=route==='/login';
+    const params=new URLSearchParams(location.search), route=params.get('route')||'/', anonymous=route==='/login'||params.get('anonymous')==='1', state=params.get('state');
     const notification={id:30,opportunityId:42,type:'DEADLINE_SOON',title:'테스트 마감 알림',content:'테스트 전용 알림 내용입니다.',link:'/opportunities/42',createdAt:'2026-10-26T01:00:00Z',readAt:null,clickedAt:null};
     const page={content:[latest,{...latest,opportunityId:104,title:'테스트 청년 지원 기회'},{...latest,opportunityId:105,title:'테스트 직업훈련 기회',type:'VOCATIONAL_TRAINING'}],page:0,size:20,totalElements:3,totalPages:1,hasNext:false};
     const notes={items:[notification],nextCursor:null,hasNext:false};
@@ -45,8 +46,11 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
     // 실제 서버·쿠키·FCM에 연결하지 않는다. 예기치 않은 변경 요청은 즉시 실패한다.
     apiClient.defaults.adapter=async config=>{
       if(config.method!=='get')throw Error('Unexpected mutation in layout test');
+      if(config.url==='/opportunities'&&state==='error')throw new AxiosError('test only','ERR_NETWORK',config);
       const values={'/opportunities':page,'/opportunities/42':detail,'/interests/options':options,'/regions':{regions},'/users/me':user,'/users/me/eligibility-profile':profile,'/users/me/interests':{interests:[]},'/users/me/recommendations':recommendations,'/notifications':notes,'/notifications/unread-count':{available:true,unreadCount:1},'/users/me/notification-settings':settings,'/users/me/saved-opportunities':{...page,content:[{opportunityId:42,type:'YOUTH_POLICY',title:'테스트 저장 기회',category:'일자리',subCategory:'취업지원',savedAt:'2026-10-26T01:00:00'}],totalElements:1}};
       if(!Object.hasOwn(values,config.url))throw Error('Unexpected read in layout test');
+      if(state==='empty'&&config.url==='/opportunities')return {config,data:{...page,content:[],totalElements:0,totalPages:0},status:200,statusText:'',headers:{}};
+      if(state==='empty'&&config.url==='/users/me/recommendations')return {config,data:[],status:200,statusText:'',headers:{}};
       return {config,data:values[config.url],status:200,statusText:'',headers:{}};
     };
     client.setQueryData(['auth','user'],anonymous?null:user);
@@ -65,11 +69,27 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
       await wait(()=>!document.querySelector('main').textContent.includes('불러오'));
       await new Promise(r=>setTimeout(r,100));
       ensure(document.documentElement.scrollWidth<=innerWidth,'horizontal overflow');
+      if(route==='/'){
+        const hero=document.querySelector('section[aria-labelledby="home-title"]');
+        ensure(!hero.querySelector('form')&&hero.textContent.includes('맞춤 추천 보기'),'compact hero without duplicate search');
+        ensure(hero.querySelector('a[href="/opportunities"]')&&hero.querySelector('a[href="#recommendations"]')&&document.querySelector('#recommendations'),'real hero CTA destinations');
+        if(anonymous){const intro=document.querySelector('[class*="recommendationIntro"]');ensure(intro&&intro.querySelectorAll('a').length===1&&intro.querySelector('a').getAttribute('href')==='/login?returnTo=%2F'&&getComputedStyle(intro).borderTopWidth==='0px','single-card anonymous recommendation');}
+        if(state==='empty')ensure(document.querySelector('main').textContent.includes('아직 등록된 기회가 없어요'),'home empty state');
+        if(state==='error')ensure(document.querySelector('main [role="alert"]')?.textContent.includes('네트워크 연결을 확인해 주세요'),'home network error');
+      }
       const main=rect(document.querySelector('main')),footer=rect(document.querySelector('footer'));
       ensure(Math.abs(main.left-footer.left)<1&&Math.abs(main.right-footer.right)<1,'footer alignment');
       if(params.get('capture')!=='1'){
       // 여러 iframe이 포커스를 빼앗지 않도록 상호작용은 부모가 한 화면씩 허용한다.
       await new Promise(resolve=>{const start=event=>{if(event.origin===location.origin&&event.data?.startRedesign){removeEventListener('message',start);resolve()}};addEventListener('message',start);parent.postMessage({readyRedesign:true},location.origin)});
+      if(route==='/'&&anonymous&&!state){
+        const bookmark=document.querySelector('main a[aria-label$="저장하려면 로그인"]');
+        ensure(bookmark&&rect(bookmark).height>=44&&bookmark.textContent.trim()==='','anonymous bookmark touch target');
+        bookmark.focus();ensure(document.activeElement===bookmark&&getComputedStyle(bookmark).outlineStyle==='solid','bookmark keyboard focus');
+        bookmark.click();await wait(()=>document.querySelector('#login-title'));
+        document.querySelector('#primary-navigation a[href="/"]').click();await wait(()=>document.querySelector('#home-title'));
+        document.querySelector('#recommendations a[href="/login?returnTo=%2F"]').click();await wait(()=>document.querySelector('#login-title'));
+      }
       const toggle=document.querySelector('button[aria-controls="primary-navigation"]'),nav=document.querySelector('#primary-navigation');
       if(innerWidth<1024){
         ensure(getComputedStyle(nav).display==='none','collapsed mobile navigation');toggle.click();await wait(()=>toggle.getAttribute('aria-expanded')==='true');
@@ -96,6 +116,7 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
     }catch(error){parent.postMessage({redesign:true,route,width:innerWidth,ok:false,error:String(error)},location.origin);}
   `
   const cases = [390, 768, 1440].flatMap(width => paths.map(route => ({ width, route })))
+  for (const width of [390, 1440]) cases.push({ width, route: '/', anonymous: true }, { width, route: '/', anonymous: true, state: 'empty' }, { width, route: '/', state: 'error' })
   const server = await createServer({ root, cacheDir: path.join(temporary, 'vite'), configFile: false, plugins: [react(), {
     name: 'test-only-redesign-pages',
     resolveId(id) { if (id === '/__test__/redesign-entry.tsx') return '\0redesign-entry.tsx' },
@@ -105,11 +126,11 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
       if (url.pathname === '/__test__/redesign-capture') {
         const width = Number(url.searchParams.get('width')) === 390 ? 390 : 1440
         response.setHeader('Content-Type', 'text/html; charset=utf-8')
-        response.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0}iframe{display:block;border:0}</style><iframe width="${width}" height="1100" src="/__test__/redesign-page?route=${encodeURIComponent(url.searchParams.get('route') || '/')}&capture=1"></iframe>`)
+        response.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0}iframe{display:block;border:0}</style><iframe width="${width}" height="1100" src="/__test__/redesign-page?route=${encodeURIComponent(url.searchParams.get('route') || '/')}&anonymous=${url.searchParams.get('anonymous') === '1' ? '1' : '0'}&capture=1"></iframe>`)
         return
       }
       if (url.pathname === '/__test__/redesign') {
-        const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><style>body{margin:0}iframe{display:block;border:0}</style><pre id="result"></pre><script>const results=[],queue=[];let busy=false;const next=()=>{if(busy||!queue.length)return;busy=true;queue.shift().postMessage({startRedesign:true},location.origin)};addEventListener('message',e=>{if(e.origin!==location.origin)return;if(e.data?.readyRedesign){queue.push(e.source);next()}if(e.data?.redesign){results.push(e.data);busy=false;next();if(results.length===${cases.length})document.querySelector('#result').textContent=JSON.stringify(results)}});</script>${cases.map(c => `<iframe width="${c.width}" height="1100" src="/__test__/redesign-page?route=${encodeURIComponent(c.route)}"></iframe>`).join('')}</html>`
+        const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><style>body{margin:0}iframe{display:block;border:0}</style><pre id="result"></pre><script>const results=[],queue=[];let busy=false;const next=()=>{if(busy||!queue.length)return;busy=true;queue.shift().postMessage({startRedesign:true},location.origin)};addEventListener('message',e=>{if(e.origin!==location.origin)return;if(e.data?.readyRedesign){queue.push(e.source);next()}if(e.data?.redesign){results.push(e.data);busy=false;next();if(results.length===${cases.length})document.querySelector('#result').textContent=JSON.stringify(results)}});</script>${cases.map(c => `<iframe width="${c.width}" height="1100" src="/__test__/redesign-page?route=${encodeURIComponent(c.route)}&anonymous=${c.anonymous ? '1' : '0'}&state=${c.state || ''}"></iframe>`).join('')}</html>`
         response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end(html); return
       }
       if (url.pathname !== '/__test__/redesign-page') return next()
@@ -129,8 +150,8 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
     if (process.env.YON_UI_SCREENSHOTS === '1') {
       const report = path.join(cache, 'redesign-review')
       fs.mkdirSync(report, { recursive: true })
-      for (const [name, route, width] of [['home', '/', 1440], ['search', '/opportunities', 1440], ['detail', '/opportunities/42', 1440], ['login', '/login', 390], ['home-mobile', '/', 390], ['profile', '/mypage', 1440], ['notifications', '/notifications', 1440], ['privacy', '/privacy', 390]]) {
-        await promisify(execFile)(browser, ['--headless', '--disable-gpu', '--no-first-run', '--disable-background-networking', '--hide-scrollbars', `--user-data-dir=${path.join(temporary, 'shots')}`, `--window-size=${width},1100`, '--virtual-time-budget=5000', `--screenshot=${path.join(report, name + '.png')}`, `${base}/__test__/redesign-capture?route=${encodeURIComponent(route)}&width=${width}`], { windowsHide: true, timeout: 30_000, maxBuffer: 500_000 })
+      for (const [name, route, width, anonymous] of [['home', '/', 1440], ['search', '/opportunities', 1440], ['detail', '/opportunities/42', 1440], ['login', '/login', 390], ['home-mobile', '/', 390], ['home-anonymous', '/', 1440, true], ['home-anonymous-mobile', '/', 390, true], ['profile', '/mypage', 1440], ['notifications', '/notifications', 1440], ['privacy', '/privacy', 390]]) {
+        await promisify(execFile)(browser, ['--headless', '--disable-gpu', '--no-first-run', '--disable-background-networking', '--hide-scrollbars', `--user-data-dir=${path.join(temporary, 'shots')}`, `--window-size=${width},1100`, '--virtual-time-budget=5000', `--screenshot=${path.join(report, name + '.png')}`, `${base}/__test__/redesign-capture?route=${encodeURIComponent(route)}&width=${width}&anonymous=${anonymous ? '1' : '0'}`], { windowsHide: true, timeout: 30_000, maxBuffer: 500_000 })
       }
     }
   } finally {

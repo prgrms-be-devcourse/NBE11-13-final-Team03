@@ -34,7 +34,7 @@ test('header distinguishes checking, anonymous, authenticated and verification e
   assert.match(render(), /로그인 상태 확인 중/)
   const anonymous = render({ auth: null })
   assert.match(anonymous, /href="\/login\?returnTo=%2F"/)
-  assert.match(anonymous, /공개 기회 탐색/)
+  assert.match(anonymous, /최근 등록된 기회/)
   const authenticated = render({ auth: user, recommendations: [] })
   assert.match(authenticated, /테스트 회원님/)
   assert.match(authenticated, /로그아웃/)

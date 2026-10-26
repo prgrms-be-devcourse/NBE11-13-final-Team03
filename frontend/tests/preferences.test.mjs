@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import { AxiosError } from 'axios'
-import { QueryClient, QueryObserver } from '@tanstack/react-query'
+import { MutationObserver, QueryClient, QueryObserver } from '@tanstack/react-query'
 import { apiClient } from '../src/api/client.ts'
 import { ApiError } from '../src/api/ApiError.ts'
 import { authQueryKey, resetPersonalizedQueries } from '../src/auth/session.ts'
-import { correctedSavedPage, getSavedOpportunities, isSavedOpportunities, savedOpportunitiesQuery, saveOpportunity, unsaveOpportunity, hideOpportunity, unhideOpportunity, runPreferenceChange } from '../src/api/preferences.ts'
+import { homeLatestQuery } from '../src/pages/home/homeQueries.ts'
+import { recommendationsQuery } from '../src/api/recommendations.ts'
+import { latestItem, latestResponse } from './home-fixtures.mjs'
+import { PreferenceRefreshError, correctedSavedPage, getSavedOpportunities, isSavedOpportunities, savedOpportunitiesQuery, saveOpportunity, unsaveOpportunity, hideOpportunity, unhideOpportunity, runPreferenceChange, refreshPreferenceQueries } from '../src/api/preferences.ts'
 
 const adapter = apiClient.defaults.adapter, originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
 afterEach(() => {
@@ -20,6 +23,63 @@ const user = { id: 11, nickname: '테스트 회원', email: null, role: 'USER' }
 const item = { opportunityId: 42, type: 'YOUTH_POLICY', title: '테스트 저장 공고', category: '일자리', subCategory: null, savedAt: '2026-10-26T09:00:00.123456' }
 const page = { content: [item], page: 0, size: 20, totalElements: 1, totalPages: 1, hasNext: false }
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done }); return { resolve, promise } }
+
+test('confirmed home save 204 is not mistaken for missing opportunity when recommendation refresh returns profile 404', async () => {
+  csrf(); const queryClient = client(), calls = []; let saved = false
+  queryClient.setQueryData(authQueryKey, user)
+  const latest = { ...latestResponse, content: [{ ...latestItem, opportunityId: 42 }] }
+  apiClient.defaults.adapter = async config => {
+    if (config.url === '/opportunities/42/save') {
+      assert.equal(config.method, 'post'); assert.equal(config.requiresAuth, true)
+      assert.equal(config.headers.get('X-XSRF-TOKEN'), 'test-preference')
+      calls.push(['POST', '/api/opportunities/42/save', 204]); saved = true; return response(config)
+    }
+    if (config.url === '/opportunities') {
+      calls.push(['GET', '/api/opportunities', 200])
+      return response(config, { ...latest, content: [{ ...latest.content[0], saved }] }, 200)
+    }
+    assert.equal(config.url, '/users/me/recommendations')
+    calls.push(['GET', '/api/users/me/recommendations', 404, 'ELIGIBILITY_001'])
+    throw new AxiosError('test only', 'ERR_BAD_RESPONSE', config, {}, response(config, { code: 'ELIGIBILITY_001', message: 'test only', fieldErrors: {} }, 404))
+  }
+  const home = new QueryObserver(queryClient, { ...homeLatestQuery(), initialData: latest, staleTime: Infinity })
+  const recommendations = new QueryObserver(queryClient, recommendationsQuery(user.id))
+  const offHome = home.subscribe(() => {}), offRecommendations = recommendations.subscribe(() => {})
+  try {
+    await recommendations.refetch(); calls.length = 0
+    const mutation = new MutationObserver(queryClient, { mutationFn: () => runPreferenceChange(queryClient, queryClient.getQueryData(authQueryKey), 42, 'save', 'OTHER') })
+    await assert.doesNotReject(mutation.mutate())
+    assert.equal(mutation.getCurrentResult().status, 'success')
+    assert.equal(home.getCurrentResult().data.content[0].opportunityId, 42)
+    assert.equal(home.getCurrentResult().data.content[0].saved, true)
+    assert.equal(recommendations.getCurrentResult().error.code, 'ELIGIBILITY_001')
+    assert.deepEqual(calls.filter(call => call[0] === 'POST'), [['POST', '/api/opportunities/42/save', 204]])
+    assert.ok(calls.some(call => call[1] === '/api/users/me/recommendations' && call[2] === 404))
+  } finally { offHome(); offRecommendations(); queryClient.clear() }
+})
+
+test('post-204 read failure is a refresh error, and read-only retry recovers without a second save', async () => {
+  csrf(); const queryClient = client(); queryClient.setQueryData(authQueryKey, user)
+  const owner = queryClient.getQueryData(authQueryKey)
+  let failed = true, posts = 0
+  const latest = { ...latestResponse, content: [{ ...latestItem, opportunityId: 42 }] }
+  apiClient.defaults.adapter = async config => {
+    if (config.url === '/opportunities/42/save') { posts++; return response(config) }
+    assert.equal(config.url, '/opportunities')
+    if (failed) throw new AxiosError('test only', 'ERR_BAD_RESPONSE', config, {}, response(config, { code: 'COMMON_003', message: 'test only', fieldErrors: {} }, 503))
+    return response(config, { ...latest, content: [{ ...latest.content[0], saved: true }] }, 200)
+  }
+  const home = new QueryObserver(queryClient, { ...homeLatestQuery(), initialData: latest, staleTime: Infinity })
+  const off = home.subscribe(() => {})
+  try {
+    await assert.rejects(runPreferenceChange(queryClient, owner, 42, 'save', 'OTHER'), error => error instanceof PreferenceRefreshError)
+    assert.equal(home.getCurrentResult().data.content[0].saved, false)
+    failed = false
+    await refreshPreferenceQueries(queryClient, owner, 42, 'save')
+    assert.equal(home.getCurrentResult().data.content[0].saved, true)
+    assert.equal(posts, 1)
+  } finally { off(); queryClient.clear() }
+})
 
 test('save/unsave/hide/unhide independently use exact paths, 204, auth and CSRF; only POST sends source and no behavior request is added', async () => {
   csrf(); const calls = [], controller = new AbortController()
@@ -41,11 +101,11 @@ test('invalid IDs never send a request and any non-204 response is not accepted 
 })
 test('401/404/403 and network failures propagate without fake success or an extra preference call', async () => {
   csrf(); let calls = 0
-  for (const [status, code] of [[401, 'AUTH001'], [404, 'PREFERENCE_001'], [404, 'USER_001'], [403, 'TEST']]) {
+  for (const [status, code] of [[401, 'AUTH001'], [404, 'PREFERENCE_001'], [404, 'USER_001'], [403, 'TEST'], [409, 'TEST']]) {
     apiClient.defaults.adapter = async (config) => { calls++; throw new AxiosError('private', 'ERR_BAD_RESPONSE', config, {}, response(config, { code, message: 'fixture', fieldErrors: {} }, status)) }
     await assert.rejects(unsaveOpportunity(42), (error) => error.status === status && error.code === code)
   }
-  assert.equal(calls, 4)
+  assert.equal(calls, 5)
   apiClient.defaults.adapter = async (config) => { throw new AxiosError('private', 'ERR_NETWORK', config, {}) }
   await assert.rejects(hideOpportunity(42), (error) => error.kind === 'network')
 })

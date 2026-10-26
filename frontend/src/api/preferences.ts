@@ -10,6 +10,12 @@ export type PreferenceSource = 'SEARCH' | 'RECOMMENDATION' | 'SAVED' | 'OTHER'
 export type PreferenceChange = 'save' | 'unsave' | 'hide' | 'unhide'
 export type SavedOpportunity = { opportunityId: number; type: OpportunityType; title: string; category: string | null; subCategory: string | null; savedAt: string }
 export type SavedOpportunities = { content: SavedOpportunity[]; page: number; size: number; totalElements: number; totalPages: number; hasNext: boolean }
+export class PreferenceRefreshError extends Error {
+  constructor() {
+    super('변경은 완료됐지만 최신 상태를 확인하지 못했어요. 상태를 다시 조회해 주세요.')
+    this.name = 'PreferenceRefreshError'
+  }
+}
 const integer = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const text = (value: unknown) => value === null || typeof value === 'string'
@@ -68,7 +74,18 @@ export async function refreshPreferenceQueries(client: QueryClient, owner: AuthU
   // 변경 전에 시작된 GET이 늦게 도착해 saved를 되돌리지 않도록 취소 후 재조회한다.
   await client.cancelQueries({ predicate })
   assertPreferenceOwner(client, owner)
-  await client.invalidateQueries({ predicate }, { throwOnError: true })
+  const results = await Promise.allSettled(client.getQueryCache().findAll({ predicate }).map(async query => {
+    try {
+      await client.invalidateQueries({ queryKey: query.queryKey, exact: true }, { throwOnError: true })
+    } catch (error) {
+      // 프로필 미설정은 추천 화면의 상태이며, 성공한 저장·숨김의 실패가 아니다.
+      if (query.queryKey[0] === 'recommendations' && error instanceof ApiError && error.status === 404 && error.code === 'ELIGIBILITY_001') return
+      throw error
+    }
+  }))
+  assertPreferenceOwner(client, owner)
+  const failure = results.find(result => result.status === 'rejected')
+  if (failure) throw failure.reason
 }
 type Attempt = { owner: AuthUser; change: PreferenceChange; promise: Promise<void> }
 const attempts = new WeakMap<QueryClient, Map<string, Attempt>>()
@@ -85,7 +102,12 @@ export function runPreferenceChange(client: QueryClient, owner: AuthUser, id: nu
     assertPreferenceOwner(client, owner, signal)
     await changePreference(id, change, source, signal)
     assertPreferenceOwner(client, owner, signal)
-    await refreshPreferenceQueries(client, owner, id, change)
+    try {
+      await refreshPreferenceQueries(client, owner, id, change)
+    } catch {
+      assertPreferenceOwner(client, owner, signal)
+      throw new PreferenceRefreshError()
+    }
   })().finally(() => { if (pending.get(key)?.promise === promise) pending.delete(key) })
   pending.set(key, { owner, change, promise })
   return promise
