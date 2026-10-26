@@ -17,12 +17,12 @@ public class MatchBatchObservationListener {
 
     @TransactionalEventListener(phase=TransactionPhase.AFTER_COMMIT,fallbackExecution=true)
     public void refreshed(EligibilityResultsRefreshed event) {
-        long cursor=0; int visited=0,unchanged=0,created=0,failed=0;
+        long cursor=0; int visited=0,unchanged=0,observed=0,created=0,failed=0;
         try {
             MatchCandidatePage.Run page;
             do {
                 page=pages.scanUser(event.userId(),cursor,PAGE_SIZE);
-                visited+=page.visited(); unchanged+=page.unchanged(); created+=page.created(); failed+=page.failed();
+                visited+=page.visited(); unchanged+=page.unchanged(); observed+=page.observed(); created+=page.created(); failed+=page.failed();
                 if (page.failed()>0) {
                     log.warn("Match batch observation needs next full sweep: userId={}, failed={}",event.userId(),page.failed());
                 }
@@ -30,9 +30,9 @@ public class MatchBatchObservationListener {
                     throw new IllegalStateException("Match page cursor did not advance");
                 cursor=page.lastOpportunityId();
             } while (page.hasNext());
-            // Locked observations = visited - unchanged - failed. This is the number to watch before enabling the flag.
-            log.debug("Match batch observation: userId={}, visited={}, unchanged={}, created={}, failed={}",
-                    event.userId(),visited,unchanged,created,failed);
+            // observed counts every locked observe() attempt (failed ones included). Watch it before enabling the flag.
+            log.debug("Match batch observation: userId={}, visited={}, unchanged={}, observed={}, created={}, failed={}",
+                    event.userId(),visited,unchanged,observed,created,failed);
         } catch (RuntimeException failure) {
             // No durable event queue here: every successful later batch (including zero writes) rescans from zero.
             log.warn("Match batch observation deferred: userId={}, error={}",event.userId(),failure.getClass().getSimpleName());

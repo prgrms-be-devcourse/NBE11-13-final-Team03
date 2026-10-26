@@ -40,9 +40,10 @@ public class MatchCandidatePage {
     private final MatchTrackingProperties settings;
     private final MatchObservationTransaction observations;
     private final Clock clock;
-    public record Run(long lastOpportunityId,boolean hasNext,int visited,int unchanged,int created,int failed) { }
+    /** observed = locked observe() attempts, including the ones that failed. This is the activation metric. */
+    public record Run(long lastOpportunityId,boolean hasNext,int visited,int unchanged,int observed,int created,int failed) { }
     private record Row(long opportunityId,long versionId,int versionNo,String normalizationVersion,long profileId,long profileVersion,
-            String ruleVersion,EligibilityStatus status,int missing,int check,boolean saved,boolean interest,String lastInputKey) { }
+            String ruleVersion,String status,int missing,int check,boolean saved,boolean interest,String lastInputKey) { }
 
     @Transactional(propagation=Propagation.NOT_SUPPORTED)
     public Run scanUser(long userId,long afterOpportunityId,int size) {
@@ -67,7 +68,7 @@ public class MatchCandidatePage {
                   AND r.profile_version=p.profile_version AND r.rule_version=? AND (r.valid_until IS NULL OR r.valid_until>?)
                 ORDER BY o.id LIMIT ?
                 """,(rs,row)->new Row(rs.getLong(1),rs.getLong(2),rs.getInt(3),rs.getString(4),rs.getLong(5),rs.getLong(6),
-                        rs.getString(7),EligibilityStatus.valueOf(rs.getString(8)),rs.getInt(9),rs.getInt(10),
+                        rs.getString(7),rs.getString(8),rs.getInt(9),rs.getInt(10),
                         rs.getBoolean(11),rs.getBoolean(12),rs.getString(13)),
                 userId,afterOpportunityId,EligibilityResultService.RULE_VERSION,today,size+1);
         var page=rows.stream().limit(size).toList();
@@ -75,20 +76,22 @@ public class MatchCandidatePage {
                 : windows.findRowsByVersionIdIn(page.stream().map(Row::versionId).distinct().toList()).stream()
                     .collect(Collectors.groupingBy(ApplicationWindowRow::versionId,Collectors.mapping(w->new ApplicationPeriod(
                             w.periodType(),w.startDate(),w.endDate(),w.validationStatus(),w.periodText()),Collectors.toList())));
-        int unchanged=0,created=0,failed=0; long last=afterOpportunityId;
+        int unchanged=0,observed=0,created=0,failed=0; long last=afterOpportunityId;
         for (var row:page) {
             try {
+                // Row-level input problems (unknown status, blank version) fail only this policy, not the page.
                 var input=new MatchObservation(row.versionId(),row.versionNo(),row.profileId(),row.profileVersion(),row.ruleVersion(),
-                        row.normalizationVersion(),row.status(),OpportunityType.YOUTH_POLICY,PersonalizationStatus.PERSONALIZABLE,
+                        row.normalizationVersion(),EligibilityStatus.valueOf(row.status()),OpportunityType.YOUTH_POLICY,PersonalizationStatus.PERSONALIZABLE,
                         applicationStatus.calculate(periods.getOrDefault(row.versionId(),List.of()),today),row.saved(),row.interest(),
                         row.missing(),row.check(),today);
-                if (input.inputKey(settings.possibly()).equals(row.lastInputKey())) unchanged++;
-                else if (observations.observe(userId,row.opportunityId()).status()==MatchObservationTransaction.Status.CANDIDATE_CREATED) created++;
+                if (input.inputKey(settings.possibly()).equals(row.lastInputKey())) { unchanged++; last=row.opportunityId(); continue; }
+                observed++;
+                if (observations.observe(userId,row.opportunityId()).status()==MatchObservationTransaction.Status.CANDIDATE_CREATED) created++;
             } catch (RuntimeException failure) {
                 failed++; log.warn("Match observation failed: userId={}, opportunityId={}, error={}",userId,row.opportunityId(),failure.getClass().getSimpleName());
             }
             last=row.opportunityId();
         }
-        return new Run(last,rows.size()>size,page.size(),unchanged,created,failed);
+        return new Run(last,rows.size()>size,page.size(),unchanged,observed,created,failed);
     }
 }
