@@ -79,7 +79,7 @@ import java.util.List;
         "yon.normalization.ingest.batch-size=${YON_INGEST_BENCH_BATCH_SIZE:100}",
         "yon.normalization.ingest.async-commit=${YON_INGEST_BENCH_ASYNC_COMMIT:false}"
 })
-@Import({RawIngestBenchmarkTest.TimedDataSourceConfig.class,
+@Import({RawIngestBenchmarkTest.TimedDataSourceConfig.class, com.team3.dataservice.config.PostgresJdbcTuning.class,
         RawIngestProcessor.class, RawRecordReader.class, RawRecordNormalizer.class,
         TrainingCourseNormalizationService.class, YouthPolicyNormalizationService.class,
         AgeNormalizer.class, ApplicationPeriodNormalizer.class, RegionNormalizer.class, RegionDirectory.class,
@@ -121,6 +121,10 @@ class RawIngestBenchmarkTest {
     private EntityManager em;
     @Value("${yon.normalization.ingest.batch-size:100}")
     private int batchSize;
+    @Value("${spring.jpa.properties.hibernate.jdbc.batch_size:(없음)}")
+    private String hibernateBatchSize;
+    @Value("${spring.jpa.properties.hibernate.order_inserts:false}")
+    private String hibernateOrderInserts;
 
     private JdbcTemplate jdbc;
     private TransactionTemplate tx;
@@ -356,12 +360,14 @@ class RawIngestBenchmarkTest {
                 + ", checkpoint_timeout=" + show("checkpoint_timeout") + ", wal_compression=" + show("wal_compression")
                 + ", full_page_writes=" + show("full_page_writes"));
         row(sb, "JDBC URL 옵션", jdbcOptions());
+        row(sb, "JDBC 드라이버 옵션 (Hikari)", hikariProperties());
+        row(sb, "Hibernate 묶음 (jdbc.batch_size, order_inserts)", hibernateBatchSize + ", " + hibernateOrderInserts);
         row(sb, "원본 데이터", sourceSchema() == null ? "합성 (청년정책 " + youthPercent + "%)" : "실데이터 (" + sourceSchema() + ".raw, 청년정책 " + sourceYouthPercent() + ")");
         row(sb, "첫 적재 경로", firstLoad);
         row(sb, "정규화 트랜잭션 비동기 커밋 (async-commit)", env("YON_INGEST_BENCH_ASYNC_COMMIT", "false"));
         row(sb, "반복", repeat + "회");
         row(sb, "처리 묶음 크기 (yon.normalization.ingest.batch-size)", String.valueOf(batchSize));
-        row(sb, "트랜잭션 크기 (비교 대상)", txSizes + " (원본 N건 = REQUIRES_NEW 1개, 원본마다 flush·clear)");
+        row(sb, "트랜잭션 크기 (비교 대상)", txSizes + " (원본 N건 = REQUIRES_NEW 1개, 묶음 끝에 flush·clear)");
         row(sb, "대조 조회", "id 커서 + NOT EXISTS(더 새 원본) 순회");
 
         sb.append("\n## 처리 시간\n\n| 트랜잭션 크기 | 시나리오 | 원본 N | 회차 | 처리 건수 | 전체(ms) | 건당(ms) | 초당 건수 | JDBC(ms) | JDBC 비중 | DB 밖(ms, 추정) |\n")
@@ -441,6 +447,15 @@ class RawIngestBenchmarkTest {
             Double percent = jdbc.queryForObject("SELECT round(100.0 * count(*) FILTER (WHERE source_code = 'YOUTH_POLICY') / count(*), 1) FROM "
                     + sourceSchema() + ".raw", Double.class);
             return percent + "%";
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    private String hikariProperties() {
+        try {
+            com.zaxxer.hikari.HikariDataSource hikari = dataSource.unwrap(com.zaxxer.hikari.HikariDataSource.class);
+            return hikari.getDataSourceProperties().isEmpty() ? "(없음)" : hikari.getDataSourceProperties().toString();
         } catch (Exception e) {
             return "?";
         }

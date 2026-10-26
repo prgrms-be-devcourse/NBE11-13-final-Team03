@@ -25,7 +25,8 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * 트랜잭션: 원본 transactionSize건을 트랜잭션 1개(REQUIRES_NEW)로 정규화하고 처리 상태를 함께 기록한다.
  * 커밋(WAL fsync) 대기가 첫 적재 시간의 83%여서 묶는다 (ingest 벤치마크 2026-10-20). 묶음 안의 한 건이 예외를 내면 그 묶음 전체가
- * 롤백되고, 그 묶음만 1건씩 다시 처리해 나머지는 저장한다. 원본마다 flush·clear 해서 영속성 컨텍스트가 묶음 크기만큼 쌓이지 않게 한다.
+ * 롤백되고, 그 묶음만 1건씩 다시 처리해 나머지는 저장한다. 묶음 끝에 한 번 flush·clear 해서 같은 테이블 INSERT를 묶어 보낸다
+ * (엔티티 ID는 시퀀스, hibernate.jdbc.batch_size). 영속성 컨텍스트에는 묶음 크기만큼 엔티티가 쌓인다.
  *
  * 한 애플리케이션 안에서는 묶음 단위로 직렬화한다 (같은 원본을 동시에 정규화하지 않도록). 여러 인스턴스는 SKIP LOCKED로 요청을 나눈다.
  */
@@ -165,12 +166,24 @@ public class RawIngestProcessor {
         try {
             return recordTx.execute(status -> {
                 relaxCommit();
-                return chunk.stream().map(this::normalizeAndRecord).toList();
+                if (!distinctRecords(chunk)) {
+                    // 같은 (출처, 외부 ID)가 묶음에 두 번 있으면 뒤 원본이 앞 원본의 공고를 찾아야 하므로 원본마다 flush한다
+                    return chunk.stream().map(this::normalizeAndRecord).toList();
+                }
+                // 원본마다 flush하지 않고 묶음 끝에 한 번 flush해서 같은 테이블 INSERT를 묶어 보낸다 (hibernate.jdbc.batch_size)
+                List<Boolean> results = chunk.stream().map(this::normalize).toList();
+                em.flush();
+                em.clear();
+                return results;
             });
         } catch (RuntimeException e) {
             log.warn("Raw record chunk failed, retrying one by one: size={}, cause={}", chunk.size(), e.toString());
             return chunk.stream().map(this::processOne).toList();
         }
+    }
+
+    private static boolean distinctRecords(List<RawRecordRow> chunk) {
+        return chunk.stream().map(r -> r.sourceId() + "\u0000" + r.externalId()).distinct().count() == chunk.size();
     }
 
     /** 원본 한 건을 트랜잭션 1개로 처리한다. 예외로 실패하면 처리 상태를 남기지 않아 다음 대조 때 다시 시도된다 */
@@ -190,11 +203,17 @@ public class RawIngestProcessor {
 
     /** 현재 트랜잭션 안에서 정규화하고 처리 상태를 기록한다. @return 정규화했으면 true, 원본 데이터 문제면 false */
     private boolean normalizeAndRecord(RawRecordRow row) {
+        boolean normalized = normalize(row);
+        em.flush();
+        em.clear();
+        return normalized;
+    }
+
+    /** flush 없이 정규화하고 처리 상태를 기록한다. 같은 트랜잭션의 끝에서 flush해야 한다 */
+    private boolean normalize(RawRecordRow row) {
         RawRecordNormalizer.Outcome outcome = normalizer.normalize(row);
         reader.saveState(row, outcome == RawRecordNormalizer.Outcome.NORMALIZED ? NORMALIZED : INVALID,
                 OffsetDateTime.now(KST));
-        em.flush();
-        em.clear();
         return outcome == RawRecordNormalizer.Outcome.NORMALIZED;
     }
 }

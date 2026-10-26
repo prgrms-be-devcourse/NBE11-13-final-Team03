@@ -15,7 +15,9 @@ import java.util.Objects;
 public class Opportunity {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    // 묶음 INSERT(hibernate.jdbc.batch_size)를 쓰려면 IDENTITY가 아니라 시퀀스여야 한다. 50개씩 미리 받는다 (pooled)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "opportunities_seq")
+    @SequenceGenerator(name = "opportunities_seq", sequenceName = "opportunities_seq", allocationSize = 50)
     private Long id;
 
     @Enumerated(EnumType.STRING)
