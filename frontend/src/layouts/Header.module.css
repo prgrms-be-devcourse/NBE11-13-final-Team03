@@ -105,6 +105,16 @@
   color: var(--color-text-primary);
 }
 
+.notificationBadge {
+  margin-inline-start: var(--space-1);
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: var(--font-size-small);
+  font-variant-numeric: tabular-nums;
+}
+
 .active,
 .active:hover {
   background: var(--color-primary-soft);

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import AuthControls from './AuthControls'
+import NotificationBadge from './NotificationBadge'
 import styles from './Header.module.css'
 
 const navigation = [
@@ -65,6 +66,7 @@ function Header() {
                     onClick={() => setIsMenuOpen(false)}
                   >
                     {label}
+                    {to === '/notifications' && <NotificationBadge />}
                   </NavLink>
                 </li>
               ))}

@@ -9,6 +9,7 @@ import LoginPage from '../pages/auth/LoginPage'
 import LoginResultPage from '../pages/auth/LoginResultPage'
 import { MyPage, OnboardingPage, ProfileSettingsPage } from '../pages/profile/ProfilePages'
 import SavedOpportunitiesPage from '../pages/saved/SavedOpportunitiesPage'
+import { NotificationsPage, NotificationSettingsPage } from '../pages/notifications/NotificationPages'
 
 function AppRoutes() {
   return (
@@ -25,8 +26,8 @@ function AppRoutes() {
         <Route path="mypage" element={<MyPage />} />
         <Route path="mypage/profile" element={<ProfileSettingsPage kind="profile" />} />
         <Route path="mypage/interests" element={<ProfileSettingsPage kind="interests" />} />
-        <Route path="notifications" element={<PlaceholderPage title="알림 목록" description="기회의 변경 소식을 확인할 알림 화면을 준비하고 있어요." />} />
-        <Route path="settings/notifications" element={<PlaceholderPage title="알림 설정" description="알림 수신 방법을 관리할 설정 화면을 준비하고 있어요." />} />
+        <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="settings/notifications" element={<NotificationSettingsPage />} />
         <Route path="*" element={<PlaceholderPage title="404 · 페이지를 찾을 수 없어요" description="주소를 확인하거나 상단 메뉴에서 원하는 화면으로 이동해 주세요." />} />
       </Route>
     </Routes></AuthProvider>

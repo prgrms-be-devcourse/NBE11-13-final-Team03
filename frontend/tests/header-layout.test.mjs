@@ -17,6 +17,7 @@ for (const extension of ['.ts', '.tsx']) require.extensions[extension] = (module
 const React = require('react'), e = React.createElement
 const { renderToStaticMarkup } = require('react-dom/server')
 const { MemoryRouter } = require('react-router-dom')
+const { QueryClient, QueryClientProvider } = require('@tanstack/react-query')
 const Header = require('../src/layouts/Header.tsx').default
 const { AuthContext } = require('../src/auth/AuthContext.ts')
 const base = { status: 'anonymous', logoutPending: false, logoutError: null, retry: () => {}, completeOAuth: async () => {}, logout: async () => {} }
@@ -32,7 +33,11 @@ test('Chrome renders desktop brand/menu/auth on one centered row and mobile disc
     const css = ['src/tokens.css', 'src/index.css', 'src/components/ui/Button.module.css', 'src/layouts/Header.module.css'].map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n').replace("@import './tokens.css';", '')
     const escape = (value) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
     const frames = fixtures.map((fixture) => {
-      let header = renderToStaticMarkup(e(MemoryRouter, null, e(AuthContext.Provider, { value: fixture.auth }, e(Header))))
+      const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, gcTime: Infinity } } })
+      client.setQueryData(['notifications', 1, 'unread'], { available: true, unreadCount: 123 })
+      let header
+      try { header = renderToStaticMarkup(e(QueryClientProvider, { client }, e(MemoryRouter, null, e(AuthContext.Provider, { value: fixture.auth }, e(Header))))) }
+      finally { client.clear() }
       header = header.replace('/logo/yon-symbol.png', pathToFileURL(path.join(root, 'public/logo/yon-symbol.png')).href)
       const document = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>${css}</style></head><body>${header}</body></html>`
       return `<iframe width="${fixture.width}" height="400" data-open="${!!fixture.open}" style="border:0;display:block" srcdoc="${escape(document)}"></iframe>`

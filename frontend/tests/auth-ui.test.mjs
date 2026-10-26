@@ -96,7 +96,8 @@ test('header keeps the existing five destinations and marks the parent menu acti
   for (const [path, label] of [['/', '홈'], ['/opportunities/42', '기회 탐색'], ['/saved', '저장한 기회'], ['/notifications', '알림'], ['/mypage/profile', '마이페이지']]) {
     const header = render({ path, auth: user }).match(/<header[\s\S]*?<\/header>/)[0]
     assert.equal((header.match(/aria-current="page"/g) || []).length, 1)
-    assert.match(header, new RegExp(`<a[^>]*aria-current="page"[^>]*>${label}</a>`))
+    const badge = label === '알림' ? '(?:<span[^>]*aria-label="미읽음 알림[^"\\n]*"[^>]*>[^<]*</span>)?' : ''
+    assert.match(header, new RegExp(`<a[^>]*aria-current="page"[^>]*>${label}${badge}</a>`))
     for (const destination of ['/', '/opportunities', '/saved', '/notifications', '/mypage']) assert.ok(header.includes(`href="${destination}"`))
     assert.match(header, /aria-label="Y:ON 홈"/)
   }
