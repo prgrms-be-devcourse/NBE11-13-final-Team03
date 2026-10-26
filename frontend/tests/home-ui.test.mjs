@@ -29,7 +29,7 @@ const { recommendationsQuery } = require('../src/api/recommendations.ts')
 const { ApiError } = require('../src/api/ApiError.ts')
 const element = React.createElement
 
-function render({ recommendationsOnly = false, userId, data, error, cachedRecommendations } = {}) {
+function render({ recommendationsOnly = false, userId, authStatus, data, error, cachedRecommendations } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, gcTime: Infinity, staleTime: Infinity } } })
   client.setQueryData(['auth', 'user'], null)
   const key = recommendationsOnly ? recommendationsQuery(userId).queryKey : homeLatestQuery().queryKey
@@ -41,7 +41,7 @@ function render({ recommendationsOnly = false, userId, data, error, cachedRecomm
   }
   try {
     return renderToStaticMarkup(element(QueryClientProvider, { client }, element(MemoryRouter, { initialEntries: ['/'] },
-      recommendationsOnly ? element(RecommendationsSection, { confirmedUserId: userId }) : element(AppRoutes))))
+      recommendationsOnly ? element(RecommendationsSection, { confirmedUserId: userId, authStatus }) : element(AppRoutes))))
   } finally { client.clear() }
 }
 
@@ -144,4 +144,25 @@ test('home CSS defines single-column mobile, two-column tablet and three-column 
   assert.match(css, /@media \(min-width: 1024px\)[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/)
   assert.match(css, /min-block-size: 2\.75rem/)
   assert.match(css, /overflow-wrap: anywhere/)
+})
+
+test('unconfirmed authentication never renders cached recommendations even when a previous user ID remains', () => {
+  for (const authStatus of ['checking', 'anonymous', 'error']) {
+    const html = render({ recommendationsOnly: true, userId: 11, authStatus, data: [policyRecommendation], cachedRecommendations: [policyRecommendation] })
+    assert.doesNotMatch(html, /테스트 정책 추천|서버가 제공한 실제 판정/)
+    if (authStatus === 'checking') assert.match(html, /로그인 상태를 확인하고/)
+    if (authStatus === 'anonymous') assert.match(html, /카카오로 로그인하기/)
+    if (authStatus === 'error') assert.match(html, /인증 상태를 확인하지 못했어요/)
+  }
+})
+
+test('nullable recommendation metadata renders safely without invented region, deadline or interest-match badges', () => {
+  const html = render({ recommendationsOnly: true, userId: 11, authStatus: 'authenticated', data: [{ ...policyRecommendation,
+    title: '', category: null, subCategory: '', detailCategory: null, regions: [], createdAt: null,
+    applicationEndDate: null, trainingStartDate: null,
+    recommendationReasons: { badges: ['신청 조건 충족'], description: '저장된 최신 판정에서 신청 조건을 충족합니다.' } }] })
+  assert.match(html, /제목 미확인/)
+  assert.match(html, /분류 미확인/)
+  assert.match(html, /저장된 최신 판정에서 신청 조건을 충족합니다/)
+  assert.doesNotMatch(html, /신청기간 마감일|교육 시작일|최초 등록일|거주지 조건|관심 분야 일치|관심 분야 관련/)
 })

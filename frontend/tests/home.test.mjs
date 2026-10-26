@@ -7,9 +7,16 @@ import { getRecommendations, isRecommendations, recommendationsQuery } from '../
 import { homeLatestQuery, homeSearchPath } from '../src/pages/home/homeQueries.ts'
 import { parseSearchParams } from '../src/pages/opportunities/searchParams.ts'
 import { latestResponse, policyRecommendation, trainingRecommendation } from './home-fixtures.mjs'
+import { authQueryKey } from '../src/auth/session.ts'
+import { runPreferenceChange } from '../src/api/preferences.ts'
 
 const originalAdapter = apiClient.defaults.adapter
-afterEach(() => { apiClient.defaults.adapter = originalAdapter })
+const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
+afterEach(() => {
+  apiClient.defaults.adapter = originalAdapter
+  if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument)
+  else delete globalThis.document
+})
 const response = (config, data, status = 200) => ({ config, data, status, statusText: '', headers: {} })
 function deferred() {
   let resolve
@@ -72,6 +79,93 @@ test('recommendation DTO validates enum, hierarchy, typed fields, max counts and
     [{ ...policyRecommendation, recommendationReasons: { badges: [1], description: 'test' } }],
     [{ ...policyRecommendation, recommendationReasons: { badges: ['1', '2', '3', '4'], description: 'test' } }],
     Array(6).fill(policyRecommendation)]) assert.equal(isRecommendations(value), false)
+})
+
+test('nullable recommendation fields and interest-free reasons preserve the supplied five-item order', async () => {
+  const data = Array.from({ length: 5 }, (_, index) => ({ ...policyRecommendation, opportunityId: 110 - index,
+    category: null, subCategory: '', detailCategory: null, createdAt: null, applicationEndDate: null, trainingStartDate: null,
+    regions: [], recommendationReasons: { badges: ['신청 조건 충족'], description: '저장된 최신 판정에서 신청 조건을 충족합니다.' } }))
+  apiClient.defaults.adapter = async (config) => response(config, data)
+  assert.equal(isRecommendations(data), true)
+  assert.deepEqual(await getRecommendations(), data)
+})
+
+test('active recommendation observers share reads and refresh server saved state or hidden exclusions after exact 204', async () => {
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'XSRF-TOKEN=test-home' } })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
+  client.setQueryData(authQueryKey, { id: 11, nickname: '테스트 회원', email: null, role: 'USER' })
+  const owner = client.getQueryData(authQueryKey), calls = [], started = deferred(), finish = deferred()
+  let saved = false, hidden = false
+  apiClient.defaults.adapter = async (config) => {
+    calls.push({ url: config.url, method: config.method, source: config.params?.source })
+    if (config.url === '/users/me/recommendations') return response(config, hidden ? [] : [{ ...policyRecommendation, saved }])
+    assert.equal(config.requiresAuth, true)
+    assert.equal(config.headers.get('X-XSRF-TOKEN'), 'test-home')
+    if (config.url === '/opportunities/102/save') {
+      if (config.method === 'post') { started.resolve(); await finish.promise }
+      saved = config.method === 'post'
+    } else {
+      assert.equal(config.url, '/opportunities/102/hide')
+      hidden = true
+    }
+    return response(config, '', 204)
+  }
+  const first = new QueryObserver(client, recommendationsQuery(11)), second = new QueryObserver(client, recommendationsQuery(11))
+  const offFirst = first.subscribe(() => {}), offSecond = second.subscribe(() => {})
+  try {
+    await client.fetchQuery(recommendationsQuery(11))
+    const a = runPreferenceChange(client, owner, 102, 'save', 'RECOMMENDATION')
+    const b = runPreferenceChange(client, owner, 102, 'save', 'RECOMMENDATION')
+    assert.equal(a, b)
+    await started.promise
+    assert.equal(first.getCurrentResult().data[0].saved, false)
+    finish.resolve(); await a
+    assert.equal(first.getCurrentResult().data[0].saved, true)
+    assert.equal(second.getCurrentResult().data[0].saved, true)
+    await runPreferenceChange(client, owner, 102, 'unsave', 'RECOMMENDATION')
+    assert.equal(first.getCurrentResult().data[0].saved, false)
+    await runPreferenceChange(client, owner, 102, 'save', 'RECOMMENDATION')
+    client.setQueryData(['opportunities', 'untouched-by-hide'], { saved: true })
+    client.setQueryData(['opportunity-detail', '102'], { saved: true })
+    await runPreferenceChange(client, owner, 102, 'hide', 'RECOMMENDATION')
+    assert.deepEqual(first.getCurrentResult().data, [])
+    assert.deepEqual(second.getCurrentResult().data, [])
+    assert.equal(saved, true)
+    for (const key of [['opportunities', 'untouched-by-hide'], ['opportunity-detail', '102']]) {
+      assert.deepEqual(client.getQueryData(key), { saved: true })
+      assert.equal(client.getQueryState(key).isInvalidated, false)
+    }
+    assert.equal(calls.filter(call => call.method === 'get').length, 5)
+    assert.deepEqual(calls.filter(call => call.method !== 'get').map(call => [call.method, call.source]),
+      [['post', 'RECOMMENDATION'], ['delete', undefined], ['post', 'RECOMMENDATION'], ['post', 'RECOMMENDATION']])
+    assert.equal(calls.some(call => call.url.includes('behavior')), false)
+  } finally { finish.resolve(); offFirst(); offSecond(); client.clear() }
+})
+
+test('failed recommendation hide leaves observed results intact and a later successful retry refetches the server', async () => {
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'XSRF-TOKEN=test-home' } })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
+  client.setQueryData(authQueryKey, { id: 11, nickname: '테스트 회원', email: null, role: 'USER' })
+  const owner = client.getQueryData(authQueryKey)
+  let fail = true, hidden = false, reads = 0
+  apiClient.defaults.adapter = async (config) => {
+    if (config.url === '/users/me/recommendations') { reads++; return response(config, hidden ? [] : [policyRecommendation]) }
+    assert.equal(config.url, '/opportunities/102/hide')
+    if (fail) throw new AxiosError('fixture', 'ERR_NETWORK', config, {})
+    hidden = true
+    return response(config, '', 204)
+  }
+  const observer = new QueryObserver(client, recommendationsQuery(11)), off = observer.subscribe(() => {})
+  try {
+    await client.fetchQuery(recommendationsQuery(11))
+    await assert.rejects(runPreferenceChange(client, owner, 102, 'hide', 'RECOMMENDATION'), error => error.kind === 'network')
+    assert.deepEqual(observer.getCurrentResult().data, [policyRecommendation])
+    assert.equal(reads, 1)
+    fail = false
+    await runPreferenceChange(client, owner, 102, 'hide', 'RECOMMENDATION')
+    assert.deepEqual(observer.getCurrentResult().data, [])
+    assert.equal(reads, 2)
+  } finally { off(); client.clear() }
 })
 
 test('recommendation profile absence and HTTP/network failures never become an empty result', async () => {
