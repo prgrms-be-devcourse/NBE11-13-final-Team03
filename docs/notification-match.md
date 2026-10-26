@@ -7,21 +7,26 @@ Notification의 NEW_MATCH 수신·슬롯 편입을 연결한다. backend가 대�
 수신 설정·만료·탈퇴·Endpoint를 확인한다. 코드와 로컬 검증 결과이며 운영 활성화 승인은 아니다.
 
 2026-10-26 확정 정책과 잠정 개발값을 다음과 같이 구분한다. 이 표가 이전 문서의 초기 적재·찜 기준선 설명을 대체한다.
+같은 날 팀 결정 5건(프로필 변경 전환 묶음, null 찜 backfill 없음, 요약 운영값 확정, 규칙 변경 시 최초 적합 허용,
+실패 후보 횟수 관측)을 반영했다. 아래 "팀 결정 반영" 절이 각 항목의 동작을 설명한다.
 
 | 항목 | 현재 결정 | 상태 |
 | --- | --- | --- |
 | 찜 이후 정책 변경 | 저장 버전과 같은 정책의 버전 번호를 비교해 `savedVersionNo < sourceVersionNo`일 때만 변경 알림 대상 | 확정 |
 | `saved_version_id = null` 현재 처리 | 버전을 추정하거나 첫 비교 버전을 저장하지 않고 정책 버전 변경 알림에서 제외. 신청 시작·D-7/3/1 등 날짜 알림은 유지 | 현재 처리 방식 확정 |
-| 기존 null 행 전환 방침 | 기존 null 행을 현재 버전으로 일괄 채우는 작업은 없음. 배포 시 1회 backfill 여부·시점·소급 범위는 별도 결정 | 미확정. 위 행은 이 결정을 대신하지 않는다 |
+| 기존 null 행 전환 방침 | backfill 없음. 서비스 배포 전이므로 배포 시점의 찜은 모두 저장 버전을 가진다. 배포 전 DB에 남은 null 행은 DB 초기화로 사라지며, 기존 DB를 그대로 쓸 경우에만 `is_saved AND saved_version_id IS NULL` 행을 현재 버전으로 1회 UPDATE한다. 과거 변경 소급 통지는 없음 | 확정 |
 | 첫 정책 버전 | 실제 첫 버전(`versionNo=1`, 이전 버전 없음)만 BASELINE_SKIPPED로 자동 기록. 변경 이력·이벤트·Outbox 생성 없음 | 확정 |
 | 초기 적재 구분 | 전역 초기화·출처별 최초 적재 완료 계약을 이 알림 경로의 선행 조건으로 요구하지 않음. 이력 누락을 첫 버전으로 간주하지 않음 | 확정 |
 | FIRST_MATCH | 사용자·정책별 최초 적합 후보를 전건 기록. 사용자별 하루 요약 1건에 후보 ID 순으로 예산만큼 포함하고 나머지는 다음 회차에서 재검증 | 확정 |
-| TRANSITION | 실제 NOT_ELIGIBLE → ELIGIBLE 발생마다 1회. 같은 발생의 재처리만 중복 차단 | 확정 |
+| TRANSITION | 실제 NOT_ELIGIBLE → ELIGIBLE 발생마다 1회. 같은 발생의 재처리만 중복 차단. 발생 원인이 사용자의 프로필 변경(`trigger=PROFILE_CHANGED`)이면 개별 BECAME_ELIGIBLE 대신 그날 NEW_MATCH 요약에 포함 | 확정 |
+| 규칙·정규화 버전 변경 | 변경 관측은 TRANSITION을 만들지 않음(상태 변화가 규칙 때문일 수 있음). 그 관측에서 처음 적합해진 쌍은 FIRST_MATCH로 요약에 1회 포함 | 확정 |
+| 같은 정책 중복 후보 | 미발행 FIRST_MATCH와 프로필 변경 TRANSITION이 겹치면 최신 전환이 대표. FIRST_MATCH는 SUPERSEDED_BY_PROFILE_TRANSITION으로 종료 | 확정 |
+| 실패 후보 | 발행 예외마다 `attempt_count`·`last_failed_at`을 기록하고 계속 재시도. 60회부터 error 로그. 자동 폐기 없음, 수동 복구 | 확정 |
 | 대상 | 청년정책의 ELIGIBLE 또는 기준 통과 POSSIBLY_ELIGIBLE. UNKNOWN·훈련과정 제외 | 확정 |
 | POSSIBLY 기준 | 미해결 조건은 정보 없음 + 확인 필요의 합계. 초기 한도 1, 관심 분야 일치 필수 | 확정 정책의 초기 설정값 |
 | 신청 상태 | OPEN·ALWAYS_OPEN 허용. UPCOMING은 찜한 정책만 허용하며 미저장 정책의 선제 안내는 제외 | 현재 개발 기준 |
-| 요약 회차·만료 | 매일 KST 08:30~09:00 생성, 다음 날 09:00 만료. 시작 포함·끝 제외 | 팀 최종 확인 전 잠정값 |
-| NEW_MATCH 푸시 순위 | BECAME_ELIGIBLE 뒤 priority 6 | 팀 최종 확인 전 잠정값 |
+| 요약 회차·만료 | 매일 KST 08:30~09:00 생성, 다음 날 09:00 만료. 시작 포함·끝 제외 | 확정. 처리량(약 750 사용자/일)은 실측 후 조정 |
+| NEW_MATCH 푸시 순위 | BECAME_ELIGIBLE 뒤 priority 6 | 확정 |
 | 추천 페이지 | 실제 프론트 경로를 확인해 summary-link로 주입. 테스트 경로를 운영 기본값으로 사용하지 않음 | 경로 확인 필요 |
 
 정책의 첫 버전 기준선과 사용자의 찜 버전은 서로 다른 기록이다. 첫 버전을 자동 기준선으로 만들더라도
@@ -34,10 +39,10 @@ null 제한은 정책 버전 변경에 대한 것이다. 같은 정책 버전에
    갱신 건수가 0이어도 성공 이벤트를 발행하며, 갱신 자체가 실패한 사용자는 제외한다.
 2. `MatchBatchObservationListener`가 결과가 있는 현재 청년정책을 키셋 페이지로 읽고 `observe`를 호출한다.
    이전 관측 상태와 현재 입력 키를 비교하며 정책·프로필·규칙·신청 상태·찜·관심·미해결 조건 변화를 반영한다.
-   판정/정규화 규칙 버전이 바뀐 관측은 최초 적합/전환 후보 생성을 억제한다.
+   판정/정규화 규칙 버전이 바뀐 관측은 전환 후보 생성을 억제한다. 최초 적합은 억제하지 않는다.
 3. 쌍 상태와 후보를 같은 트랜잭션에서 저장한다. FIRST_MATCH는 occurrence 0, TRANSITION은 발생 번호를 증가시킨다.
    불가→가능의 실제 전환은 FIRST_MATCH보다 우선하며, 가능 상태 유지·같은 입력 재처리는 새 발생이 아니다.
-4. `MatchAutomaticWorker`가 PENDING 전환 후보와 요약 대상 사용자를 제한된 페이지로 처리한다.
+4. `MatchAutomaticWorker`가 PENDING 전환 후보(프로필 변경 원인 제외)와 요약 대상 사용자를 제한된 페이지로 처리한다.
    Outbox 직전 최신 입력과 찜 상태·버전·신청 상태·규칙을 다시 확인한다. 오래된 전환은 제외하고
    신선한 판정/관측이 필요한 후보는 DEFERRED로 남긴다. 정책이 더 이상 관측 대상이 아니면(청년정책 아님·
    PERSONALIZABLE 아님·정책 삭제) 그 후보만 POLICY_UNAVAILABLE로 닫는다. 조건 묶음이 아직 없는 버전은 결과 대기로 본다.
@@ -55,7 +60,48 @@ TRANSITION의 sourceEventId는 발생별 후보 event_id다. 발생 시각부터
 긍정 전환 경로를 양보한 뒤에는 판정 배치 → 후보 관측 → 자동 발행 poll → 기존 전달 경로를 거친다.
 판정 배치의 기본 fixedDelay 10분과 자동 발행 기본 fixedDelay 60초에 각 실행·잠금 대기 시간이 더해지므로
 정책 변경 직후 즉시 발행하거나 10분 이내에 전달됨을 보장하지 않는다. FIRST_MATCH는 다음 요약 생성 창까지 기다린다.
-프로필 변경으로 여러 정책이 신청 가능해지면 TRANSITION은 정책별 인앱 알림을 생성한다. 푸시 슬롯 묶음은 인앱 건수를 합치지 않는다.
+프로필 변경으로 여러 정책이 신청 가능해지면 그 TRANSITION 후보들은 정책별 인앱 알림 대신 다음 요약 창의 NEW_MATCH 1건에 묶인다.
+정책 변경·판정 결과 변경으로 생긴 TRANSITION은 지금처럼 정책별 BECAME_ELIGIBLE이다.
+
+## 팀 결정 반영 (2026-10-26)
+
+### 1. 프로필 변경 전환은 요약으로 묶는다
+
+- 후보 생성은 그대로다. `evidence.trigger=PROFILE_CHANGED`인 TRANSITION 후보는 `MatchCandidateEvent.summarized()`가 참이다.
+- 자동 워커의 개별 전환 페이지는 이 후보를 제외하고, 요약 사용자 페이지는 FIRST_MATCH 또는 이 후보가 있는 사용자를 포함한다.
+  조회는 PostgreSQL JSON 연산자(`evidence->>'trigger'`)를 사용한다.
+- `summarize`는 FIRST_MATCH와 같은 페이지(ID 순, 예산 500)에서 이 후보를 읽고, 개별 전환과 같은 유효성 규칙을 적용한다.
+  발생 번호가 최신이 아니거나 현재 ELIGIBLE이 아니면 `SUPERSEDED_OR_NO_LONGER_ELIGIBLE`, 발생 후 7일이 지났으면 `EXPIRED`로 닫는다.
+- NEW_MATCH payload에 `transitionCount`를 추가했다. `eligibleCount`에 포함되므로 `eligibleCount + possiblyCount = matchCount`는 유지된다.
+  전환이 포함되면 제목은 `새로 신청 가능해진 정책 T건 포함 N건`, 없으면 기존 `가능성 있는 정책 N건`이다. Notification 검증기는 바꾸지 않았다.
+- 같은 정책의 미발행 FIRST_MATCH와 프로필 변경 TRANSITION이 둘 다 유효하면 최신 전환만 요약에 넣고 FIRST_MATCH는
+  `SUPERSEDED_BY_PROFILE_TRANSITION`으로 닫는다(팀 결정: 최신 사건 우선). 전환이 superseded/EXPIRED로 닫히면 FIRST_MATCH가 그대로 요약된다.
+  두 후보가 예산 경계로 다른 회차에 나뉘면 각 회차에서 따로 발행된다.
+- 명시 호출 `transition(userId, candidateId)`에 이 후보를 넘기면 IllegalArgumentException이다.
+- 프로필을 저녁에 바꾸면 다음 날 08:30 창까지 기다린다. 즉시 인앱 알림이 필요한지는 운영에서 다시 본다.
+
+### 2. 기존 찜 null 행 backfill 없음
+
+위 표의 "기존 null 행 전환 방침"을 확정으로 바꿨다. 코드 변경은 없다.
+
+### 3. 요약 운영값 확정
+
+08:30~09:00 KST 생성, 다음 날 09:00 만료, priority 6을 확정값으로 기록했다. `MatchSummaryWindow` 상수와 `PushSlotPolicy`는 그대로다.
+처리량(30분 × 분당 25명 ≈ 750 사용자/일)은 실측 뒤 `max-summary-users-per-run`으로 조정한다.
+
+### 4. 규칙·정규화 버전 변경 시 최초 적합 허용
+
+`MatchPairState.observe`는 규칙 변경 관측에서 TRANSITION은 만들지 않지만, `everMatched=false`인 쌍이 적합이면 FIRST_MATCH 후보를 만든다.
+이미 한 번 적합했던 쌍의 규칙 변경 관측은 이전처럼 알림 없이 상태만 갱신한다.
+이전 구현은 규칙 변경 시점에 처음 적합해진 쌍을 영구 억제했는데, 정규화·판정 로직 개정이 잦을 것으로 보여 허용으로 바꿨다.
+
+### 5. 실패 후보는 세고 버리지 않는다
+
+- `notification_match_candidates.attempt_count`(기본 0)·`last_failed_at`을 추가했다. JPA는 두 열을 쓰지 않고(insertable/updatable=false)
+  워커가 발행 트랜잭션이 예외로 롤백된 뒤 자동 커밋 UPDATE로 올린다. 전환 실패는 그 후보 1건, 요약 실패는 그 사용자의 PENDING 요약 멤버 전부다.
+- 경고 로그에 `attempts=N`을 남기고 60회(`FAILURE_ALERT_ATTEMPTS`)부터 error 레벨이다. 기록 자체가 실패하면 `attempts=null`로 경고만 남긴다.
+- 상한 초과 자동 폐기는 없다. 반복 실패 후보는 운영자가 원인을 확인한 뒤 수동으로 `status='SKIPPED', close_reason='MANUAL'`로 닫거나 데이터를 고친다.
+- 기존 DB: `ddl-auto: update`가 두 열을 추가한다. `attempt_count`는 DB 기본값 0으로 기존 행을 채운다.
 
 ## 새 테이블과 멱등성
 
@@ -168,11 +214,8 @@ fixedDelay에 실행 시간이 더해지고, 전환 처리·잠금 대기·DEFER
 - 자동 회차 중지는 automatic.scheduler-enabled=false로 제어한다. 관측 중지는 match.enabled도 내려야 하며
   outbox.enabled=true와 match.enabled=false 조합은 기동 가드가 거부한다. 기존 커밋 Outbox/전달 중지는 별도다.
 - outbox.enabled를 끄면 기존 찜 경로가 새 BECAME_ELIGIBLE 생성 책임을 다시 가지므로, 혼합 배포·잔여 후보·Outbox를 검토한 뒤 전환한다.
-- 기존 null 찜의 1회 backfill, 실제 추천 경로, 잠정 회차·만료·NEW_MATCH 순위, 대량 사용자 처리 예산은 별도 확인한다.
-- 규칙/정규화 버전 변경 관측에서 처음 적합해져도 현재 구현은 후보 없이 everMatched=true를 기록한다.
-  이후 FIRST_MATCH는 다시 만들지 않으며, 나중의 실제 불가→가능 TRANSITION은 별개다. 최초 적합 영구 억제의 정책 의도는 활성화 전 확인한다.
-- 실패 후보의 영속 시도 횟수·backoff·상한은 아직 없다. 매 순회 재호출될 수 있으므로 실패 반복을 관측하고 활성화 전 재시도·수동 복구 방침을 정한다.
-  임의 횟수 초과만으로 후보를 자동 폐기하는 정책은 도입하지 않았다.
+- 실제 추천 경로와 대량 사용자 처리 예산은 별도 확인한다. null 찜 backfill·회차·만료·순위·규칙 변경 최초 적합·실패 후보 정책은 위 "팀 결정 반영" 절로 확정했다.
+- 실패 후보의 backoff는 없다. 횟수만 기록하며 상한 초과 자동 폐기는 도입하지 않았다.
 - WAITING_POLICY 재개·보류 마감 자동 재스캔·외부 FCM 전달 검증은 이 문서 추가로 완료되지 않는다.
 
 ## 검증 결과
@@ -186,6 +229,8 @@ fixedDelay에 실행 시간이 더해지고, 전환 처리·잠금 대기·DEFER
 | notification-service: `test --rerun-tasks` | 189개 통과, 건너뜀·실패·오류 0 |
 | 요약 예산 초과 수정 후: MatchObservationPostgresTest 39, MatchAutomaticWorkerTest 3, MatchAutomaticSchedulingTest 3, MatchSummaryWindowTest 2, IngestBoundaryTest 3 | 50개 통과, 건너뜀·실패·오류 0. 회차별 분할·당일 중복 차단·다음 날 잔여 처리 및 자격 재검증 확인 |
 | 무변경 입력 사전 필터 추가 후: Match 10개 클래스 101(MatchObservationPostgresTest 47), EligibilityNotificationRevalidationPostgresTest 48, EventFanoutIntegrationTest 19, EligibilityBatchMatchEventTest 3, IngestBoundaryTest·ApplicationPersistenceCompletenessTest | 171개 통과, 건너뜀·실패·오류 0. 재스캔 시 무변경 정책 잠금 관측 0건, 관심·찜·날짜 경계 변화 감지, 사전 필터 불일치 시 잠금 재검증·중복 후보 없음, 행 오류 정책별 격리 확인 |
+| 같은 정책 중복 후보 정리 후: Match 10개 클래스 110(MatchObservationPostgresTest 53) | 110개 통과, 건너뜀·실패·오류 0. 미발행 FIRST_MATCH + 프로필 전환 겹침 시 전환 1건만 요약·FIRST_MATCH 종료·다른 정책은 다음 회차 발행, 전환 EXPIRED 시 FIRST_MATCH 유지 확인 |
+| 팀 결정 5건 반영 후: Match 10개 클래스 105(MatchObservationPostgresTest 51), EligibilityNotificationRevalidationPostgresTest·EventFanoutIntegrationTest·DeadlineExtensionPostgresTest·EligibilityBatchMatchEventTest·IngestBoundaryTest·ApplicationPersistenceCompletenessTest | backend 16개 클래스 224개 통과, 건너뜀·실패·오류 0. notification-service NotificationMessageContractTest·NotificationReceptionPostgresTest·NotificationSlotPostgresTest 79개 통과. 프로필 변경 전환의 요약 편입·개별 발행 제외·명시 호출 거부, superseded/EXPIRED 종료, 정규화 버전 변경 시 FIRST_MATCH 생성, 실패 2회 후 attempt_count=2·PENDING 유지·제약 해제 후 발행 확인 |
 | POLICY_UNAVAILABLE 후보 종료 수정 후: Match 10개 클래스 97(MatchObservationPostgresTest 43), DeadlineExtensionPostgresTest 40, EligibilityNotificationRevalidationPostgresTest 48, EventFanoutIntegrationTest 19, EligibilityBatchMatchEventTest 3 | 207개 통과, 건너뜀·실패·오류 0. 비가용 정책 후보만 닫고 나머지 요약 발행, 전부 비가용 시 Outbox 없이 종료, 조건 묶음 미생성은 DEFERRED 유지, 전환 후보 종료 확인 |
 
 실제 업무 DB의 DDL 적용·타이머 장시간 실행·운영 부하·외부 FCM은 미검증이다.

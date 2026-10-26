@@ -60,11 +60,20 @@ class MatchPairStateTest {
         var pair=pair(); pair.observe(input(UNKNOWN,1),settings,now);
         assertThat(pair.observe(input(ELIGIBLE,2),settings,now).reason()).isEqualTo(MatchPairState.Reason.FIRST_MATCH);
     }
-    @Test void changedJudgementRuleRebaselinesWithoutAnAlert() {
+    @Test void changedJudgementRuleIsNeverATransitionButStillAllowsTheOneFirstMatch() {
         var pair=pair(); pair.observe(input(NOT_ELIGIBLE,1,"3",true),settings,now);
-        assertThat(pair.observe(input(ELIGIBLE,1,"4",true),settings,now)).isNull();
+        var notice=pair.observe(input(ELIGIBLE,1,"4",true),settings,now);
+        assertThat(notice.reason()).isEqualTo(MatchPairState.Reason.FIRST_MATCH); assertThat(pair.getTransitionCount()).isZero();
         assertThat(pair.getLastStatus()).isEqualTo(ELIGIBLE);
         assertThat(pair.observe(input(ELIGIBLE,1,"4",true),settings,now)).isNull();
+        assertThat(pair.observe(input(NOT_ELIGIBLE,1,"5",true),settings,now)).isNull();
+        assertThat(pair.observe(input(ELIGIBLE,1,"6",true),settings,now)).isNull();
+    }
+    @Test void changedJudgementRuleAfterAnEarlierMatchRebaselinesWithoutAnAlert() {
+        var pair=pair(); pair.observe(input(ELIGIBLE,1,"3",true),settings,now);
+        pair.observe(input(NOT_ELIGIBLE,1,"3",true),settings,now);
+        assertThat(pair.observe(input(ELIGIBLE,1,"4",true),settings,now)).isNull();
+        assertThat(pair.getTransitionCount()).isZero();
     }
     @Test void olderProfileObservationCannotRewindOrInventAnotherTransition() {
         var pair=pair(); pair.observe(input(ELIGIBLE,2),settings,now);

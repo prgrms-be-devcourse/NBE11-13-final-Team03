@@ -33,6 +33,17 @@ public class MatchCandidateEvent {
     @Column(name="outbox_id") private Long outboxId;
     @Column(name="close_reason",length=80) private String closeReason;
     @Column(name="closed_at") private Instant closedAt;
+    /** Publication attempts that ended in an exception. The worker records them outside the failed transaction. */
+    @Column(name="attempt_count",insertable=false,updatable=false,columnDefinition="integer default 0 not null") private int attemptCount;
+    @Column(name="last_failed_at",insertable=false,updatable=false) private Instant lastFailedAt;
+
+    /** Team decision: transitions caused by the user's own profile change join the daily summary instead of individual alerts. */
+    public static final String SUMMARIZED_TRANSITION_TRIGGER=MatchPairState.Trigger.PROFILE_CHANGED.name();
+    public static boolean summarized(MatchPairState.Reason reason,Map<String,Object> evidence) {
+        return reason==MatchPairState.Reason.FIRST_MATCH
+                || (reason==MatchPairState.Reason.TRANSITION && evidence!=null && SUMMARIZED_TRANSITION_TRIGGER.equals(evidence.get("trigger")));
+    }
+    public boolean summarized() { return summarized(reason,evidence); }
 
     public void enqueue(Long outboxId,Instant now) {
         requirePending();
