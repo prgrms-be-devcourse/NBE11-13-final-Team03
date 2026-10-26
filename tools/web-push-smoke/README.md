@@ -8,8 +8,10 @@
 
 ## 1. 로컬 화면
 
+저장소를 내려받은 뒤 **저장소 루트**에서 실행한다.
+
 ```bash
-cd /Users/mac/Desktop/teamProject/NBE11-13-final-Team03/tools/web-push-smoke/public
+cd tools/web-push-smoke/public
 python3 -m http.server 4173 --bind 127.0.0.1
 ```
 
@@ -21,9 +23,10 @@ localhost에서 토큰 발급과 Firebase 콘솔 수신은 가능하다. 우리 
 
 Firebase Hosting의 **별도 테스트 사이트**를 사용한다. 기존 서비스 사이트를 덮어쓰지 않는다.
 계정 로그인과 사이트 생성/배포는 실행 담당자가 수행한다.
+아래 명령도 **저장소 루트**에서 시작한다. 로컬 서버가 실행 중이면 별도 터미널을 연다.
 
 ```bash
-cd /Users/mac/Desktop/teamProject/NBE11-13-final-Team03/tools/web-push-smoke
+cd tools/web-push-smoke
 npx firebase-tools login
 npx firebase-tools hosting:sites:list --project FIREBASE_PROJECT_ID
 npx firebase-tools hosting:sites:create UNIQUE_TEST_SITE_ID --project FIREBASE_PROJECT_ID
