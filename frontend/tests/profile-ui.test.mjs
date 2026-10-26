@@ -29,12 +29,14 @@ function renderComponent(component, props) {
   finally { client.clear() }
 }
 
-function render({ path = '/mypage', auth = user, profileData = profile, interests = [], optionData = options, error, optionError } = {}) {
+function render({ path = '/mypage', auth = user, profileData = profile, interests = [], optionData = options, error, optionError, regionData, regionError } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Infinity, gcTime: Infinity } } })
   client.setQueryData(['auth', 'user'], auth)
   if (error) client.getQueryCache().build(client, { queryKey: ['profile', user.id] }).setState({ status: 'error', error, fetchStatus: 'idle' })
   else client.setQueryData(['profile', user.id], profileData)
   client.setQueryData(['user-interests', user.id], interests)
+  if (regionData) client.setQueryData(['regions'], toRegionOptions(regionData))
+  if (regionError) client.getQueryCache().build(client, { queryKey: ['regions'] }).setState({ status: 'error', error: regionError, fetchStatus: 'idle' })
   if (optionError) client.getQueryCache().build(client, { queryKey: ['interest-options'] }).setState({ status: 'error', error: optionError, fetchStatus: 'idle' })
   else if (optionData) client.setQueryData(['interest-options'], optionData)
   try { return renderToStaticMarkup(e(QueryClientProvider, { client }, e(MemoryRouter, { initialEntries: [path] }, e(AppRoutes)))) }
@@ -71,7 +73,7 @@ test('profile form labels required and optional fields, folds sensitive extras a
   assert.match(html, /value="UNEMPLOYED" selected="">미취업/)
   assert.match(html, /<details><summary>추가 정보 \(선택\)/)
   assert.match(html, /<select[^>]*disabled=""[^>]*><option value="11680" selected="">등록된 지역 코드 11680/)
-  assert.match(html, /지역 선택 API가 없어 신규 등록과 지역 변경/)
+  assert.match(html, /지역 목록을 불러오고 있어요/)
   assert.doesNotMatch(html, /type="text"[^>]*value="11680"/)
   const missing = render({ path: '/mypage/profile', profileData: null })
   assert.match(missing, /disabled=""[^>]*>맞춤 조건 저장/)
@@ -98,7 +100,7 @@ test('onboarding recognizes saved profiles, explains independent saves and never
   assert.match(html, /이미 등록된 맞춤 조건/)
   assert.match(html, /기존 조건으로 다음 단계/)
   assert.match(html, /중간에 나가도 유지/)
-  assert.match(render({ path: '/onboarding', profileData: null }), /지역 선택 API 제공 전에는 신규 등록이 제한/)
+  assert.match(render({ path: '/onboarding', profileData: null }), /거주지역은 마지막 하위 지역까지 선택/)
 })
 test('profile styles define mobile single column, flexible fields and minimum touch targets', () => {
   const css = fs.readFileSync(new URL('../src/pages/profile/Profile.module.css', import.meta.url), 'utf8')
@@ -117,7 +119,7 @@ test('region selects restore actual parent/child labels, filter children, and pe
   const school = renderComponent(RegionSelect, { source: regions, mode: 'school', value: '1100000000', onChange: () => {} })
   assert.match(school, /학교 소재지는 시·도 또는 시·군·구/)
   assert.match(school, /value="1100000000" selected="">서울특별시/)
-  assert.match(school, /선택한 시·도 단위 사용/)
+  assert.match(school, /선택한 상위 지역 단위 사용/)
 })
 test('a top-level leaf renders immediate completion with no fake district select', () => {
   const html = renderComponent(RegionSelect, { source: regions, mode: 'residence', value: '3611000000', onChange: () => {} })
@@ -162,4 +164,19 @@ test('profile form already accepts supplied region data while unchanged edits an
   const interests = renderComponent(InterestsForm, { user, initial: [], onBack: () => {} })
   assert.match(interests, /이전 단계로 돌아가기/)
   assert.doesNotMatch(interests, /disabled=""[^>]*>관심 분야 저장/)
+})
+test('profile routes consume the shared region query and restore three-level residence plus non-leaf school codes', () => {
+  const regionData = [...regionRows, { code: '4111000000', name: '수원시', parentCode: '4100000000', leaf: false }, { code: '4111100000', name: '장안구', parentCode: '4111000000', leaf: true }]
+  const html = render({ path: '/mypage/profile', regionData, profileData: { ...profile, residenceRegionCode: '4111100000', schoolRegionCode: '4111000000' } })
+  for (const [code, name] of [['4100000000', '경기도'], ['4111000000', '수원시'], ['4111100000', '장안구']]) assert.ok(html.includes(`value="${code}" selected="">${name}`))
+  assert.match(html, /거주 하위 지역 \(3단계\)/)
+  assert.match(html, /학교 하위 지역 \(3단계\)/)
+  assert.doesNotMatch(html, /지역 목록을 불러오고 있어요|disabled=""[^>]*>맞춤 조건 저장/)
+  const empty = render({ path: '/onboarding', profileData: null, regionData: [] })
+  assert.match(empty, /제공되는 지역이 없어요/)
+  assert.match(empty, /disabled=""[^>]*>맞춤 조건 저장/)
+  const failure = render({ path: '/mypage/profile', regionError: new ApiError('http', 'private', 404) })
+  assert.match(failure, /지역 목록을 불러오지 못했어요/)
+  assert.match(failure, /지역 목록 다시 시도/)
+  assert.doesNotMatch(failure, /disabled=""[^>]*>맞춤 조건 저장/)
 })

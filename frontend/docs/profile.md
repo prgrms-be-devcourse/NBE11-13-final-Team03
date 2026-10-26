@@ -10,7 +10,7 @@
 
 - `GET /api/users/me`: 기존 인증 Query의 id, nickname, email, role을 사용한다. 닉네임·이메일 편집 API는 없다. 최신 UserController에 회원 탈퇴 DELETE는 있으나 이번 구현 범위에서 제외한다.
 - `GET /api/users/me/eligibility-profile`: 200은 현재 프로필, 404 **ELIGIBILITY_001만** 미등록으로 처리한다. 다른 404·401·403·네트워크·서버 오류는 미등록으로 바꾸지 않는다.
-- `PUT /api/users/me/eligibility-profile`: 최초 등록·전체 교체이며 생략한 선택값은 null이다. API 함수와 모의 PUT 테스트를 구현했으나 지역 선택지 부재로 신규 등록 버튼은 비활성화한다.
+- `PUT /api/users/me/eligibility-profile`: 최초 등록·전체 교체이며 생략한 선택값은 null이다. 공개 지역 목록에서 유효한 거주지를 선택하면 신규 등록할 수 있다. 지역 조회 실패·빈 목록·미완성 선택에서는 등록을 허용하지 않는다.
 - `PATCH /api/users/me/eligibility-profile`: JSON Merge Patch 계약이다. 수정한 최상위 필드만 보내며, untouched 필드는 생략하고 명시적으로 비운 선택은 null로 보낸다. 중첩 응답 묶음은 해당 필드 전체를 보낸다. 서버 구현은 일반 JSON body를 받는다.
 - `GET/PUT /api/users/me/interests`: `{ interests: [{ type, code }] }` 응답·요청이다. PUT은 전체 교체, 빈 배열은 전체 해제다. 최대 30개, 동일 type/code 중복을 허용하지 않는다.
 - `GET /api/interests/options`: 검색의 기존 API 함수·`['interest-options']` Query를 재사용한다. category → CATEGORY, subCategory → SUB_CATEGORY, detailCategories의 문자열 → DETAIL_CATEGORY다. 문자열은 가공하지 않는다. NCS 타입은 원본 코드이며 옵션 API는 원본 NCS 코드 목록을 제공하지 않는다.
@@ -29,20 +29,22 @@
 
 ## 지역 선택 구조와 연결 경계
 
-지역 Controller·정적 코드/이름/상위 코드 리소스는 기존 점검에서 확인되지 않았다. [RegionDirectory](../../backend/src/main/java/com/team3/backend/region/directory/RegionDirectory.java)는 DB RegionRepository에서 색인을 만든다. 프로필 Service는 거주지를 사전에 존재하면서 하위 지역이 없는 코드(세종 포함)로 제한한다. 학교 지역은 사전에 존재하는 코드면 된다. Region 엔티티는 실제 10자리 region_cd를 문자열로 저장한다.
+병합된 로컬 [RegionController](../../backend/src/main/java/com/team3/backend/region/controller/RegionController.java), [RegionResponse](../../backend/src/main/java/com/team3/backend/region/dto/RegionResponse.java), [RegionsResponse](../../backend/src/main/java/com/team3/backend/region/dto/RegionsResponse.java), [RegionQueryService](../../backend/src/main/java/com/team3/backend/region/service/RegionQueryService.java)와 Controller·Service 테스트, SecurityConfig를 확인했다. `GET /api/regions`만 공개하며 `{ regions: [{ code, name, parentCode, leaf }] }` 객체로 전체 사전을 코드 오름차순 반환한다. 빈 사전은 `{ regions: [] }`다. 코드는 문자열이다.
+
+[RegionDirectory](../../backend/src/main/java/com/team3/backend/region/directory/RegionDirectory.java)는 DB에서 색인을 만들며 조회 Service는 하위 지역 유무로 leaf를 계산한다. 사전에 없는 부모는 서버가 parentCode=null로 반환한다. 프로필 Service는 같은 색인에서 거주지에 하위가 없는지 검사하고 학교는 코드 존재 여부만 검사한다. 지역 코드는 10자리 문자열이며 앞 2자리는 시·도 구분에 사용한다. 시·도 요약값과 API의 전체 지역 코드를 혼동하지 않으며 프런트엔드는 반환된 전체 코드를 가공·보정하지 않는다.
 
 외부 데이터를 받는 [RegionSelect](../src/pages/profile/RegionSelect.tsx)를 거주지·학교에 공통 사용한다. 컴포넌트 내부 HTTP 요청은 없다. source props로 unavailable/loading/error/ready 상태와 재시도 콜백을 전달하며, ready의 빈 목록과 잘못된 계층은 별도로 표시한다. 기본 HTML select·label·fieldset·legend와 오류 설명 연결, 전역 키보드 포커스 스타일을 사용한다. 기존 모바일 1열 그리드를 재사용한다.
 
-- [regions.ts](../src/api/regions.ts)의 `RegionOptionDto`는 **예정 필드** code/name/parentCode/leaf만 나타낸다. 실제 URL, 인증 조건, 배열·객체 래퍼는 미확정이다. GET `/api/regions` 요청과 지역 Query는 구현하거나 실행하지 않는다.
-- `toRegionOptions(rows)`는 추후 실제 응답에서 꺼낸 행 목록만 변환한다. DTO와 별개인 내부 모델은 value/label/parentValue/isLeaf다. 코드·이름을 변경하거나 숫자로 변환하지 않는다.
-- [regionSelection.ts](../src/pages/profile/regionSelection.ts)는 완전한 시·도 → 시·군·구 2단계 목록을 검증한다. 중복 코드, 누락된 부모, 순환·자기 참조, 3단계 이상, 말단 부모의 자식, 자식 없는 비말단, 말단이 아닌 하위 행은 목록 전체를 선택 불가로 처리한다. 잘못된 행을 임의로 최상위로 올리거나 일부 목록을 정상 목록처럼 사용하지 않는다. 향후 API가 분할·페이지 조회를 제공하면 전체 목록을 모은 뒤 전달하거나 확인된 계약에 맞춰 이 경계를 조정해야 한다.
-- 거주지는 isLeaf=true만 확정한다. 비말단 시·도를 선택하면 기존 하위 코드가 null로 초기화되고 하위 선택을 기다린다. 학교는 사전에 존재하는 비말단 시·도도 확정할 수 있으며 하위 선택은 선택 사항이다.
+- [regions.ts](../src/api/regions.ts)의 `getRegions`는 기존 apiClient로 `/regions`를 호출한다. 공개 요청이므로 requiresAuth를 지정하지 않으며 AbortSignal을 전달한다. 객체 래퍼와 행 필드 타입, 계층을 검사하고 오류를 빈 목록으로 바꾸지 않는다.
+- `toRegionOptions(rows)`는 DTO를 UI의 value/label/parentValue/isLeaf로 변환한다. 코드·이름을 변경하거나 숫자로 변환하지 않는다. 중복·불명확한 행을 추측해 고치지 않는다.
+- [regionSelection.ts](../src/pages/profile/regionSelection.ts)는 깊이를 2로 제한하지 않는다. 시·도 → 시·군·구 → 일반구의 3단계도 하위 목록이 있는 동안 선택란을 추가한다. 기존 말단 코드에서 모든 상위 경로를 복원한다. 중복 코드, 누락된 부모, 순환·자기 참조, 말단 부모의 자식, 자식 없는 비말단은 목록 전체를 선택 불가로 처리한다. 순환 검사는 재귀 없이 수행한다.
+- 거주지는 isLeaf=true만 확정한다. 비말단 지역을 선택하거나 상위 선택을 변경하면 기존 하위 경로를 비우고 최종 값은 null로 둔다. 학교는 사전에 존재하는 시·도와 중간 시·군·구도 확정할 수 있으며, 하위 선택을 비우면 선택한 상위 지역을 사용한다. 최상위를 비우면 학교 소재지는 null이 된다.
 - 세종시 3611000000이 최상위 leaf=true로 전달되면 추가 시·군·구 없이 확정한다. 코드별 예외 처리나 가짜 하위 행을 추가하지 않는다. 다른 최상위 말단 지역도 같은 규칙으로 동작한다.
 - 기존 코드가 현재 목록에 없으면 코드와 유지 안내를 표시하고 다른 지역을 자동 선택하지 않는다. 로딩·오류·빈/잘못된 목록도 기존 값을 변경하지 않는다. 서버에서 읽은 **변경 없는 기존 코드**는 PATCH에서 생략해 지역 외 항목 수정을 허용한다. 단, 정상 목록에서 기존 거주지가 명확히 비말단으로 확인되면 저장을 차단한다. 신규·변경 코드는 정상 목록의 선택 기준을 통과해야 하며, 컴포넌트 표시와 별도로 제출 시에도 검증한다.
 
-현재 페이지는 `unavailableRegions`를 전달한다. 따라서 신규 등록과 거주·학교 지역 변경, 신규 사용자 온보딩 첫 단계는 여전히 제한된다. 관심 분야 설정과 기존 지역을 유지한 다른 프로필 항목 수정은 제한하지 않는다. fixture는 `tests/`에만 두며 운영 화면에 지역 목록을 하드코딩하지 않는다.
+`regionsQuery()`는 공개 `['regions']` 키, staleTime 1시간·gcTime 24시간을 사용하며 창 포커스로 재조회하지 않는다. [useRegions](../src/pages/profile/useRegions.ts)는 동일 Query를 공유하고 loading/error/ready와 명시적 refetch를 RegionSource로 전달한다. 프로필 편집과 온보딩이 이 Query를 사용하며 관심 분야 전용 화면에서는 지역 요청을 시작하지 않는다. 두 폼 및 재진입의 fresh 캐시는 재사용하고 인증 전환 시에도 공개 지역 사전은 제거하지 않는다. 오류 상태에서는 이전 사전이 있어도 새 지역 선택을 허용하지 않는다.
 
-실제 연결 시에는 확정된 Controller·DTO·Security 계약을 확인하고 `src/api/regions.ts`에 응답 추출·검증과 apiClient 요청을 추가한다. 기존 Query 패턴으로 로딩·오류·재시도를 `RegionSource`로 변환해 `ProfileSettingsPage`·`OnboardingPage`의 `regions` props에 전달한다. ProfileForm과 RegionSelect는 이미 같은 props를 받으므로 폼 전체를 다시 구성하지 않는다. 서버 leaf가 실제 하위 지역 유무와 일치하는지 확인하고, 세종·학교 시·도·목록 누락·오류 복구·인증된 PUT/PATCH를 통합 검증한다.
+신규 등록은 필수 입력과 거주지 말단 선택을 모두 통과한 뒤 기존 PUT으로 저장한다. 기존 프로필 수정은 PATCH를 유지해 바뀐 코드만 보내며, 변경하지 않은 지역은 생략한다. 서버 성공 후 프로필 Query와 개인화 조회를 갱신하고 온보딩은 관심 분야 단계로 이동한다. 이전 단계·건너뛰기·완료와 홈 링크, 저장 중 중복 제출·단계 이동 차단은 유지한다. fixture는 `tests/`에만 둔다.
 
 ## Query와 인증 격리
 
@@ -52,12 +54,19 @@
 
 ## 검증과 남은 범위
 
-이전 마이페이지 구현 작업(2026-10-26)에서 로컬 실제 백엔드에 읽기 요청을 실행했다. `/api/opportunities?size=1`, `/api/interests/options`는 HTTP 200(분류 8개), 세 사용자 API(`/users/me`, `/users/me/eligibility-profile`, `/users/me/interests`)는 인증 쿠키 없이 모두 401이었다. 테스트 계정·로그인 세션을 확보하지 않았으므로 실제 보호 API 200과 PUT/PATCH는 검증하지 않았다. DB나 실제 사용자 정보를 변경하지 않았다. 기존 개발 프록시는 기본 localhost:8080을 사용하며 설정을 변경하지 않았다. 이번 지역 UI 준비 작업에서는 실제 API 요청을 실행하지 않는다.
+이전 마이페이지 구현 작업(2026-10-26)에서 `/api/opportunities?size=1`, `/api/interests/options`는 HTTP 200(분류 8개), 세 사용자 API(`/users/me`, `/users/me/eligibility-profile`, `/users/me/interests`)는 인증 쿠키 없이 모두 401이었다. DB나 실제 사용자 정보를 변경하지 않았다. 기존 개발 프록시는 기본 localhost:8080을 사용하며 설정을 변경하지 않았다.
 
 실제 `getInterestOptions`·`searchOpportunities` 함수로도 백엔드 응답 검증을 통과했다(분류 8개·검색 1개). Node 실행에는 브라우저 출처가 없으므로 상대 `/api` 설정을 유지하고 HTTP 전송 adapter에서만 실제 upstream을 지정했다. baseURL을 절대 주소로 변경하는 시도는 기존 경로 보호 규칙에 의해 차단됐다. 이는 실제 브라우저·Vite 프록시 통합 확인을 대신하지 않는다.
 
 Node 모의 API·QueryObserver·MutationObserver 테스트는 미등록/오류 구분, DTO·enum·조건부 범위 검증, 최초 PUT·차이 PATCH, 생략/null, 관심 분야 전체 교체·기존 NCS 보존·중복·30개 제한, CSRF/401/403/400/5xx, 선택적 Query 갱신, 계정 전환 및 지연 응답, 화면 이탈 취소를 검증한다. 실제 TSX 서버 렌더링 테스트로 인증 접근 제한, 사용자 정보, 온보딩 기존 프로필 인식, 레이블·접힌 추가 입력·지역 제한·옵션 상태를 확인한다.
 
-이전 단계는 기존 101개와 신규 22개를 포함한 123개 테스트가 통과했다. 이번에는 지역 선택 전이·잘못된 계층·말단과 학교 선택 기준·UI 상태·기존 지역 보존·지역 외 실제 모의 PATCH 등을 15개 추가해 총 138개 테스트가 통과했다. `npm run lint`와 `npm run build`(strict TypeScript 검사 포함)도 통과했다. 테스트 프로세스 생성이 샌드박스에서 EPERM으로 차단되어 동일 명령을 승인된 제한 밖 실행으로 검증했다. SSR·선택 로직 단위 테스트는 실제 브라우저의 드롭다운 키보드·클릭·포커스 동작을 대신하지 않는다.
+이번 지역 API 연결 작업의 검증 결과는 다음과 같다.
 
-실제 브라우저의 입력·클릭·키보드·모바일 시각 표시·가로 스크롤, 카카오/쿠키와 인증된 서버 저장, 여러 탭·기기에서의 동시 수정은 미검증이다. 모바일 1열·터치 영역·필드 너비는 CSS와 마크업 검사로만 확인한다. 서버에 버전/ETag 기반 충돌 계약이 없으므로 다른 탭의 동시 전체 교체를 프런트엔드만으로 병합하지 않는다. 지역 데이터 제공, 실제 테스트 계정 저장 및 비동기 판정 완료 후 추천 갱신을 후속 통합 확인한다.
+- 실제 공개 GET `/api/regions`의 HTTP 200 및 `getRegions` 응답·계층 검증 결과는 유지한다. 담당자 확인에 따르면 현재 DB에는 개발용 임시 테스트 데이터 약 10건만 등록되어 있고, 전국 지역 데이터는 아직 적재하지 않았다. 일부 지역만 반환되는 것은 예상된 동작이며 데이터 동기화 실패나 API 구현 오류로 판단하지 않는다. 현재 테스트 데이터와 fixture로 확인한 API 응답·계층 선택·leaf 검증 결과는 유지한다.
+- 기존 기록에서 `11`, `26`, `41`을 전체 지역 코드처럼 기재하고 사전 동기화 문제로 해석한 부분을 정정한다. 앞 2자리 시·도 요약과 실제 10자리 반환 코드는 구분해야 한다. 이번 정정으로 연동 코드나 검증 로직을 변경하지 않으며 새로운 API 호출·통합 검증 결과를 추가하지 않는다.
+- 실제 인증 없는 프로필·관심 분야 GET은 401이다. 허용된 테스트 계정이 없어 실제 서버의 PUT/PATCH는 실행하지 않았다.
+- Node API/Query 테스트는 래퍼·필드 타입·잘못된 계층, 빈 목록과 오류, 병렬 요청 공유·fresh 캐시, 명시적 재시도, 2·3단계·말단·학교 중간 지역·경로 복원·초기화를 검증한다.
+- `profile-browser.test.mjs`는 격리된 Chrome과 테스트 전용 Vite 서버에서 실제 React·Query·apiClient·폼을 실행한다. HTTP adapter만 모의 처리해 3단계 선택·상위 변경·세종시·학교 중간 지역, 최초 PUT, 중복 제출 방지, 이전 단계 복귀·경로 복원, 관심 분야 저장·완료·홈 링크, 지역만 변경하는 PATCH와 지역 Query 1회 공유를 검증한다. 실제 인증된 백엔드 저장을 검증한 것은 아니다.
+- `npm run lint`, `npm run build`(strict 타입 검사 포함)가 통과했다. 전체 테스트는 기존 141개와 신규 7개를 포함한 148개가 통과했으며 브라우저 테스트도 생략하지 않았다. 테스트용 Vite 캐시는 별도 임시 경로로 분리해 병렬 프록시 테스트·개발 서버와 공유하지 않는다.
+
+사용자 브라우저의 수동 키보드·모바일 시각 확인, 실제 카카오·쿠키, 인증된 백엔드 저장과 여러 탭·기기의 동시 수정은 미검증이다. 서버에 버전/ETag 충돌 계약이 없어 다른 탭의 전체 교체를 프런트엔드만으로 병합하지 않는다. 추후 전국 지역 데이터가 적재되면 전체 지역 선택·세종시·3단계 경로를 확인하고, 허용된 로그인 테스트 계정에서 실제 프로필 PUT/PATCH 및 비동기 판정 완료 후 추천 갱신을 추가 검증한다. 이는 예정된 데이터 적재 이후의 후속 작업이며 현재 API 오류에 대한 복구 작업이 아니다.

@@ -10,7 +10,7 @@ import ProfileGate from './ProfileGate'
 import ProfileError from './ProfileError'
 import ProfileForm from './ProfileForm'
 import InterestsForm from './InterestsForm'
-import { unavailableRegions } from './regionSelection'
+import { useRegions } from './useRegions'
 import type { RegionSource } from './regionSelection'
 import styles from './Profile.module.css'
 
@@ -34,17 +34,19 @@ function MyPageContent({ user }: { user: AuthUser }) {
 }
 export function MyPage() { return <ProfileGate>{(user) => <MyPageContent key={user.id} user={user} />}</ProfileGate> }
 
-function SettingsContent({ user, kind, regions }: { user: AuthUser; kind: 'profile' | 'interests'; regions: RegionSource }) {
+function SettingsContent({ user, kind, regions }: { user: AuthUser; kind: 'profile' | 'interests'; regions?: RegionSource }) {
+  const regionSource = useRegions(kind === 'profile' && regions === undefined)
   const profile = useQuery({ ...profileQuery(user.id), enabled: kind === 'profile' })
   const interests = useQuery({ ...interestsQuery(user.id), enabled: kind === 'interests' })
   return <div className={styles.page}><h1>{kind === 'profile' ? '맞춤 조건 설정' : '관심 분야 설정'}</h1><Link to="/mypage">마이페이지로 돌아가기</Link><section className={styles.panel}>
-    {kind === 'profile' ? profile.isPending ? <AsyncState status="loading" /> : profile.isError ? <ProfileError error={profile.error} onRetry={() => { void profile.refetch() }} /> : <ProfileForm user={user} initial={profile.data} regions={regions} />
+    {kind === 'profile' ? profile.isPending ? <AsyncState status="loading" /> : profile.isError ? <ProfileError error={profile.error} onRetry={() => { void profile.refetch() }} /> : <ProfileForm user={user} initial={profile.data} regions={regions ?? regionSource} />
       : interests.isPending ? <AsyncState status="loading" /> : interests.isError ? <ProfileError error={interests.error} onRetry={() => { void interests.refetch() }} /> : <InterestsForm user={user} initial={interests.data} />}
   </section></div>
 }
-export function ProfileSettingsPage({ kind, regions = unavailableRegions }: { kind: 'profile' | 'interests'; regions?: RegionSource }) { return <ProfileGate>{(user) => <SettingsContent key={`${user.id}-${kind}`} user={user} kind={kind} regions={regions} />}</ProfileGate> }
+export function ProfileSettingsPage({ kind, regions }: { kind: 'profile' | 'interests'; regions?: RegionSource }) { return <ProfileGate>{(user) => <SettingsContent key={`${user.id}-${kind}`} user={user} kind={kind} regions={regions} />}</ProfileGate> }
 
-function OnboardingContent({ user, regions }: { user: AuthUser; regions: RegionSource }) {
+function OnboardingContent({ user, regions }: { user: AuthUser; regions?: RegionSource }) {
+  const regionSource = useRegions(regions === undefined)
   const profile = useQuery(profileQuery(user.id))
   const interests = useQuery(interestsQuery(user.id))
   const [step, setStep] = useState<'profile' | 'interests' | 'done'>('profile')
@@ -53,10 +55,10 @@ function OnboardingContent({ user, regions }: { user: AuthUser; regions: RegionS
     <nav className={styles.actions} aria-label="설정 메뉴"><Link to="/mypage/interests">관심 분야만 먼저 설정</Link><Link to="/mypage">마이페이지로 돌아가기</Link></nav>
     <section className={styles.panel}>
       {profile.isPending ? <AsyncState status="loading" /> : profile.isError ? <ProfileError error={profile.error} onRetry={() => { void profile.refetch() }} />
-        : currentStep === 'profile' ? <><h2>1. 맞춤 조건</h2>{profile.data ? <p>이미 등록된 맞춤 조건이 있어요. 확인·수정하거나 다음 단계로 이동할 수 있어요.</p> : <p>필수 조건을 등록해 주세요.{regions.status === 'unavailable' && ' 지역 선택 API 제공 전에는 신규 등록이 제한돼요.'}</p>}<ProfileForm user={user} initial={profile.data} regions={regions} onSaved={() => setStep('interests')} onContinue={profile.data ? () => setStep('interests') : undefined} /></>
+        : currentStep === 'profile' ? <><h2>1. 맞춤 조건</h2>{profile.data ? <p>이미 등록된 맞춤 조건이 있어요. 확인·수정하거나 다음 단계로 이동할 수 있어요.</p> : <p>필수 조건을 등록해 주세요. 거주지역은 마지막 하위 지역까지 선택해 주세요.</p>}<ProfileForm user={user} initial={profile.data} regions={regions ?? regionSource} onSaved={() => setStep('interests')} onContinue={profile.data ? () => setStep('interests') : undefined} /></>
           : currentStep === 'interests' ? <><h2>2. 관심 분야 (선택)</h2>{interests.isPending ? <><AsyncState status="loading" /><Button variant="secondary" onClick={() => setStep('profile')}>이전 단계로 돌아가기</Button></> : interests.isError ? <><ProfileError error={interests.error} onRetry={() => { void interests.refetch() }} /><Button variant="ghost" onClick={() => setStep('done')}>관심 분야를 변경하지 않고 완료</Button><Button variant="secondary" onClick={() => setStep('profile')}>이전 단계로 돌아가기</Button></> : <InterestsForm user={user} initial={interests.data} onSaved={() => setStep('done')} onSkip={() => setStep('done')} onBack={() => setStep('profile')} />}</>
             : <><h2>설정을 완료했어요</h2><p>저장된 조건에 따른 추천을 홈에서 확인할 수 있어요. 판정 반영에는 시간이 걸릴 수 있어요.</p><Link to="/">홈으로 이동</Link><Link to="/mypage">내 설정 확인</Link></>}
     </section>
   </div>
 }
-export function OnboardingPage({ regions = unavailableRegions }: { regions?: RegionSource } = {}) { return <ProfileGate>{(user) => <OnboardingContent key={user.id} user={user} regions={regions} />}</ProfileGate> }
+export function OnboardingPage({ regions }: { regions?: RegionSource } = {}) { return <ProfileGate>{(user) => <OnboardingContent key={user.id} user={user} regions={regions} />}</ProfileGate> }
