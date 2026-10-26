@@ -69,3 +69,37 @@ Consumer를 먼저 올린 뒤 v2 생산자를 배포하고 별도 큐·DLQ·IAM�
 검증은 10,000건/100건 묶음·중간 장애 복구·마지막 페이지 전 무알림,
 수동 전체 재시도와 원본 중복 방지, 실행별 알림·동시 콜백·원자적 롤백·legacy SQL 전환을 포함한다.
 CI는 PostgreSQL 통합 테스트의 실행 > 0, 실패·오류·건너뜀 = 0을 검사한다.
+
+## SQS Publisher와 복구
+
+backend Outbox의 저장소·Worker·SQS 전송·오류 분류를 data-service 내부로 복제했다.
+공용 Java 모듈이나 backend 의존은 추가하지 않는다. AWS SDK v2 BOM·sqs·url-connection-client는 backend와 같은 2.57.2다.
+
+- 전용 `collectionOutboxScheduler` 한 스레드가 5초마다 최대 10건을 처리한다.
+  `collectionExecutor`와 별도이며 Boot의 일반 taskScheduler도 대체하지 않는다.
+- 짧은 REQUIRES_NEW 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 한 행을 선점하고 `PROCESSING`·UUID lease를 저장한다.
+  실제 SQS 요청은 DB 트랜잭션 밖에서 수행한다. 수집 종료나 DB 잠금을 네트워크 응답까지 붙잡지 않는다.
+- SQS 응답의 messageId와 본문 MD5가 유효해야 `PUBLISHED`로 바꾼다. 이는 큐 수락이며 Slack 전달 완료를 뜻하지 않는다.
+- 저장된 envelope·messageId는 재전송에도 그대로 쓰며 correlationId를 message attribute에도 담는다.
+  `COLLECTION_COMPLETED` 이외의 eventType·행과 다른 messageId·잘못된 correlationId는 영구 오류다.
+- 일시 오류는 1·2·4·8분처럼 지수 백오프로 재시도하고 최대 5회 후 FAILED로 남긴다(배율 최대 64).
+  SDK 자체 재시도는 끄고 API 전체 10초·단일 시도 5초로 제한한다.
+- 자격증명·권한·큐 설정 오류는 PENDING으로 반환하고 시도 횟수를 늘리지 않으며 현재 배치를 중단한다.
+- 기동 중단이나 SQS 수락 뒤 DB 저장 실패로 남은 PROCESSING은 1분 lease 만료 후 복구한다.
+  lease 소유권 CAS로 오래된 Worker가 새 소유자의 상태를 덮어쓰지 못한다. 마지막 시도의 중단도 FAILED로 정리된다.
+- 원격 오류 본문·자격증명은 기록하지 않고 고정 오류 코드만 보존한다.
+
+설정 접두사는 `yon.collection.notification.publisher.*`이며 아래 별도 별칭을 사용한다.
+기존 `NOTIFICATION_*` 환경변수로 이 Publisher가 켜지거나 사용자 큐 주소가 재사용되지 않는다.
+
+| 환경변수 | 기본값·요구 |
+| --- | --- |
+| COLLECTION_NOTIFICATION_PUBLISHER_ENABLED | false |
+| COLLECTION_NOTIFICATION_SQS_REGION | 켰을 때 필수 |
+| COLLECTION_NOTIFICATION_SQS_QUEUE_URL | 켰을 때 필수, 별도 관리자 Standard 큐 |
+| COLLECTION_NOTIFICATION_SQS_ENDPOINT | 비움. LocalStack 사용 시 같은 loopback origin만 허용 |
+| COLLECTION_NOTIFICATION_PUBLISHER_POLL_DELAY_MS | 5000, 양수 |
+
+batch-size(10), max-attempts(5), lease-timeout(PT1M), retry-delay(PT1M)는 속성 접두사 아래에서 조정할 수 있다.
+lease는 SDK 10초 호출과 복구 여유를 포함해 15초보다 길어야 한다.
+운영 큐 URL은 해당 region의 HTTPS SQS 호스트여야 하며 FIFO·인증정보·query·fragment URL은 거부한다.

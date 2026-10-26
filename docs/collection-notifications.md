@@ -2,7 +2,7 @@
 
 수집 완료 관리자 알림은 정제 요청 NOTIFY와 별도 흐름이다.
 정기 수집 종료 시 data-service 소유 Outbox에 6필드 메시지를 보존하며,
-관리자 큐 SQS 발행·notification-service 소비·Slack 전달은 후속 단계다.
+관리자 큐 SQS Publisher는 기본 비활성이며 notification-service 관리자 소비·Slack 전달은 후속 단계다.
 계약·중복 제거·SQL 적용 순서는 [collection-completed-notifications.md](collection-completed-notifications.md)를 따른다.
 
 ## 역할과 연동 계약
