@@ -1,9 +1,18 @@
 # Notification 수신·소비 기록·인앱 저장 — 개정안 5단계
 
-아래는 5단계 구현 범위다. 6단계 HTTP 연결과 활성화·오류 계약은
-[HTTP Publisher 문서](notification-http-publisher.md)를 따른다. HTTP 수신의 기본값은 여전히 비활성이다.
+## 현재 계약과 문서 범위
 
-## 범위
+현재 schemaVersion=1 / eventType=NOTIFICATION_REQUESTED는 APPLICATION_OPENED, APPLICATION_CLOSED,
+DEADLINE_SOON, DEADLINE_EXTENDED, BECAME_ELIGIBLE, ELIGIBILITY_DOWNGRADED, ELIGIBILITY_REVIEW_REQUIRED, NEW_MATCH를 지원한다.
+NEW_MATCH는 최초 적합 정책 전건을 사용자별 인앱 1건으로 저장하며 계약·SQL 전환은
+[최초 적합 요약·자격 전환 알림](notification-match.md)을 따른다. USER_WITHDRAWN은 별도 탈퇴 메시지 경로다.
+
+아래 본문은 PR #38의 5단계 수신 기반 구현 이력이다. 이후 연결된 HTTP/SQS·설정·Delivery·탈퇴·슬롯의 현재 동작은
+[HTTP Publisher](notification-http-publisher.md), [SQS](notification-sqs.md), [사용자 API](notification-user-api.md),
+[Delivery](notification-delivery.md), [탈퇴](notification-withdrawal.md), [슬롯](notification-push-slots.md) 문서를 따른다.
+아래의 "미연결/향후 단계"를 현재 지원 범위로 해석하지 않는다. 실제 수신·푸시 활성화는 별도 설정을 요구한다.
+
+## PR #38 당시 범위
 
 Notification의 독립 프로젝트 안에 `NotificationMessageHandler`를 추가한다.
 Application의 사용자별 Outbox JSON을 검증해 인앱 알림과 소비 기록을 저장하는 내부 서비스다.

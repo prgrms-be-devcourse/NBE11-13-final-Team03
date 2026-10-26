@@ -71,7 +71,8 @@ public class EligibilityFanoutBatch {
             event.skipFanout(now, "NORMALIZATION_RULE_CHANGED"); return true;
         }
         var date = LocalDate.ofInstant(now, KST);
-        var ids = preferences.findSavedUserIdsAfter(policy.getId(), event.getLastUserId(), PageRequest.of(0, properties.batchSize()));
+        var ids = preferences.findSavedUserIdsForVersionChangeAfter(policy.getId(), to.getVersionNo(),
+                event.getLastUserId(), PageRequest.of(0, properties.batchSize()));
         if (ids.isEmpty()) {
             if (assessments.existsByEventIdAndStatus(event.getId(), DEFERRED)) event.waitForPolicy("ELIGIBILITY_ASSESSMENT_DEFERRED");
             else event.complete(now);
@@ -89,7 +90,8 @@ public class EligibilityFanoutBatch {
             evidence.put("observedCurrentVersionId", policy.getCurrentVersion().getId());
             evidence.put("evaluatedOn", date.toString());
             var status = SKIPPED; String reason; Long outboxId = null;
-            if (preferences.lockSavedForNotification(policy.getId(), List.of(userId)).isEmpty()) reason = "NOT_SAVED";
+            if (preferences.lockSavedBeforeVersionForNotification(policy.getId(), to.getVersionNo(), List.of(userId)).isEmpty())
+                reason = "NOT_SAVED_BEFORE_EVENT_VERSION";
             else {
                 var profileIds = jdbc.queryForList("SELECT id FROM eligibility_profiles WHERE user_id=? FOR SHARE", Long.class, userId);
                 if (profileIds.isEmpty()) { status = SKIPPED; reason = "PROFILE_MISSING"; }

@@ -271,12 +271,56 @@ class DeadlineExtensionPostgresTest {
     }
 
     @Test
-    void sequentialStepWaitsForExplicitBaselineAndNeverCreatesOne() {
+    void sequentialStepCreatesOnlyFirstVersionBaselineWithoutEvents() {
         var pair = seed(false, "v1", null);
         var result = comparisons.compareNext(pair.policyId());
-        assertThat(result.outcome()).isEqualTo(OpportunityVersionComparisonTransaction.Outcome.WAITING_FOR_BASELINE);
+        assertThat(result.outcome()).isEqualTo(OpportunityVersionComparisonTransaction.Outcome.BASELINE_RECORDED);
         assertThat(result.versionId()).isEqualTo(pair.fromId());
+        assertThat(tracking.count()).isEqualTo(1); assertThat(events.count()).isZero(); assertThat(changes.count()).isZero();
+        assertThat(tracking.findById(result.trackingId()).orElseThrow().getStatus()).isEqualTo(OpportunityVersionTrackingStatus.BASELINE_SKIPPED);
+        assertThat(comparisons.compareNext(pair.policyId()).versionId()).isEqualTo(pair.toId());
+    }
+
+    @Test
+    void directFirstVersionBaselineIsIdempotentAndCreatesNoNotificationWork() {
+        var pair=seed(false,"v1",null);
+        var first=comparisons.compare(pair.fromId()).orElseThrow();
+        assertThat(comparisons.compare(pair.fromId())).contains(first);
+        assertThat(tracking.count()).isEqualTo(1); assertThat(changes.count()).isZero();
+        assertThat(events.count()).isZero(); assertThat(outboxes.count()).isZero();
+        assertThat(tracking.findById(first).orElseThrow().getProcessedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void missingHistoricalVersionsAreNotSilentlyReclassifiedAsFirstVersion() {
+        var pair=seed(false,"v1",null);
+        jdbc.update("UPDATE opportunity_versions SET version_no=version_no+4 WHERE opportunity_id=?",pair.policyId());
+        assertThat(comparisons.compareNext(pair.policyId()).outcome())
+                .isEqualTo(OpportunityVersionComparisonTransaction.Outcome.WAITING_FOR_BASELINE);
+        assertThatThrownBy(()->comparisons.compare(pair.fromId())).isInstanceOf(IllegalStateException.class);
         assertThat(tracking.count()).isZero(); assertThat(events.count()).isZero();
+    }
+
+    @Test
+    void concurrentFirstVersionBaselinesPersistOnlyOneRecord() throws Exception {
+        var pair=seed(false,"v1",null); var gate=new CountDownLatch(1);
+        Callable<Optional<Long>> operation=()->{gate.await();return comparisons.compare(pair.fromId());};
+        try(var pool=Executors.newVirtualThreadPerTaskExecutor()) {
+            var a=pool.submit(operation); var b=pool.submit(operation); gate.countDown();
+            assertThat(a.get(20,TimeUnit.SECONDS)).isEqualTo(b.get(20,TimeUnit.SECONDS));
+        }
+        assertThat(tracking.count()).isEqualTo(1); assertThat(events.count()).isZero();
+    }
+
+    @Test
+    void failedBaselineWriteDoesNotMarkVersionAsProcessed() {
+        var pair=seed(false,"v1",null);
+        jdbc.execute("ALTER TABLE opportunity_version_tracking ADD CONSTRAINT reject_baseline CHECK(status<>'BASELINE_SKIPPED')");
+        try { assertThatThrownBy(()->comparisons.compareNext(pair.policyId())).isInstanceOf(RuntimeException.class); }
+        finally { jdbc.execute("ALTER TABLE opportunity_version_tracking DROP CONSTRAINT reject_baseline"); }
+        assertThat(tracking.count()).isZero();
+        assertThat(comparisons.compareNext(pair.policyId()).outcome())
+                .isEqualTo(OpportunityVersionComparisonTransaction.Outcome.BASELINE_RECORDED);
     }
 
     @Test
@@ -377,18 +421,18 @@ class DeadlineExtensionPostgresTest {
     }
 
     @Test
-    void realKeysetDiscoveryDoesNotLetBaselineWaitStarveFollowingPolicies() {
+    void realKeysetDiscoveryRecordsBaselineAndStillVisitsFollowingPolicies() {
         var waiting = seed(false, "v1", null);
         var ready = seed(true, "v2", null);
         var firstPage = worker.runOnce(0, 1);
         assertThat(firstPage.hasNext()).isTrue();
         assertThat(firstPage.lastOpportunityId()).isEqualTo(waiting.policyId());
         assertThat(firstPage.attempts().getFirst().step().orElseThrow().outcome())
-                .isEqualTo(OpportunityVersionComparisonTransaction.Outcome.WAITING_FOR_BASELINE);
+                .isEqualTo(OpportunityVersionComparisonTransaction.Outcome.BASELINE_RECORDED);
         var nextPage = worker.runOnce(firstPage.lastOpportunityId(), 1);
         assertThat(nextPage.hasNext()).isFalse();
         assertThat(nextPage.attempts().getFirst().step().orElseThrow().versionId()).isEqualTo(ready.toId());
-        assertThat(tracking.findByOpportunityVersionId(waiting.fromId())).isEmpty();
+        assertThat(tracking.findByOpportunityVersionId(waiting.fromId())).isPresent();
         assertThat(tracking.findByOpportunityVersionId(ready.toId())).isPresent();
     }
 

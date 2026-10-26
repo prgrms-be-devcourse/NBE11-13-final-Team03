@@ -670,12 +670,16 @@ class EligibilityNotificationRevalidationPostgresTest {
     }
 
     @Test
-    void pipelineWithoutExplicitBaselineDoesNotGuessInitialIngestionOrCreateEvents() {
-        fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
+    void pipelineAutomaticallyRecordsOnlyFirstVersionBaselineWithoutEvents() {
+        var fixture = fixture(age(34), age(39), age(39), ValidationStatus.VALID, "v1");
         var result = pipeline.runOnce();
         assertThat(result.analysisCalls()).isZero(); assertThat(result.failures()).isZero();
         assertThat(events.count()).isZero(); assertThat(outboxes.count()).isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM opportunity_version_tracking", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM opportunity_version_tracking", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM opportunity_version_tracking WHERE opportunity_version_id=?",
+                String.class, fixture.fromId())).isEqualTo("BASELINE_SKIPPED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM opportunity_version_tracking WHERE opportunity_version_id IN (?,?)",
+                Long.class, fixture.toId(), fixture.currentId())).isZero();
     }
 
     @Test
@@ -696,12 +700,82 @@ class EligibilityNotificationRevalidationPostgresTest {
                 .isEqualTo("PROCESSED");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings={"same","future","null","foreign"})
+    void explicitOutboxRejectsChangesNotAfterTheSavedVersion(String saved) {
+        var fixture=fixture(age(34),age(39),age(39),ValidationStatus.VALID,"v1");
+        var request=request(fixture,NOW);
+        Long version=switch(saved) {
+            case "same" -> fixture.toId();
+            case "future" -> fixture.currentId();
+            case "foreign" -> fixture(age(34),age(39),age(39),ValidationStatus.VALID,"v1").fromId();
+            default -> null;
+        };
+        jdbc.update("UPDATE user_opportunity_preferences SET saved_version_id=? WHERE user_id=?",version,USER);
+        assertThat(outboxService.create(request.eventId(),request.source()).status())
+                .isEqualTo(EligibilityOutboxTransaction.Status.SAVED_VERSION_NOT_BEFORE_EVENT);
+        assertThat(outboxes.count()).isZero();
+    }
+
+    @Test
+    void eligibilityFanoutDoesNotEvaluateOrEmitForChangesBeforeResave() {
+        var fixture=fixture(age(34),age(39),age(39),ValidationStatus.VALID,"v1");
+        var request=request(fixture,NOW);
+        jdbc.update("UPDATE user_opportunity_preferences SET saved_version_id=? WHERE user_id=?",fixture.currentId(),USER);
+        var execution=fanout.claim(request.eventId()).orElseThrow();
+        assertThat(fanoutBatch.process(execution)).isTrue();
+        assertThat(outboxes.count()).isZero(); assertThat(assessments.count()).isZero();
+    }
+
+    @Test
+    void newMatchRouteOwnsPositiveRequestsInExplicitAndFanoutPaths() {
+        var fixture=fixture(age(34),age(39),age(39),ValidationStatus.VALID,"v1");
+        var request=request(fixture,NOW);
+        org.springframework.test.util.ReflectionTestUtils.setField(outboxService,"matchOwnsPositiveTransitions",true);
+        try {
+            assertThat(outboxService.create(request.eventId(),request.source()).status())
+                    .isEqualTo(EligibilityOutboxTransaction.Status.MATCH_ROUTE_OWNS_TRANSITION);
+            var execution=fanout.claim(request.eventId()).orElseThrow();
+            assertThat(fanoutBatch.process(execution)).isFalse(); assertThat(fanoutBatch.process(execution)).isTrue();
+            assertThat(outboxes.count()).isZero();
+            assertThat(assessments.findAll().getFirst().getReason()).isEqualTo("MATCH_ROUTE_OWNS_TRANSITION");
+        } finally { org.springframework.test.util.ReflectionTestUtils.setField(outboxService,"matchOwnsPositiveTransitions",false); }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings={"loss","review"})
+    void newPositiveRouteDoesNotDisableSavedLossOrReviewInApp(String kind) {
+        var after=kind.equals("loss")?age(34):Map.<String,Object>of("status","UNSTRUCTURED");
+        var fixture=fixture(age(39),after,after,ValidationStatus.VALID,"v1");
+        var request=request(fixture,NOW);
+        org.springframework.test.util.ReflectionTestUtils.setField(outboxService,"matchOwnsPositiveTransitions",true);
+        try {
+            var result=outboxService.create(request.eventId(),request.source());
+            assertThat(result.status()).isEqualTo(EligibilityOutboxTransaction.Status.CREATED);
+            var message=outboxes.findById(result.outboxId()).orElseThrow();
+            assertThat(message.getNotificationType()).isEqualTo(kind.equals("loss")?"ELIGIBILITY_DOWNGRADED":"ELIGIBILITY_REVIEW_REQUIRED");
+            assertThat(message.getPayload()).containsEntry("channels",List.of("IN_APP"));
+        } finally { org.springframework.test.util.ReflectionTestUtils.setField(outboxService,"matchOwnsPositiveTransitions",false); }
+    }
+
+    @Test
+    void positiveRouteHandoffDoesNotRecreateAnAlreadyExistingLegacyRequest() {
+        var fixture=fixture(age(34),age(39),age(39),ValidationStatus.VALID,"v1"); var request=request(fixture,NOW);
+        var original=outboxService.create(request.eventId(),request.source());
+        org.springframework.test.util.ReflectionTestUtils.setField(outboxService,"matchOwnsPositiveTransitions",true);
+        try {
+            var replay=outboxService.create(request.eventId(),request.source());
+            assertThat(replay.status()).isEqualTo(EligibilityOutboxTransaction.Status.EXISTING);
+            assertThat(replay.outboxId()).isEqualTo(original.outboxId()); assertThat(outboxes.count()).isEqualTo(1);
+        } finally { org.springframework.test.util.ReflectionTestUtils.setField(outboxService,"matchOwnsPositiveTransitions",false); }
+    }
+
     private void baselineAndSave(Fixture fixture) {
         tx(() -> {
             var from = em.find(OpportunityVersion.class, fixture.fromId());
             em.persist(OpportunityVersionTracking.baseline(from, NOW));
             var saved = UserOpportunityPreference.builder().user(em.find(User.class, USER)).opportunity(from.getOpportunity()).build();
-            saved.markSaved(from.getOpportunity().getCurrentVersion().getId()); em.persist(saved); return null;
+            saved.markSaved(fixture.fromId()); em.persist(saved); return null;
         });
     }
 
@@ -712,7 +786,7 @@ class EligibilityNotificationRevalidationPostgresTest {
                     .employmentStatus(EmploymentStatus.UNEMPLOYED).educationLevel(EducationLevel.UNIVERSITY).build());
             var preference = UserOpportunityPreference.builder().user(user)
                     .opportunity(em.find(OpportunityVersion.class, fixture.toId()).getOpportunity()).build();
-            preference.markSaved(fixture.currentId()); em.persist(preference); em.flush(); return user.getId();
+            preference.markSaved(fixture.fromId()); em.persist(preference); em.flush(); return user.getId();
         });
     }
 
@@ -721,7 +795,7 @@ class EligibilityNotificationRevalidationPostgresTest {
         return tx(() -> {
             var to = em.find(OpportunityVersion.class, fixture.toId());
             var preference = UserOpportunityPreference.builder().user(em.find(User.class, USER)).opportunity(to.getOpportunity()).build();
-            preference.markSaved(to.getOpportunity().getCurrentVersion().getId()); preference.markHidden(); em.persist(preference);
+            preference.markSaved(fixture.fromId()); preference.markHidden(); em.persist(preference);
             var event = OpportunityEvent.create(to.getOpportunity(), to, OpportunityEventType.ELIGIBILITY_CHANGED,
                     LocalDate.ofInstant(occurredAt, ZoneId.of("Asia/Seoul")), "ELIGIBILITY_CHANGED:" + fixture.fromId() + ":" + fixture.toId(),
                     Map.of("fromVersionId", fixture.fromId(), "toVersionId", fixture.toId()), true, null, occurredAt);

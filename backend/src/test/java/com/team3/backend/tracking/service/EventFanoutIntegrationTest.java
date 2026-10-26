@@ -6,6 +6,7 @@ import com.team3.backend.outbox.domain.entity.*;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceRepository;
+import com.team3.backend.preference.service.PreferenceService;
 import com.team3.backend.tracking.config.EventFanoutProperties;
 import com.team3.backend.tracking.domain.entity.*;
 import com.team3.backend.tracking.domain.model.EventFanoutExecution;
@@ -45,7 +46,7 @@ import static org.assertj.core.api.Assertions.*;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import({EventFanoutCoordinator.class, EventFanoutBatch.class, DateNotificationMessageFactory.class,
-        ApplicationStatusCalculator.class, DeadlineSoonDetector.class, EventFanoutIntegrationTest.Beans.class})
+        ApplicationStatusCalculator.class, DeadlineSoonDetector.class, PreferenceService.class, EventFanoutIntegrationTest.Beans.class})
 class EventFanoutIntegrationTest {
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 23);
     private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");
@@ -65,6 +66,7 @@ class EventFanoutIntegrationTest {
     @Autowired private OutboxEventRepository outboxes;
     @Autowired private UserOpportunityPreferenceRepository preferences;
     @Autowired private UserRepository users;
+    @Autowired private PreferenceService preferenceService;
     @jakarta.persistence.PersistenceContext private EntityManager entityManager;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private DataSource dataSource;
@@ -341,11 +343,134 @@ class EventFanoutIntegrationTest {
         }
     }
 
+    @Test
+    void versionChangeCandidateQueryRejectsNullSameFutureAndForeignSavedVersions() {
+        var fixture=event(OpportunityEventType.DEADLINE_EXTENDED,true);
+        var before=subscriber(fixture.policyId(),true,false);
+        var unknown=subscriber(fixture.policyId(),true,false);
+        var same=subscriber(fixture.policyId(),true,false);
+        var future=subscriber(fixture.policyId(),true,false);
+        var foreign=subscriber(fixture.policyId(),true,false);
+        var other=event(OpportunityEventType.DEADLINE_SOON,true);
+        Long futureId=new TransactionTemplate(transactionManager).execute(status->{
+            var v=OpportunityVersion.builder().opportunity(entityManager.getReference(Opportunity.class,fixture.policyId()))
+                    .versionNo(3).normalizationVersion("test").normalizedSnapshot(Map.of())
+                    .personalizationStatus(PersonalizationStatus.PERSONALIZABLE).build();
+            entityManager.persist(v); entityManager.flush(); return v.getId();
+        });
+        jdbc.update("UPDATE user_opportunity_preferences SET saved_version_id=NULL WHERE user_id=?",unknown);
+        jdbc.update("UPDATE user_opportunity_preferences SET saved_version_id=? WHERE user_id=?",fixture.versionId(),same);
+        jdbc.update("UPDATE user_opportunity_preferences SET saved_version_id=? WHERE user_id=?",futureId,future);
+        jdbc.update("UPDATE user_opportunity_preferences SET saved_version_id=? WHERE user_id=?",other.versionId(),foreign);
+        var ids=preferences.findSavedUserIdsForVersionChangeAfter(fixture.policyId(),2,0L,
+                org.springframework.data.domain.PageRequest.of(0,10));
+        assertThat(ids).containsExactly(before);
+        assertThat(preferences.findSavedUserIdsForVersionChangeAfter(fixture.policyId(),2,before,
+                org.springframework.data.domain.PageRequest.of(0,10))).isEmpty();
+        var execution=coordinator.claim(fixture.eventId()).orElseThrow();
+        assertThat(batch.process(execution)).isFalse();
+        assertThat(batch.process(execution)).isTrue();
+        assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(outboxes.findAll().getFirst().getUserId()).isEqualTo(before);
+    }
+
+    @Test
+    void lockedSavedVersionCheckRejectsResaveAfterCandidateDiscovery() {
+        var fixture=event(OpportunityEventType.DEADLINE_EXTENDED,true);
+        var user=subscriber(fixture.policyId(),true,false);
+        assertThat(preferences.findSavedUserIdsForVersionChangeAfter(fixture.policyId(),2,0L,
+                org.springframework.data.domain.PageRequest.of(0,10))).containsExactly(user);
+        jdbc.update("UPDATE user_opportunity_preferences SET saved_version_id=? WHERE user_id=?",fixture.versionId(),user);
+        new TransactionTemplate(transactionManager).execute(status->{
+            assertThat(preferences.lockSavedBeforeVersionForNotification(fixture.policyId(),2,List.of(user))).isEmpty();
+            return null;
+        });
+    }
+
+    @Test
+    void dateThresholdStillNotifiesSavedCurrentVersionAndLegacyNullSave() {
+        var fixture=event(OpportunityEventType.DEADLINE_SOON,true);
+        subscriber(fixture.policyId(),true,false);
+        var legacy=subscriber(fixture.policyId(),true,false);
+        jdbc.update("UPDATE user_opportunity_preferences SET saved_version_id=NULL WHERE user_id=?",legacy);
+        var execution=coordinator.claim(fixture.eventId()).orElseThrow();
+        assertThat(batch.process(execution)).isFalse();
+        assertThat(batch.process(execution)).isTrue();
+        assertThat(outboxes.count()).isEqualTo(2);
+    }
+
+    @Test
+    void mergedSaveContractKeepsOriginalVersionOnDuplicateSaveAndNotifiesLaterChange() {
+        var fixture=event(OpportunityEventType.DEADLINE_EXTENDED,true);
+        long previous=firstVersion(fixture.policyId());
+        long user=users.saveAndFlush(User.builder().nickname("real-save").role(Role.USER).build()).getId();
+        selectCurrentVersion(fixture.policyId(),previous);
+        assertThat(preferenceService.save(user,fixture.policyId())).isTrue();
+        selectCurrentVersion(fixture.policyId(),fixture.versionId());
+        assertThat(preferenceService.save(user,fixture.policyId())).isFalse();
+        assertThat(preferences.findByUserIdAndOpportunityId(user,fixture.policyId()).orElseThrow().getSavedVersionId()).isEqualTo(previous);
+        assertThat(preferences.findSavedUserIdsForVersionChangeAfter(fixture.policyId(),2,0L,
+                org.springframework.data.domain.PageRequest.of(0,10))).containsExactly(user);
+        var execution=coordinator.claim(fixture.eventId()).orElseThrow();
+        assertThat(batch.process(execution)).isFalse();
+        assertThat(outboxes.count()).isEqualTo(1);
+        assertThat(batch.process(execution)).isTrue();
+        assertThat(outboxes.count()).isEqualTo(1);
+    }
+
+    @Test
+    void mergedResaveContractExcludesPreResaveChangeAndClearsVersionWhileHidden() {
+        var fixture=event(OpportunityEventType.DEADLINE_EXTENDED,true);
+        long user=users.saveAndFlush(User.builder().nickname("real-resave").role(Role.USER).build()).getId();
+        selectCurrentVersion(fixture.policyId(),firstVersion(fixture.policyId()));
+        preferenceService.save(user,fixture.policyId()); preferenceService.hide(user,fixture.policyId());
+        assertThat(preferences.findSavedUserIdsForVersionChangeAfter(fixture.policyId(),2,0L,
+                org.springframework.data.domain.PageRequest.of(0,10))).containsExactly(user);
+        selectCurrentVersion(fixture.policyId(),fixture.versionId());
+        preferenceService.unsave(user,fixture.policyId());
+        var hidden=preferences.findByUserIdAndOpportunityId(user,fixture.policyId()).orElseThrow();
+        assertThat(hidden.isHidden()).isTrue(); assertThat(hidden.getSavedVersionId()).isNull();
+        preferenceService.save(user,fixture.policyId());
+        assertThat(preferences.findByUserIdAndOpportunityId(user,fixture.policyId()).orElseThrow().getSavedVersionId()).isEqualTo(fixture.versionId());
+        new TransactionTemplate(transactionManager).execute(status->{
+            assertThat(preferences.lockSavedBeforeVersionForNotification(fixture.policyId(),2,List.of(user))).isEmpty(); return null;
+        });
+        assertThat(batch.process(coordinator.claim(fixture.eventId()).orElseThrow())).isTrue();
+        assertThat(outboxes.count()).isZero();
+    }
+
+    @Test
+    void mergedUnversionedSaveRemainsNullWithoutGuessingAfterVersionAppears() {
+        var fixture=event(OpportunityEventType.DEADLINE_EXTENDED,true);
+        long user=users.saveAndFlush(User.builder().nickname("unversioned-save").role(Role.USER).build()).getId();
+        selectCurrentVersion(fixture.policyId(),null);
+        preferenceService.save(user,fixture.policyId());
+        selectCurrentVersion(fixture.policyId(),fixture.versionId());
+        assertThat(preferenceService.save(user,fixture.policyId())).isFalse();
+        assertThat(preferences.findByUserIdAndOpportunityId(user,fixture.policyId()).orElseThrow().getSavedVersionId()).isNull();
+        assertThat(preferences.findSavedUserIdsForVersionChangeAfter(fixture.policyId(),2,0L,
+                org.springframework.data.domain.PageRequest.of(0,10))).isEmpty();
+        assertThat(batch.process(coordinator.claim(fixture.eventId()).orElseThrow())).isTrue();
+        assertThat(outboxes.count()).isZero();
+    }
+
+    private long firstVersion(long policyId) {
+        return jdbc.queryForObject("SELECT id FROM opportunity_versions WHERE opportunity_id=? AND version_no=1",Long.class,policyId);
+    }
+    private void selectCurrentVersion(long policyId,Long versionId) {
+        // Disposable test DB only: simulate a policy version arriving before/after the real preference service call.
+        jdbc.update("UPDATE opportunities SET current_version_id=? WHERE id=?",versionId,policyId);
+    }
+
     private Fixture event(OpportunityEventType type, boolean eligible) {
         return new TransactionTemplate(transactionManager).execute(status -> {
             var policy = Opportunity.builder().opportunityType(OpportunityType.YOUTH_POLICY).title("Policy").build();
             entityManager.persist(policy);
-            var version = OpportunityVersion.builder().opportunity(policy).versionNo(1)
+            boolean extension = type == OpportunityEventType.DEADLINE_EXTENDED;
+            if (extension) entityManager.persist(OpportunityVersion.builder().opportunity(policy).versionNo(1)
+                    .normalizationVersion("test").normalizedSnapshot(Map.of())
+                    .personalizationStatus(PersonalizationStatus.PERSONALIZABLE).build());
+            var version = OpportunityVersion.builder().opportunity(policy).versionNo(extension ? 2 : 1)
                     .normalizationVersion("test").normalizedSnapshot(Map.of())
                     .personalizationStatus(PersonalizationStatus.PERSONALIZABLE).build();
             entityManager.persist(version);
@@ -372,9 +497,11 @@ class EventFanoutIntegrationTest {
     private Long subscriber(Long policyId, boolean saved, boolean hidden) {
         return new TransactionTemplate(transactionManager).execute(status -> {
             var user = users.saveAndFlush(User.builder().nickname("test").role(Role.USER).build());
+            var savedVersion = entityManager.createQuery("select v.id from OpportunityVersion v where v.opportunity.id=:id order by v.versionNo",Long.class)
+                    .setParameter("id",policyId).setMaxResults(1).getSingleResult();
             var preference = UserOpportunityPreference.builder().user(user)
                     .opportunity(entityManager.getReference(Opportunity.class, policyId)).build();
-            if (saved) preference.markSaved(entityManager.find(Opportunity.class, policyId).getCurrentVersion().getId());
+            if (saved) preference.markSaved(savedVersion);
             if (hidden) preference.markHidden();
             preferences.saveAndFlush(preference);
             return user.getId();

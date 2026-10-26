@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.Objects;
 import static com.team3.backend.tracking.domain.entity.OpportunityVersionTrackingStatus.*;
 
-/** Application-owned audit/state. No scheduler or automatic baseline completion is connected yet. */
+/** Application-owned audit/state. First-version baseline is recorded by the comparison transaction. */
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

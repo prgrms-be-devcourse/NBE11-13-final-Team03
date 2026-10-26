@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "messageId": "11111111-1111-4111-8111-111111111111",
+  "eventType": "NOTIFICATION_REQUESTED",
+  "sourceEventId": "22222222-2222-4222-8222-222222222222",
+  "correlationId": "22222222-2222-4222-8222-222222222222",
+  "causationId": "22222222-2222-4222-8222-222222222222",
+  "userId": 7,
+  "opportunityId": 10,
+  "opportunityVersionId": 20,
+  "type": "NEW_MATCH",
+  "channels": ["IN_APP", "PUSH"],
+  "title": "가능성 있는 정책 3건",
+  "content": "새롭게 확인한 정책을 추천 페이지에서 확인해 주세요. 찜하면 마감 알림을 받아요.",
+  "link": "/test-recommendations",
+  "occurredAt": "2026-10-23T00:00:00Z",
+  "expiresAt": "2026-10-26T15:00:00Z",
+  "payload": {
+    "reason": "FIRST_MATCH",
+    "summary": true,
+    "summaryRunId": "22222222-2222-4222-8222-222222222222",
+    "matchCount": 3,
+    "eligibleCount": 2,
+    "possiblyCount": 1,
+    "maxUnresolved": 1,
+    "evaluatedOn": "2026-10-23",
+    "membershipStoredIn": "notification_match_candidates.outbox_id",
+    "possiblyLabel": "확인 필요 1개"
+  }
+}

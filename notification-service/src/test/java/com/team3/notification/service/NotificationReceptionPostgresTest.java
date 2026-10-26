@@ -137,6 +137,28 @@ class NotificationReceptionPostgresTest {
     }
 
     @Test
+    void newMatchSummaryIsOneInAppNotificationAndReplayIsIdempotent() throws Exception {
+        String json = new ClassPathResource("contracts/notification-new-match-v1.json")
+                .getContentAsString(StandardCharsets.UTF_8);
+        try (var client = HttpClient.newHttpClient()) {
+            assertThat(post(client, json).statusCode()).isEqualTo(200);
+            assertThat(post(client, json).statusCode()).isEqualTo(200);
+            var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+            var changed = new LinkedHashMap<>(mapper.readValue(json, Map.class));
+            var payload = new LinkedHashMap<>((Map<String, Object>) changed.get("payload"));
+            payload.put("matchCount", 4); payload.put("eligibleCount", 3);
+            changed.put("payload", payload);
+            assertThat(post(client, mapper.writeValueAsString(changed)).statusCode()).isEqualTo(409);
+        }
+        assertThat(notifications.count()).isEqualTo(1);
+        assertThat(consumed.count()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT type FROM notification.notifications", String.class)).isEqualTo("NEW_MATCH");
+        var saved = notifications.findAll().iterator().next();
+        assertThat(saved.getLink()).isEqualTo("/test-recommendations");
+        assertThat(saved.getPayload()).containsEntry("matchCount", 3).containsEntry("possiblyCount", 1);
+    }
+
+    @Test
     void allEligibilityTypesAreStoredAndReplayedWithoutDuplicateNotifications() throws Exception {
         String template = new ClassPathResource("contracts/notification-eligibility-v1.json").getContentAsString(StandardCharsets.UTF_8);
         try (var client = HttpClient.newHttpClient()) {

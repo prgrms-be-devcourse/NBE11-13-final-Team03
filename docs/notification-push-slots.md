@@ -20,8 +20,8 @@
 | 호출·재시도 | claim과 FCM 호출 직전 모두 창 검사. 기존 지수 백오프 유지, 창 밖 신규 호출 금지. 진행 중 호출 완료 시각까지 보장하지 않음 |
 | 횟수 | 사용자당 슬롯별 1개 묶음·하루 최대 3개. 화면 수신 횟수 보장이 아님 |
 | 묶음 | 대표 1건 + 외 N건. 단건은 기존 상세 링크, 다건은 확인된 알림함 경로. 프론트 경로는 미확정이며 임의 생성하지 않음 |
-| 우선순위 | D-1 → D-3 → 신청 시작 → 마감 연장 → D-7 → BECAME_ELIGIBLE. 동순위는 오래된 순, 동일 시각은 ID로 결정 |
-| 우선순위 책임 | Notification이 type·payload.threshold로 계산. 별도 priority 필드는 추가하지 않음. 추천·기타는 v1 제외 |
+| 우선순위 | D-1 → D-3 → 신청 시작 → 마감 연장 → D-7 → BECAME_ELIGIBLE → NEW_MATCH. 동순위는 오래된 순, 동일 시각은 ID로 결정. NEW_MATCH의 마지막 순위는 잠정값 |
+| 우선순위 책임 | Notification이 type·payload.threshold로 계산. 별도 priority 필드는 추가하지 않음. 최초 적합 요약 NEW_MATCH는 포함하며 그 밖의 추천·기타는 v1 제외 |
 | 푸시 대상 | backend가 요청한 PUSH와 사용자 동의/활성 Endpoint의 교집합. DOWNGRADED·REVIEW_REQUIRED는 기존 IN_APP 전용 |
 | 만료 | 기존 메시지/인앱 만료 유지. D-N 푸시만 임계일 다음 날 00:00 KST를 pushExpiresAt으로 지정. 기존 메시지 만료를 넘기거나 이월로 연장하지 않음 |
 | 발송 직전 검사 | 만료·동의·탈퇴·활성 Endpoint 재확인. 포함 알림은 제외만 가능하며 대표·건수·문구·링크 재계산. 전부 제외 시 발송 없이 종료 |
@@ -31,7 +31,9 @@
 | 멱등성 | 묶음 식별자 고정·중복 편입 금지. (사용자, KST 날짜, 슬롯) UNIQUE와 기기별 lease를 함께 사용. 외부 FCM 정확히 한 번 호출 보장은 아님 |
 
 기존 초안보다 마감 연장 우선순위를 D-7 앞에 추가했으며, 신청 가능성 변화 표기는 실제 PUSH 요청 대상인 BECAME_ELIGIBLE로 한정했다.
-Application이 priority를 싣는 이전 초안은 v1에 적용하지 않는다. 최초 계약 변경은 pushExpiresAt 추가로 한정한다.
+Application이 priority를 싣는 이전 초안은 v1에 적용하지 않는다. NEW_MATCH는 사용자별 최초 적합 요약 1건이며
+후보 수만큼 슬롯 항목을 만들지 않는다. 새 수신 계약·설정·기존 DB의 priority 0~6 전환 순서는
+[최초 적합 요약·자격 전환 알림](notification-match.md)을 따른다. 기존 슬롯 DB는 NEW_MATCH를 받기 전에 해당 SQL을 적용한다.
 
 ## 최초 시도·예약과 장애
 
@@ -148,4 +150,4 @@ Application이 priority를 싣는 이전 초안은 v1에 적용하지 않는다.
 
 팀 정책 최종 합의·기존 대기 Delivery 전환·실제 알림함 경로 확인과 성능/실패 관측이 필요하다.
 운영 관측 후보로 `status='READY' AND window_end < 현재 시각`인 묶음 수와 창 종료 후 경과 시간(특히 최장 대기 시간)을 함께 확인한다. 이 집합에는 정상적인 예약 충돌 대기와 유효한 SENDING lease의 완료 대기도 포함되므로 건수만으로 장애를 단정하지 않는다. 최초 시도 유무·예약 충돌·전달 상태/lease 만료 여부를 함께 구분하고, 경보 임계값과 실제 지표 수집 구현은 운영 준비에서 정한다.
-초기 데이터 기준선·WAITING_POLICY 재개 등 10단계 잔여는 별도 후속으로 유지한다.
+실제 첫 정책 버전의 자동 기준선은 PR #80에 연결됐다. 기존 찜 null의 backfill 결정·WAITING_POLICY 재개 등 잔여는 별도 후속이다.

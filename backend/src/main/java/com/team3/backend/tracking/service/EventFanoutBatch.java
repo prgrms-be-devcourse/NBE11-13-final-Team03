@@ -63,8 +63,12 @@ public class EventFanoutBatch {
             event.skipFanout(clock.instant(), "POLICY_NOT_RELEVANT_OR_EXPIRED");
             return true;
         }
-        var userIds = preferences.findSavedUserIdsAfter(event.getOpportunity().getId(), event.getLastUserId(),
-                PageRequest.of(0, properties.batchSize()));
+        boolean versionChange = event.getEventType() == com.team3.backend.tracking.domain.entity.OpportunityEventType.DEADLINE_EXTENDED;
+        var page = PageRequest.of(0, properties.batchSize());
+        var userIds = versionChange
+                ? preferences.findSavedUserIdsForVersionChangeAfter(event.getOpportunity().getId(),
+                    event.getOpportunityVersion().getVersionNo(), event.getLastUserId(), page)
+                : preferences.findSavedUserIdsAfter(event.getOpportunity().getId(), event.getLastUserId(), page);
         if (userIds.isEmpty()) {
             event.complete(clock.instant());
             return true;
@@ -72,6 +76,8 @@ public class EventFanoutBatch {
         // Withdrawal locks the User before cancelling Outbox/deleting preferences. Keep that lock order here too.
         var liveUsers = users.lockNotificationRecipients(userIds).stream().map(User::getId).toList();
         var saved = liveUsers.isEmpty() ? java.util.List.<com.team3.backend.preference.domain.entity.UserOpportunityPreference>of()
+                : versionChange ? preferences.lockSavedBeforeVersionForNotification(event.getOpportunity().getId(),
+                    event.getOpportunityVersion().getVersionNo(), liveUsers)
                 : preferences.lockSavedForNotification(event.getOpportunity().getId(), liveUsers);
         // One lookup per page; the UNIQUE(dedup_key) constraint remains the actual guard.
         var existing = saved.isEmpty() ? java.util.Set.<String>of() : outboxes.findExistingDedupKeys(saved.stream()
