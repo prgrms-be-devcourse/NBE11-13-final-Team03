@@ -52,6 +52,9 @@ public class UserOpportunityPreference {
     @Column(name = "saved_at")
     private LocalDateTime savedAt;
 
+    @Column(name = "saved_version_id")
+    private Long savedVersionId;
+
     @Column(name = "hidden_at")
     private LocalDateTime hiddenAt;
 
@@ -68,12 +71,13 @@ public class UserOpportunityPreference {
         this.updatedAt = now;
     }
 
-    /** 저장 상태로 전환할 때만 저장·수정 시각을 갱신한다. */
-    public void markSaved() {
+    /** 저장 전환 시점에 확인한 공고 버전 ID를 함께 보관한다. */
+    public void markSaved(Long versionId) {
         if (!isSaved) {
             LocalDateTime now = LocalDateTime.now();
             this.isSaved = true;
             this.savedAt = now;
+            this.savedVersionId = versionId;
             touchUpdatedAt(now);
         }
     }
@@ -83,6 +87,7 @@ public class UserOpportunityPreference {
         if (isSaved) {
             this.isSaved = false;
             this.savedAt = null;
+            this.savedVersionId = null;
             touchUpdatedAt(LocalDateTime.now());
         }
     }

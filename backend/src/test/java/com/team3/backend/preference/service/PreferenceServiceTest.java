@@ -4,6 +4,8 @@ import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.global.exception.GlobalErrorCode;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
+import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
+import com.team3.backend.opportunity.domain.entity.PersonalizationStatus;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceRepository;
 import com.team3.backend.preference.dto.SavedOpportunitiesResponseDto;
@@ -24,6 +26,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -116,6 +119,63 @@ class PreferenceServiceTest {
 
         assertTrue(preferenceRepository
                 .findByUserIdAndOpportunityId(userId, opportunityId).isEmpty());
+    }
+
+    @Test
+    void savedVersionFollowsActualSaveTransitionsAndRemainsUserSpecific() {
+        Long firstUserId = createUser(213L);
+        Long secondUserId = createUser(214L);
+        Long opportunityId = createOpportunity("Versioned save");
+        Long firstVersionId = createVersion(opportunityId, 1);
+
+        assertTrue(preferenceService.save(firstUserId, opportunityId));
+        UserOpportunityPreference firstSaved = findPreference(firstUserId, opportunityId);
+        LocalDateTime firstSavedAt = firstSaved.getSavedAt();
+        assertEquals(firstVersionId, firstSaved.getSavedVersionId());
+
+        preferenceService.hide(firstUserId, opportunityId);
+        Long secondVersionId = createVersion(opportunityId, 2);
+        assertFalse(preferenceService.save(firstUserId, opportunityId));
+        assertEquals(firstVersionId, findPreference(firstUserId, opportunityId).getSavedVersionId());
+        assertEquals(firstSavedAt, findPreference(firstUserId, opportunityId).getSavedAt());
+
+        assertTrue(preferenceService.save(secondUserId, opportunityId));
+        assertEquals(secondVersionId, findPreference(secondUserId, opportunityId).getSavedVersionId());
+
+        preferenceService.unsave(firstUserId, opportunityId);
+        UserOpportunityPreference hidden = findPreference(firstUserId, opportunityId);
+        assertFalse(hidden.isSaved());
+        assertTrue(hidden.isHidden());
+        assertNull(hidden.getSavedVersionId());
+        assertNull(hidden.getSavedAt());
+
+        assertTrue(preferenceService.save(firstUserId, opportunityId));
+        UserOpportunityPreference resaved = findPreference(firstUserId, opportunityId);
+        assertTrue(resaved.isHidden());
+        assertEquals(secondVersionId, resaved.getSavedVersionId());
+        preferenceService.unhide(firstUserId, opportunityId);
+        assertEquals(secondVersionId, findPreference(firstUserId, opportunityId).getSavedVersionId());
+        assertEquals(secondVersionId, findPreference(secondUserId, opportunityId).getSavedVersionId());
+    }
+
+    @Test
+    void missingVersionAndLegacySavedNullRemainSupported() {
+        Long userId = createUser(215L);
+        Long opportunityId = createOpportunity("Unversioned save");
+
+        assertTrue(preferenceService.save(userId, opportunityId));
+        assertNull(findPreference(userId, opportunityId).getSavedVersionId());
+        LocalDateTime savedAt = findPreference(userId, opportunityId).getSavedAt();
+
+        Long versionId = createVersion(opportunityId, 1);
+        assertFalse(preferenceService.save(userId, opportunityId));
+        assertNull(findPreference(userId, opportunityId).getSavedVersionId());
+        assertEquals(savedAt, findPreference(userId, opportunityId).getSavedAt());
+
+        preferenceService.unsave(userId, opportunityId);
+        assertTrue(preferenceRepository.findByUserIdAndOpportunityId(userId, opportunityId).isEmpty());
+        assertTrue(preferenceService.save(userId, opportunityId));
+        assertEquals(versionId, findPreference(userId, opportunityId).getSavedVersionId());
     }
 
     @Test
@@ -366,6 +426,23 @@ class PreferenceServiceTest {
             entityManager.persist(opportunity);
             entityManager.flush();
             return opportunity.getId();
+        });
+    }
+
+    private Long createVersion(Long opportunityId, int versionNo) {
+        return transactionTemplate.execute(status -> {
+            Opportunity opportunity = entityManager.find(Opportunity.class, opportunityId);
+            OpportunityVersion version = OpportunityVersion.builder()
+                    .opportunity(opportunity)
+                    .versionNo(versionNo)
+                    .normalizationVersion("test")
+                    .normalizedSnapshot(Map.of("versionNo", versionNo))
+                    .personalizationStatus(PersonalizationStatus.UNKNOWN)
+                    .build();
+            entityManager.persist(version);
+            opportunity.changeCurrentVersion(version);
+            entityManager.flush();
+            return version.getId();
         });
     }
 

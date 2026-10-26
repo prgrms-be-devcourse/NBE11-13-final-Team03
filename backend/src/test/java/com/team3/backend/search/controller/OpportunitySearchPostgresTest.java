@@ -149,7 +149,7 @@ class OpportunitySearchPostgresTest {
         }
         UserOpportunityPreference preference = UserOpportunityPreference.builder()
                 .user(account).opportunity(near).build();
-        preference.markSaved();
+        preference.markSaved(near.getCurrentVersion().getId());
         preference.markHidden();
         entityManager.persist(preference);
         entityManager.flush();
@@ -505,20 +505,20 @@ class OpportunitySearchPostgresTest {
 
         UserOpportunityPreference both = UserOpportunityPreference.builder()
                 .user(account).opportunity(eligible).build();
-        both.markSaved();
+        both.markSaved(eligible.getCurrentVersion().getId());
         both.markHidden();
         entityManager.persist(both);
         UserOpportunityPreference saved = UserOpportunityPreference.builder()
                 .user(account).opportunity(unknown).build();
-        saved.markSaved();
+        saved.markSaved(unknown.getCurrentVersion().getId());
         entityManager.persist(saved);
         UserOpportunityPreference otherSaved = UserOpportunityPreference.builder()
                 .user(otherAccount).opportunity(possible).build();
-        otherSaved.markSaved();
+        otherSaved.markSaved(possible.getCurrentVersion().getId());
         entityManager.persist(otherSaved);
         UserOpportunityPreference noProfileSaved = UserOpportunityPreference.builder()
                 .user(noProfileAccount).opportunity(notEligible).build();
-        noProfileSaved.markSaved();
+        noProfileSaved.markSaved(notEligible.getCurrentVersion().getId());
         entityManager.persist(noProfileSaved);
         entityManager.flush();
         entityManager.clear();

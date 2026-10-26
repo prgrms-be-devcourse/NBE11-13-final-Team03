@@ -374,7 +374,7 @@ class EventFanoutIntegrationTest {
             var user = users.saveAndFlush(User.builder().nickname("test").role(Role.USER).build());
             var preference = UserOpportunityPreference.builder().user(user)
                     .opportunity(entityManager.getReference(Opportunity.class, policyId)).build();
-            if (saved) preference.markSaved();
+            if (saved) preference.markSaved(entityManager.find(Opportunity.class, policyId).getCurrentVersion().getId());
             if (hidden) preference.markHidden();
             preferences.saveAndFlush(preference);
             return user.getId();
