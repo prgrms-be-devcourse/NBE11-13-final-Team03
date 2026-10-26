@@ -228,6 +228,69 @@ class MatchObservationPostgresTest {
         assertThat(candidates.count()).isEqualTo(3); assertThat(pairs.findByUserIdAndOpportunityId(userId,a)).isPresent();
         assertThat(pages.scanUser(userId,0,3).created()).isZero(); assertThat(candidates.count()).isEqualTo(3);
     }
+    @Test void unchangedPoliciesSkipTheLockedObservationOnRescan() {
+        policy(ELIGIBLE); policy(NOT_ELIGIBLE); policy(POSSIBLY_ELIGIBLE);
+        var first=pages.scanUser(userId,0,10);
+        assertThat(first.visited()).isEqualTo(3); assertThat(first.unchanged()).isZero(); assertThat(first.created()).isEqualTo(1);
+        assertThat(pairs.count()).isEqualTo(3);
+        var again=pages.scanUser(userId,0,10);
+        assertThat(again.visited()).isEqualTo(3); assertThat(again.unchanged()).isEqualTo(3);
+        assertThat(again.observed()).isZero(); assertThat(again.created()).isZero(); assertThat(again.failed()).isZero();
+        assertThat(candidates.count()).isEqualTo(1);
+    }
+    @Test void prefilterDetectsInterestSaveAndDateBoundaryChanges() {
+        long possibly=policy(POSSIBLY_ELIGIBLE), later=policy(ELIGIBLE); upcoming(later,false);
+        assertThat(pages.scanUser(userId,0,10).created()).isZero(); assertThat(candidates.count()).isZero();
+        assertThat(pages.scanUser(userId,0,10).unchanged()).isEqualTo(2);
+        interest();
+        var interestRun=pages.scanUser(userId,0,10);
+        // Both policies share the category, so the interest flag changes both keys; only the POSSIBLY one qualifies.
+        assertThat(interestRun.unchanged()).isZero(); assertThat(interestRun.created()).isEqualTo(1);
+        assertThat(candidates.findAll().getFirst().getPair().getId())
+                .isEqualTo(pairs.findByUserIdAndOpportunityId(userId,possibly).orElseThrow().getId());
+        tx(()->{
+            var preference=UserOpportunityPreference.builder().user(em.find(User.class,userId)).opportunity(em.find(Opportunity.class,later)).build();
+            preference.markSaved(em.find(Opportunity.class,later).getCurrentVersion().getId()); em.persist(preference); return null;
+        });
+        var savedRun=pages.scanUser(userId,0,10);
+        assertThat(savedRun.unchanged()).isEqualTo(1); assertThat(savedRun.created()).isEqualTo(1);
+        assertThat(candidates.count()).isEqualTo(2);
+        jdbc.update("DELETE FROM user_opportunity_preferences"); jdbc.update("DELETE FROM notification_match_candidates");
+        jdbc.update("UPDATE notification_match_pairs SET ever_matched=false");
+        assertThat(pages.scanUser(userId,0,10).unchanged()).isEqualTo(1);
+        clock.set(NOW.plus(Duration.ofDays(3)));
+        var openRun=pages.scanUser(userId,0,10);
+        assertThat(openRun.unchanged()).isEqualTo(1); assertThat(openRun.created()).isEqualTo(1);
+        assertThat(pages.scanUser(userId,0,10).unchanged()).isEqualTo(2);
+    }
+    @Test void prefilterMismatchStillRevalidatesUnderLockWithoutDuplicateCandidate() {
+        long p=policy(ELIGIBLE); assertThat(pages.scanUser(userId,0,10).created()).isEqualTo(1);
+        jdbc.update("UPDATE notification_match_pairs SET last_input_key='stale-prefilter-key'");
+        var run=pages.scanUser(userId,0,10);
+        assertThat(run.unchanged()).isZero(); assertThat(run.observed()).isEqualTo(1); assertThat(run.created()).isZero(); assertThat(run.failed()).isZero();
+        assertThat(candidates.count()).isEqualTo(1);
+        assertThat(pairs.findByUserIdAndOpportunityId(userId,p).orElseThrow().getLastInputKey()).isNotEqualTo("stale-prefilter-key");
+        assertThat(pages.scanUser(userId,0,10).unchanged()).isEqualTo(1);
+    }
+    @Test void prefilterRowFailureIsIsolatedPerPolicy() {
+        long broken=policy(ELIGIBLE); long unknownStatus=policy(ELIGIBLE); policy(ELIGIBLE);
+        jdbc.update("UPDATE opportunity_versions v SET normalization_version='' FROM opportunities o WHERE o.id=? AND v.id=o.current_version_id",broken);
+        // Hibernate's enum CHECK blocks an unknown status, so lift it for this test to simulate a value the code does not know.
+        jdbc.execute("ALTER TABLE eligibility_set_results DROP CONSTRAINT eligibility_set_results_eligibility_status_check");
+        try {
+            jdbc.update("UPDATE eligibility_set_results SET eligibility_status='NOT_A_STATUS' WHERE condition_set_id=?",unknownStatus+100);
+            var run=pages.scanUser(userId,0,10);
+            assertThat(run.visited()).isEqualTo(3); assertThat(run.failed()).isEqualTo(2);
+            assertThat(run.observed()).isEqualTo(1); assertThat(run.created()).isEqualTo(1);
+            assertThat(run.lastOpportunityId()).isGreaterThan(unknownStatus);
+            assertThat(pairs.findByUserIdAndOpportunityId(userId,broken)).isEmpty();
+            assertThat(pairs.findByUserIdAndOpportunityId(userId,unknownStatus)).isEmpty();
+        } finally {
+            jdbc.update("UPDATE eligibility_set_results SET eligibility_status='UNKNOWN' WHERE eligibility_status='NOT_A_STATUS'");
+            jdbc.execute("ALTER TABLE eligibility_set_results ADD CONSTRAINT eligibility_set_results_eligibility_status_check "
+                    + "CHECK (eligibility_status IN ('ELIGIBLE','NOT_ELIGIBLE','POSSIBLY_ELIGIBLE','UNKNOWN'))");
+        }
+    }
     @Test void pageIncludesNegativeObservationsForFutureTransitionDetection() {
         long p=policy(NOT_ELIGIBLE); assertThat(pages.scanUser(userId,0,10).created()).isZero();
         assertThat(pairs.count()).isEqualTo(1); status(p,ELIGIBLE);

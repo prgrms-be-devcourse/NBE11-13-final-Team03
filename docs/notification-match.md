@@ -11,8 +11,8 @@ Notification의 NEW_MATCH 수신·슬롯 편입을 연결한다. backend가 대�
 | 항목 | 현재 결정 | 상태 |
 | --- | --- | --- |
 | 찜 이후 정책 변경 | 저장 버전과 같은 정책의 버전 번호를 비교해 `savedVersionNo < sourceVersionNo`일 때만 변경 알림 대상 | 확정 |
-| `saved_version_id = null` | 버전을 추정하거나 첫 비교 버전을 저장하지 않고 정책 버전 변경 알림에서 제외. 신청 시작·D-7/3/1 등 날짜 알림은 유지 | 확정 |
-| 기존 찜의 시작점 | 기존 null 행을 현재 버전으로 일괄 채우는 작업은 없음. 배포 시 1회 backfill 여부·시점은 별도 결정 | 미확정 |
+| `saved_version_id = null` 현재 처리 | 버전을 추정하거나 첫 비교 버전을 저장하지 않고 정책 버전 변경 알림에서 제외. 신청 시작·D-7/3/1 등 날짜 알림은 유지 | 현재 처리 방식 확정 |
+| 기존 null 행 전환 방침 | 기존 null 행을 현재 버전으로 일괄 채우는 작업은 없음. 배포 시 1회 backfill 여부·시점·소급 범위는 별도 결정 | 미확정. 위 행은 이 결정을 대신하지 않는다 |
 | 첫 정책 버전 | 실제 첫 버전(`versionNo=1`, 이전 버전 없음)만 BASELINE_SKIPPED로 자동 기록. 변경 이력·이벤트·Outbox 생성 없음 | 확정 |
 | 초기 적재 구분 | 전역 초기화·출처별 최초 적재 완료 계약을 이 알림 경로의 선행 조건으로 요구하지 않음. 이력 누락을 첫 버전으로 간주하지 않음 | 확정 |
 | FIRST_MATCH | 사용자·정책별 최초 적합 후보를 전건 기록. 사용자별 하루 요약 1건에 후보 ID 순으로 예산만큼 포함하고 나머지는 다음 회차에서 재검증 | 확정 |
@@ -78,7 +78,7 @@ ENQUEUED는 Outbox 생성 완료를 뜻하고 실제 인앱 저장/FCM 성공을
 
 | 키 | 기본값 | 의미·범위 |
 | --- | --- | --- |
-| yon.tracking.match.enabled | false | 관측 서비스·배치 성공 리스너 활성화. 아래 관측 비용 P2 해결 전에는 비활성 유지 |
+| yon.tracking.match.enabled | false | 관측 서비스·배치 성공 리스너 활성화. 아래 관측 비용 절의 실데이터 측정 전에는 비활성 유지 |
 | yon.tracking.match.possibly.max-unresolved | 1 | 미해결 조건 합계 한도, 0 이상 |
 | yon.tracking.match.possibly.require-interest | true | POSSIBLY에 관심 분야 일치 요구 |
 | yon.tracking.match.summary-link | 빈 값 | 검증된 내부 추천 페이지 경로. match.enabled=true이면 필수. 외부 URL·query·fragment 불허 |
@@ -137,24 +137,31 @@ fixedDelay에 실행 시간이 더해지고, 전환 처리·잠금 대기·DEFER
 4. **Notification DB 제약 → NEW_MATCH 지원 Notification → 생산 backend 활성화** 순서를 지킨다.
    구 Notification은 NEW_MATCH를 거부한다. backend를 먼저 배포하더라도 신규 생성 플래그는 비활성이어야 한다.
 5. 실제 추천 페이지를 확인해 모든 backend 인스턴스에 summary-link를 설정한다. 관측만 켜더라도 빈 링크면 기동 실패한다.
-6. 아래 관측 비용 P2를 수정·검증한 뒤 match.enabled 활성화를 검토한다. 기존 쌍/후보·구 경로 Outbox 상태와
+6. 아래 관측 비용 절의 실데이터 측정을 마친 뒤 match.enabled 활성화를 검토한다. 기존 쌍/후보·구 경로 Outbox 상태와
    모든 인스턴스의 설정 일치를 확인한다. 기존 pending 메시지의 일괄 삭제·후보 초기화를 자동 수행하지 않는다.
 7. 관측을 검증한 뒤 outbox.enabled를 켜고 automatic/scheduler는 비활성인 상태에서 명시 호출로 수신 계약·근거·Outbox를 확인한다.
    그 뒤 automatic/scheduler 게이트를 단계적으로 적용한다.
    팀의 잠정 회차·우선순위 확인, 실제 슬롯·동의·FCM 전달 검증과 기존 레거시 전환 절차는 별도 수행한다.
 
-### 활성화 전 필수 후속: P2 관측 비용
+### 관측 비용 (이전 P2) — 무변경 입력 사전 필터
 
-**현재 미해결이다.** 리스너는 판정 배치 스레드에서 동기로 사용자별 대상 정책을 끝까지 순회한다.
-각 observe가 정책·사용자·입력 잠금을 잡은 뒤 입력 키를 비교하므로 결과가 바뀌지 않아도 정책마다 트랜잭션을 연다.
-예를 들어 대상 정책 4천 건이면 사용자당 최대 수천 번의 잠금 트랜잭션이 발생한다. 배치 기본 fixedDelay는 10분이며
-관측 시간이 배치 실행 시간에 포함되므로 실행 주기도 길어진다.
+리스너는 여전히 판정 배치 스레드에서 동기로 사용자별 대상 정책을 끝까지 순회하지만,
+`MatchCandidatePage.scanUser`가 페이지(최대 100건)마다 잠금 없는 조회 두 번으로 완전한 입력을 읽는다.
+첫 조회는 현재 버전·프로필 버전·규칙·판정 상태·미해결 수·찜 여부·관심 일치와 쌍의 `last_input_key`를,
+두 번째는 그 페이지 버전들의 신청기간을 읽어 `ApplicationStatusCalculator`로 신청 상태를 계산한다.
+이 입력으로 쌍과 같은 방식의 입력 키를 만들어 저장된 키와 같으면 `observe`를 호출하지 않는다(`unchanged`).
+키가 다르거나 쌍이 없을 때만 기존 `observe` 잠금 트랜잭션에 넘기며, 그 트랜잭션은 지금처럼 잠금 아래 모든 입력을 다시 읽어 판단한다.
 
-후속 PR에서 잠금 없는 페이지 조회로 완전한 입력 키를 먼저 비교해 다른 경우만 observe를 호출하거나,
-갱신 대상만 관측하고 날짜에 따른 신청 상태 변화를 별도 순회하는 방법을 검토한다.
-버전·프로필만으로 생략하면 찜·관심·미해결 수·규칙 설정·신청일 경계 변화를 놓칠 수 있다.
-최종 저장 시 기존 잠금 아래 재검증은 유지하고, 무변경 입력의 잠금 감소·동시 변경·날짜 경계·실패 재시도를 검증해야 한다.
-단순 비동기 실행으로 옮기는 것만으로 전체 DB 작업량이 줄지는 않는다. 해결·부하 검증 전 match.enabled=false를 유지한다.
+- 잠금 관측 시도 수는 `observed`로 따로 센다(실패한 시도 포함). 리스너가 사용자별 방문·무변경·관측·생성·실패 합계를 debug 로그로 남기며, 활성화 전 측정 지표는 `observed`다.
+- 잠금 없는 조회는 동시 변경과 경합할 수 있다. 키가 다르다고 읽었으면 잠금 아래 재검증이 바로잡고,
+  같다고 읽은 직후 바뀐 변경은 다음 배치에서 관측된다. 오래된 키를 저장하는 경우는 없다.
+- 날짜 경계(UPCOMING→OPEN 등)는 신청 상태가 키에 포함되므로 별도 순회 없이 같은 사전 필터에서 잡힌다.
+- 행 하나의 입력 오류(예: 빈 정규화 버전, 알 수 없는 판정 상태값)는 그 정책만 실패로 세고 페이지는 계속 진행한다. 페이지 조회 SQL 자체의 실패는 페이지 전체 실패다.
+- 판정 배치가 사용자 결과를 갱신하지 않아도 리스너는 전체를 다시 읽는다. 읽기 자체는 인덱스 범위 조회이며
+  정책 4천 건이면 사용자당 약 40페이지 × 조회 2번이다.
+
+**활성화 전 남은 조건:** 실데이터(`yon_e2e` 또는 운영 복제본)에서 사용자당 방문·무변경·관측 시도 수(`observed`)와
+판정 배치 실행 시간을 측정해 기록한다. 측정 전에는 match.enabled=false를 유지한다.
 
 ### 중지·미결정 항목
 
@@ -178,7 +185,8 @@ fixedDelay에 실행 시간이 더해지고, 전환 처리·잠금 대기·DEFER
 | backend: YON_TEST_DB_URL을 테스트 전용 yon_test로 지정해 `test bootJar --rerun-tasks` | 960개 중 958개 통과, 벤치마크 2개 건너뜀, 실패·오류 0. bootJar 성공 |
 | notification-service: `test --rerun-tasks` | 189개 통과, 건너뜀·실패·오류 0 |
 | 요약 예산 초과 수정 후: MatchObservationPostgresTest 39, MatchAutomaticWorkerTest 3, MatchAutomaticSchedulingTest 3, MatchSummaryWindowTest 2, IngestBoundaryTest 3 | 50개 통과, 건너뜀·실패·오류 0. 회차별 분할·당일 중복 차단·다음 날 잔여 처리 및 자격 재검증 확인 |
+| 무변경 입력 사전 필터 추가 후: Match 10개 클래스 101(MatchObservationPostgresTest 47), EligibilityNotificationRevalidationPostgresTest 48, EventFanoutIntegrationTest 19, EligibilityBatchMatchEventTest 3, IngestBoundaryTest·ApplicationPersistenceCompletenessTest | 171개 통과, 건너뜀·실패·오류 0. 재스캔 시 무변경 정책 잠금 관측 0건, 관심·찜·날짜 경계 변화 감지, 사전 필터 불일치 시 잠금 재검증·중복 후보 없음, 행 오류 정책별 격리 확인 |
 | POLICY_UNAVAILABLE 후보 종료 수정 후: Match 10개 클래스 97(MatchObservationPostgresTest 43), DeadlineExtensionPostgresTest 40, EligibilityNotificationRevalidationPostgresTest 48, EventFanoutIntegrationTest 19, EligibilityBatchMatchEventTest 3 | 207개 통과, 건너뜀·실패·오류 0. 비가용 정책 후보만 닫고 나머지 요약 발행, 전부 비가용 시 Outbox 없이 종료, 조건 묶음 미생성은 DEFERRED 유지, 전환 후보 종료 확인 |
 
 실제 업무 DB의 DDL 적용·타이머 장시간 실행·운영 부하·외부 FCM은 미검증이다.
-로컬 테스트 통과는 위 관측 비용 P2 해결이나 운영 활성화 승인을 뜻하지 않는다.
+로컬 테스트 통과는 실데이터 관측 비용 측정이나 운영 활성화 승인을 뜻하지 않는다.
