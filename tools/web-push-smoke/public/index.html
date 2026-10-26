@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Y:ON 웹 푸시 테스트</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main>
+    <span class="badge">Y:ON · 임시 테스트</span>
+    <h1>웹 푸시 수신 확인</h1>
+    <p>프론트·로그인·우리 서버 없이 Firebase 토큰 발급과 메시지 수신을 확인합니다.</p>
+    <p class="notice">Firebase 웹 설정과 VAPID <strong>공개 키</strong>만 입력하세요. 서비스 계정 JSON·비공개 키는 입력하지 않습니다. 입력값과 수신 기록은 새로고침하면 화면에서 지워집니다. 서비스 워커와 FCM 토큰은 아래 해제 버튼으로 정리하세요.</p>
+    <form id="setup">
+      <h2>1. Firebase 설정</h2>
+      <label>apiKey <input name="apiKey" required autocomplete="off" spellcheck="false"></label>
+      <label>authDomain <input name="authDomain" required placeholder="프로젝트.firebaseapp.com" autocomplete="off" spellcheck="false"></label>
+      <label>projectId <input name="projectId" required autocomplete="off" spellcheck="false"></label>
+      <label>messagingSenderId <input name="messagingSenderId" required inputmode="numeric" autocomplete="off" spellcheck="false"></label>
+      <label>appId <input name="appId" required autocomplete="off" spellcheck="false"></label>
+      <label>Web Push VAPID 공개 키 <textarea name="vapidKey" required rows="2" autocomplete="off" spellcheck="false"></textarea></label>
+      <button id="connect" type="submit">알림 권한 허용 · FCM 토큰 발급</button>
+    </form>
+    <section>
+      <h2>2. 테스트 메시지 보내기</h2>
+      <p>아래 토큰을 같은 Firebase 프로젝트 콘솔의 Messaging → 알림 메시지 작성 → 테스트 메시지 전송에 넣으세요. 백그라운드 알림 확인 시 이 탭을 열어 둔 채 다른 탭으로 이동하세요.</p>
+      <label>현재 브라우저의 FCM 토큰 <textarea id="token" readonly rows="4" spellcheck="false" placeholder="토큰 발급 후 표시됩니다"></textarea></label>
+      <div class="actions">
+        <button type="button" id="copy" disabled>토큰 복사</button>
+        <button type="button" id="disconnect" disabled>테스트 토큰 · 서비스 워커 해제</button>
+      </div>
+      <p id="status" role="status" aria-live="polite">설정을 입력하고 토큰을 발급받으세요.</p>
+    </section>
+    <section>
+      <h2>3. 수신 기록</h2>
+      <p>화면을 보고 있을 때는 아래에 수신 내역이 표시됩니다. OS 알림 표시와 화면 수신 기록은 별도로 확인하세요.</p>
+      <pre id="messages" aria-live="polite">아직 수신한 메시지가 없습니다.</pre>
+    </section>
+    <footer>이 페이지는 인앱 저장·사용자 Endpoint 등록·SQS·슬롯 발송을 검증하지 않습니다.</footer>
+  </main>
+</body>
+</html>
