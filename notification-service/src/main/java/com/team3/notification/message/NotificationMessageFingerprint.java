@@ -1,5 +1,7 @@
 package com.team3.notification.message;
 
+import com.team3.notification.admin.CollectionCompletedMessage;
+
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
@@ -21,6 +23,10 @@ public class NotificationMessageFingerprint {
     }
 
     public String fingerprint(UserWithdrawnMessage message) {
+        return fingerprintFields(message);
+    }
+
+    public String fingerprint(CollectionCompletedMessage message) {
         return fingerprintFields(message);
     }
 
