@@ -61,10 +61,28 @@ class BodyConditionDetectorTest {
             "작가 박천휴 (MBC '나혼자산다' 등 출연)",
             "청년의 주거비 부담을 덜어 준다",
             "고졸 취업연계 장려금/장학금 - 제대군인 전직지원금 - 창작준비금/지원금 등",
-            "[상한 연령 연장 군필자] 병적증명서, 전역증"
+            "[상한 연령 연장 군필자] 병적증명서, 전역증",
+            "축하금, 결혼축하금, 교통비, 사업장 부동산 재산세 감면(50%) 등",
+            "지방세(재산세 면제) 혜택",
+            "소득·재산 경감 혜택 안내"
     })
     void 자격_조건이_아닌_표현은_찾지_않는다(String text) {
         assertThat(detect(text).isEmpty()).isTrue();
+    }
+
+    /** 서류 이름에만 드러나는 실제 재산 기준 (청년월세지원, 실데이터). 혜택이 아니므로 찾는다 */
+    @Test
+    void 제출서류_문맥은_자격_판단용이라_찾는다() {
+        Detection detection = BodyConditionDetector.detect(YouthPolicyRaw.builder()
+                .sbmsnDcmntCn("(필수서류) 월세지원 신청(변경)서, 소득·재산 신고서, 임대차계약(확정일자 날인)").build());
+
+        assertThat(detection.kinds()).containsExactly(Kind.PROPERTY);
+        assertThat(detection.sourceFields()).containsExactly("sbmsnDcmntCn");
+    }
+
+    @Test
+    void 같은_줄에_혜택과_자격이_함께_있으면_자격으로_찾는다() {
+        assertThat(detect("재산세 감면 대상: 재산 기준 2억원 이하 청년").kinds()).containsExactly(Kind.PROPERTY);
     }
 
     @Test
