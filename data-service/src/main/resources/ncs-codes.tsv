@@ -1,7 +1,7 @@
 # NCS 분류 코드 → 이름 (NcsClassification)
 # 형식: 코드<TAB>이름. 2자리 = 대분류(1차), 4자리 = 중분류(2차)
 # 출처: 고용24 공통코드 API callOpenApiSvcInfo319L01 (srchType 05 대분류, 06 중분류), 2026-10-22 생성
-# 다시 만들기: backend/scripts/ncs_codes_fetch.py (홈서버에서 실행 후 이 파일로 복사)
+# 다시 만들기: data-service/scripts/ncs_codes_fetch.py (홈서버에서 실행 후 이 파일로 복사)
 01	사업관리
 0101	사업관리
 02	경영·회계·사무

@@ -12,7 +12,21 @@ import java.util.List;
 
 public interface OpportunityVersionRepository extends JpaRepository<OpportunityVersion, Long> {
 
+    java.util.Optional<OpportunityVersion> findFirstByOpportunityIdAndVersionNoLessThanOrderByVersionNoDesc(
+            Long opportunityId, Integer versionNo);
+
     List<OpportunityVersion> findByOpportunityIdOrderByVersionNoAsc(Long opportunityId);
+
+    /** Includes missing records and non-terminal analyses; never skip an unfinished intermediate version. */
+    @Query("""
+            select v from OpportunityVersion v
+            where v.opportunity.id = :opportunityId and v.versionNo <= :currentVersionNo
+              and not exists (select t.id from OpportunityVersionTracking t
+                  where t.opportunityVersion.id = v.id and t.processedAt is not null)
+            order by v.versionNo, v.id
+            """)
+    List<OpportunityVersion> findUnfinishedTrackingVersions(@Param("opportunityId") Long opportunityId,
+            @Param("currentVersionNo") Integer currentVersionNo, Pageable pageable);
 
     /** 조건 묶음이 비어 있는 버전 ID (ConditionSetBackfill용, afterId보다 큰 ID 순서로 pageable 크기만큼) */
     @Query("select v.id from OpportunityVersion v where v.conditionSetId is null and v.id > :afterId order by v.id")

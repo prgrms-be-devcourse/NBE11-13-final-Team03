@@ -1,0 +1,123 @@
+.header {
+  background: var(--color-surface);
+  border-block-end: 1px solid var(--color-border);
+}
+
+.inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  max-inline-size: calc(var(--content-max-width) + 2 * var(--page-gutter));
+  margin-inline: auto;
+  padding: var(--space-3) var(--page-gutter);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  min-block-size: 2.75rem;
+  color: var(--color-primary);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-heading);
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.brand > span {
+  /* Pretendard 워드마크를 전구 심볼의 시각적 중심에 맞춘다. */
+  transform: translateY(2px);
+}
+
+.logo {
+  display: block;
+  flex-shrink: 0;
+  inline-size: auto;
+  block-size: 2rem;
+  object-fit: contain;
+}
+
+@media (min-width: 1024px) {
+  .brand {
+    font-size: 1.75rem;
+  }
+
+  .logo {
+    block-size: 2.5rem;
+  }
+}
+
+.menuButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-primary);
+}
+
+.navigation {
+  display: none;
+  flex-basis: 100%;
+  min-inline-size: 0;
+}
+
+.open {
+  display: block;
+}
+
+.menuList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menuLink {
+  display: flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.menuLink:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text-primary);
+}
+
+.active,
+.active:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+@media (min-width: 768px) {
+  .menuButton {
+    display: none;
+  }
+
+  .navigation {
+    display: block;
+    flex-basis: auto;
+  }
+
+  .menuList {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}

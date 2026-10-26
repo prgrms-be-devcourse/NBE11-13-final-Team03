@@ -1,0 +1,50 @@
+:root {
+  --color-background: #f7f8f6;
+  --color-surface: #ffffff;
+  --color-primary: #486b53;
+  --color-primary-soft: #eaf1e7;
+  --color-accent-green: #d9e8cd;
+  --color-accent-yellow: #f6e8b4;
+  --color-text-primary: #253029;
+  --color-text-secondary: #68746c;
+  --color-border: #e3e8e1;
+  --color-surface-muted: #f1f4ef;
+  --color-error: #a33434;
+  --color-input-border: #7d887f;
+
+  --font-family-base: 'Pretendard', system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font-size-title: 2rem;
+  --font-size-heading: 1.5rem;
+  --font-size-body: 1rem;
+  --font-size-small: 0.875rem;
+  --line-height-heading: 1.35;
+  --line-height-body: 1.6;
+  --line-height-small: 1.5;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --space-5: 2rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.75rem;
+
+  --content-max-width: 1200px;
+  --page-gutter: var(--space-3);
+}
+
+/* Mobile: <=767px; tablet: 768–1023px; desktop: >=1024px.
+   Use these literal breakpoints in media queries; CSS variables cannot be used
+   in media query conditions. Content width excludes the outer page gutters. */
+@media (min-width: 768px) {
+  :root {
+    --page-gutter: var(--space-4);
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --page-gutter: var(--space-5);
+  }
+}

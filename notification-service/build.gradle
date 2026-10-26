@@ -19,10 +19,14 @@ repositories {
 }
 
 dependencies {
+    implementation platform('software.amazon.awssdk:bom:2.57.2')
+    implementation 'software.amazon.awssdk:sqs'
+    implementation 'software.amazon.awssdk:url-connection-client'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'com.google.firebase:firebase-admin:9.11.0'
     developmentOnly 'me.paulschwarz:springboot4-dotenv:5.1.0'
     runtimeOnly 'org.postgresql:postgresql'
 
@@ -39,10 +43,13 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
-// The projects share only operator SQL as test fixtures, not application code.
+// Share operator SQL and wire-contract examples only as test fixtures, not runtime code.
 tasks.named('processTestResources') {
     from('../database/scripts') {
         into 'db-boundary'
+    }
+    from('../contracts') {
+        into 'contracts'
     }
 }
 

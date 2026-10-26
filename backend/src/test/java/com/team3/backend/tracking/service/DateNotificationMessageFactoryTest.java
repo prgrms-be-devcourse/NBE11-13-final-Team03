@@ -1,0 +1,227 @@
+package com.team3.backend.tracking.service;
+
+import com.team3.backend.opportunity.domain.entity.*;
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
+import com.team3.backend.outbox.domain.entity.OutboxStatus;
+import com.team3.backend.tracking.domain.entity.*;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
+import java.time.*;
+import java.util.*;
+import static com.team3.backend.tracking.config.DateTrackingConfig.KST;
+import static org.assertj.core.api.Assertions.*;
+
+class DateNotificationMessageFactoryTest {
+    private static final LocalDate TODAY = LocalDate.of(2026, 10, 23);
+    private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");
+    private final ApplicationStatusCalculator calculator = new ApplicationStatusCalculator();
+    private final DateNotificationMessageFactory factory =
+            new DateNotificationMessageFactory(calculator, new DeadlineSoonDetector(calculator));
+    private final Opportunity policy = Opportunity.builder().opportunityType(OpportunityType.YOUTH_POLICY)
+            .title("Policy").build();
+    private final OpportunityVersion version = OpportunityVersion.builder().opportunity(policy).versionNo(1)
+            .normalizationVersion("test").normalizedSnapshot(Map.of()).build();
+
+    @Test
+    void supportedTypesAreExactlyTheFourDateTypesAndCannotBeModified() {
+        assertThat(DateNotificationMessageFactory.supportedTypes()).containsExactlyInAnyOrder(
+                OpportunityEventType.APPLICATION_OPENED, OpportunityEventType.APPLICATION_CLOSED,
+                OpportunityEventType.DEADLINE_SOON, OpportunityEventType.DEADLINE_EXTENDED);
+        for (var type : OpportunityEventType.values()) {
+            assertThat(factory.supports(type)).isEqualTo(DateNotificationMessageFactory.supportedTypes().contains(type));
+        }
+        assertThat(factory.supports(null)).isFalse();
+        assertThatThrownBy(() -> DateNotificationMessageFactory.supportedTypes().add(OpportunityEventType.ELIGIBILITY_CHANGED))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void producerMatchesSharedVersionOneContract() throws Exception {
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var resource = new org.springframework.core.io.ClassPathResource("contracts/notification-requested-push-expiry-v1.json");
+        var expected = mapper.readTree(resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+        var event = deadline();
+        ReflectionTestUtils.setField(event, "eventId", UUID.fromString(expected.get("sourceEventId").asText()));
+        ReflectionTestUtils.setField(event, "correlationId", UUID.fromString(expected.get("correlationId").asText()));
+        var prepared = factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(3))), NOW)
+                .orElseThrow();
+        var outbox = factory.create(event, 7L, prepared, NOW);
+        var actual = new LinkedHashMap<>(outbox.getPayload());
+        // Only the generated transport identity differs from the example.
+        actual.put("messageId", expected.get("messageId").asText());
+        assertThat(mapper.readTree(mapper.writeValueAsString(actual))).isEqualTo(expected);
+    }
+
+    @Test
+    void deadlineMessageIsCompleteAndUsesExclusiveKstMidnightExpiry() {
+        var event = deadline();
+        var prepared = factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(3))), NOW)
+                .orElseThrow();
+        var outbox = factory.create(event, 7L, prepared, NOW);
+        assertThat(prepared.expiresAt()).isEqualTo(Instant.parse("2026-10-26T15:00:00Z"));
+        assertThat(outbox.getStatus()).isEqualTo(OutboxStatus.PENDING);
+        assertThat(outbox.getNextRetryAt()).isEqualTo(NOW);
+        assertThat(outbox.getDedupKey()).isEqualTo("NOTIFICATION_REQUESTED:" + event.getEventId() + ":7");
+        assertThat(outbox.getPayload()).containsEntry("schemaVersion", 1)
+                .containsEntry("messageId", outbox.getMessageId().toString())
+                .containsEntry("eventType", "NOTIFICATION_REQUESTED")
+                .containsEntry("sourceEventId", event.getEventId().toString())
+                .containsEntry("correlationId", event.getCorrelationId().toString())
+                .containsEntry("causationId", event.getEventId().toString())
+                .containsEntry("userId", 7L).containsEntry("opportunityId", 10L)
+                .containsEntry("opportunityVersionId", 20L).containsEntry("type", "DEADLINE_SOON")
+                .containsEntry("channels", List.of("IN_APP", "PUSH"))
+                .containsEntry("link", "/opportunities/10")
+                .containsEntry("expiresAt", "2026-10-26T15:00:00Z")
+                .containsEntry("pushExpiresAt", "2026-10-23T15:00:00Z")
+                .containsEntry("payload", event.getPayload())
+                .containsKeys("title", "content", "occurredAt");
+    }
+
+    @Test
+    void pushExpiryUsesThresholdDayWithoutShorteningTheMessageForAllThreeThresholds() {
+        for (int days : List.of(1, 3, 7)) {
+            var event = event(OpportunityEventType.DEADLINE_SOON,
+                    Map.of("threshold", "D-" + days, "applicationEndDate", TODAY.plusDays(days).toString()), true);
+            var prepared = factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(days))), NOW).orElseThrow();
+            var envelope = factory.create(event, 7L, prepared, NOW).getPayload();
+            assertThat(envelope).containsEntry("pushExpiresAt", TODAY.plusDays(1).atStartOfDay(KST).toInstant().toString());
+            assertThat(prepared.expiresAt()).isEqualTo(TODAY.plusDays(days + 1L).atStartOfDay(KST).toInstant());
+        }
+    }
+
+    @Test
+    void changedDeadlineOrPassedThresholdDoesNotCreateNewRequest() {
+        var event = deadline();
+        assertThat(factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(4))), NOW))
+                .isEmpty();
+        assertThat(factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(3))),
+                NOW.plus(Duration.ofDays(1)))).isEmpty();
+    }
+
+    @Test
+    void alwaysOpenAndInvalidWindowsDoNotCreateDeadlineRequests() {
+        var fixed = period(TODAY.minusDays(7), TODAY.plusDays(3));
+        var always = new ApplicationPeriod(PeriodType.ALWAYS, null, null, ValidationStatus.VALID, "");
+        assertThat(factory.prepare(deadline(), policy, List.of(fixed, always), NOW)).isEmpty();
+        var invalid = new ApplicationPeriod(PeriodType.FIXED, fixed.startDate(), fixed.endDate(),
+                ValidationStatus.INVALID, "");
+        assertThat(factory.prepare(deadline(), policy, List.of(invalid), NOW)).isEmpty();
+    }
+
+    @Test
+    void openedExpiryIsEarlierOfThreeDaysAndClosingBoundary() {
+        var event = event(OpportunityEventType.APPLICATION_OPENED, Map.of("startDate", TODAY.toString()), true);
+        var prepared = factory.prepare(event, policy, List.of(period(TODAY, TODAY)), NOW).orElseThrow();
+        assertThat(prepared.expiresAt()).isEqualTo(Instant.parse("2026-10-23T15:00:00Z"));
+        assertThat(prepared.channels()).containsExactly("IN_APP", "PUSH");
+        var withoutEnd = factory.prepare(event, policy, List.of(period(TODAY, null)), NOW).orElseThrow();
+        assertThat(withoutEnd.expiresAt()).isEqualTo(NOW.plus(Duration.ofDays(3)));
+        var multiple = factory.prepare(event, policy,
+                List.of(period(TODAY, TODAY), period(TODAY, TODAY.plusDays(7))), NOW).orElseThrow();
+        assertThat(multiple.expiresAt()).isEqualTo(NOW.plus(Duration.ofDays(3)));
+        var partlyUnbounded = factory.prepare(event, policy,
+                List.of(period(TODAY, TODAY), period(TODAY, null)), NOW).orElseThrow();
+        assertThat(partlyUnbounded.expiresAt()).isEqualTo(NOW.plus(Duration.ofDays(3)));
+        assertThatThrownBy(() -> factory.create(event, 7L, prepared, prepared.expiresAt()))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void openedRecoveredAfterAWeekendExpiresFromCreationNotFromTheScannedDate() {
+        // Friday (TODAY) was missed and recovered on Monday within recovery-days=3.
+        var monday = Instant.parse("2026-10-25T16:00:00Z");
+        ReflectionTestUtils.setField(policy, "id", 10L);
+        ReflectionTestUtils.setField(version, "id", 20L);
+        var recovered = OpportunityEvent.create(policy, version, OpportunityEventType.APPLICATION_OPENED, TODAY,
+                "APPLICATION_OPENED:10:" + TODAY, Map.of("startDate", TODAY.toString()), true, null, monday);
+        recovered.recordOrigin(UUID.randomUUID(), TODAY.atStartOfDay(KST).toInstant());
+
+        var prepared = factory.prepare(recovered, policy, List.of(period(TODAY, null)), monday).orElseThrow();
+        assertThat(prepared.expiresAt()).isEqualTo(monday.plus(Duration.ofDays(3)));
+    }
+
+    @Test
+    void closedRequestsInAppOnlyAndOtherOpenPeriodInvalidatesIt() {
+        var event = event(OpportunityEventType.APPLICATION_CLOSED,
+                Map.of("endDate", TODAY.minusDays(1).toString()), true);
+        var old = period(TODAY.minusDays(7), TODAY.minusDays(1));
+        var prepared = factory.prepare(event, policy, List.of(old), NOW).orElseThrow();
+        assertThat(prepared.channels()).containsExactly("IN_APP");
+        assertThat(prepared.expiresAt()).isEqualTo(NOW.plus(Duration.ofDays(3)));
+        assertThat(factory.prepare(event, policy, List.of(old, period(TODAY.minusDays(1), TODAY.plusDays(9))), NOW))
+                .isEmpty();
+        assertThat(factory.prepare(event, policy, List.of(old), prepared.expiresAt())).isEmpty();
+    }
+
+    @Test
+    void eventSuppressionIsHonoredAndMalformedPayloadIsNotSilentlyAccepted() {
+        var suppressed = event(OpportunityEventType.DEADLINE_SOON, Map.of(), false);
+        assertThat(factory.prepare(suppressed, policy, List.of(), NOW)).isEmpty();
+        var broken = event(OpportunityEventType.DEADLINE_SOON,
+                Map.of("applicationEndDate", TODAY.plusDays(3).toString(), "threshold", "D-UNKNOWN"), true);
+        assertThatThrownBy(() -> factory.prepare(broken, policy, List.of(), NOW))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void extensionProducerMatchesSharedContract() throws Exception {
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var resource = new org.springframework.core.io.ClassPathResource("contracts/notification-deadline-extended-v1.json");
+        var expected = mapper.readTree(resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+        var event = extension();
+        ReflectionTestUtils.setField(event, "eventId", UUID.fromString(expected.get("sourceEventId").asText()));
+        ReflectionTestUtils.setField(event, "correlationId", UUID.fromString(expected.get("correlationId").asText()));
+        var prepared = factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(3))), NOW).orElseThrow();
+        var actual = new LinkedHashMap<>(factory.create(event, 7L, prepared, NOW).getPayload());
+        actual.put("messageId", expected.get("messageId").asText());
+        assertThat(mapper.readTree(mapper.writeValueAsString(actual))).isEqualTo(expected);
+        assertThat(prepared.channels()).containsExactly("IN_APP", "PUSH");
+    }
+
+    @Test
+    void extensionExpiresAtEarlierOfSevenDaysAfterOccurrenceAndNewDeadline() {
+        var event = extension();
+        var far = TODAY.plusDays(20);
+        var payload = new HashMap<>(event.getPayload()); payload.put("applicationEndDate", far.toString());
+        var distant = event(OpportunityEventType.DEADLINE_EXTENDED, payload, true);
+        assertThat(factory.prepare(distant, policy, List.of(period(TODAY.minusDays(7), far)), NOW).orElseThrow().expiresAt())
+                .isEqualTo(NOW.plus(Duration.ofDays(7)));
+        assertThat(factory.prepare(event, policy, List.of(period(TODAY.minusDays(7), TODAY.plusDays(3))),
+                Instant.parse("2026-10-26T15:00:00Z"))).isEmpty();
+    }
+
+    @Test
+    void extensionRevalidatesCurrentPeriodWithoutMatchingAnUnrelatedRound() {
+        var event = extension();
+        var valid = period(TODAY.minusDays(7), TODAY.plusDays(3));
+        assertThat(factory.prepare(event, policy, List.of(period(valid.startDate(), TODAY.plusDays(4))), NOW)).isEmpty();
+        assertThat(factory.prepare(event, policy, List.of(period(TODAY, valid.endDate())), NOW)).isEmpty();
+        assertThat(factory.prepare(event, policy, List.of(valid, valid), NOW)).isEmpty();
+        assertThat(factory.prepare(event, policy, List.of(), NOW)).isEmpty();
+    }
+
+    private OpportunityEvent extension() {
+        return event(OpportunityEventType.DEADLINE_EXTENDED, Map.of("fromVersionId", 19L, "toVersionId", 20L,
+                "applicationStartDate", TODAY.minusDays(7).toString(),
+                "previousApplicationEndDate", TODAY.plusDays(2).toString(),
+                "applicationEndDate", TODAY.plusDays(3).toString()), true);
+    }
+
+    private OpportunityEvent deadline() {
+        return event(OpportunityEventType.DEADLINE_SOON,
+                Map.of("threshold", "D-3", "applicationEndDate", TODAY.plusDays(3).toString()), true);
+    }
+
+    private OpportunityEvent event(OpportunityEventType type, Map<String, Object> payload, boolean eligible) {
+        ReflectionTestUtils.setField(policy, "id", 10L);
+        ReflectionTestUtils.setField(version, "id", 20L);
+        return OpportunityEvent.create(policy, version, type, TODAY, type + ":10:" + TODAY, payload, eligible,
+                eligible ? null : OpportunityEventSuppressionReason.THRESHOLD_ALREADY_PASSED, NOW);
+    }
+
+    private ApplicationPeriod period(LocalDate start, LocalDate end) {
+        return new ApplicationPeriod(PeriodType.FIXED, start, end, ValidationStatus.VALID, "");
+    }
+}

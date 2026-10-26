@@ -1,0 +1,117 @@
+# Local stack: PostgreSQL, data-service, backend, notification-service, nginx.
+#   docker compose up -d postgres-db          DB only (IDE/bootRun development)
+#   docker compose up -d --build backend      rebuild/restart one service; the DB keeps running
+#   ./start.sh                                build JARs, then start everything
+# Start order is enforced by depends_on + healthchecks. Values come from docker/.env.
+name: yon
+
+services:
+  postgres-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in docker/.env}
+      POSTGRES_DB: ${DB_NAME:-yon}
+      TZ: Asia/Seoul
+      # Read only by the init scripts below.
+      APPLICATION_DB_PASSWORD: ${APPLICATION_DB_PASSWORD:?Set APPLICATION_DB_PASSWORD in docker/.env}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?Set NOTIFICATION_DB_PASSWORD in docker/.env}
+    ports:
+      # Host access for bootRun/IDE. Containers use postgres-db:5432.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      # Init scripts run once, in file-name order, only when the data volume is empty.
+      - ../database/scripts/database-boundaries.sql:/docker-entrypoint-initdb.d/01-database-boundaries.sql:ro
+      - ../database/local/02-set-local-passwords.sh:/docker-entrypoint-initdb.d/02-set-local-passwords.sh:ro
+      - ../database/local/03-apply-notification-ddl.sh:/docker-entrypoint-initdb.d/03-apply-notification-ddl.sh:ro
+      - ../database/scripts:/yon-scripts:ro
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    # Dockerfile copies the pre-built Boot JAR; run ./gradlew bootJar first (start.sh does it).
+    build: ../backend
+    image: yon-backend:local
+    env_file: .env
+    environment:
+      DB_URL: jdbc:postgresql://postgres-db:5432/${DB_NAME:-yon}
+      NOTIFICATION_BASE_URL: http://notification-service:8081
+      DATA_SERVICE_GRPC_ADDRESS: static://data-service:9092
+      # Trust X-Forwarded-* from nginx so OAuth redirect URIs use the browser's host:port.
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      TZ: Asia/Seoul
+    ports:
+      # Direct access for debugging (Swagger etc.). Browsers normally go through nginx.
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    healthcheck:
+      # eclipse-temurin JRE has no curl; check the TCP port with bash.
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 20s
+    restart: unless-stopped
+
+  data-service:
+    # Collection and normalization. Writes the shared application schema as application_user.
+    build: ../data-service
+    image: yon-data-service:local
+    env_file: .env
+    environment:
+      DB_URL: jdbc:postgresql://postgres-db:5432/${DB_NAME:-yon}
+      TZ: Asia/Seoul
+    # No host port: internal API only; backend relays /api/admin/collection/** to it.
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/9092"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 20s
+    restart: unless-stopped
+
+  notification-service:
+    build: ../notification-service
+    image: yon-notification-service:local
+    env_file: .env
+    environment:
+      DB_URL: jdbc:postgresql://postgres-db:5432/${DB_NAME:-yon}
+      PORT: "8081"
+      TZ: Asia/Seoul
+    # No host port: the internal receiver API is reachable only inside the compose network.
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8081"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 20s
+    restart: unless-stopped
+
+  nginx:
+    # Single browser entry point. Add the frontend service here when it exists and route "/" to it.
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+    name: ${YON_DB_VOLUME:-yon-postgres-data}

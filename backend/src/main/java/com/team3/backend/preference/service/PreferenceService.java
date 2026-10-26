@@ -33,16 +33,20 @@ public class PreferenceService {
     private final UserOpportunityPreferenceRepository preferenceRepository;
     private final EntityManager entityManager;
 
-    /** 사용자 잠금 아래 공고를 멱등하게 저장한다. */
+    /** 사용자 잠금 아래 공고를 멱등하게 저장하고 실제 전환 여부를 반환한다. */
     @Transactional
-    public void save(Long userId, Long opportunityId) {
+    public boolean save(Long userId, Long opportunityId) {
         User user = getLockedUser(userId);
         Opportunity opportunity = getOpportunity(opportunityId);
         Optional<UserOpportunityPreference> existing = preferenceRepository
                 .findByUserIdAndOpportunityId(userId, opportunityId);
         if (existing.isPresent()) {
-            existing.get().markSaved();
-            return;
+            UserOpportunityPreference preference = existing.get();
+            if (!preference.isSaved()) {
+                preference.markSaved();
+                return true;
+            }
+            return false;
         }
 
         UserOpportunityPreference preference = UserOpportunityPreference.builder()
@@ -51,6 +55,7 @@ public class PreferenceService {
                 .build();
         preference.markSaved();
         preferenceRepository.save(preference);
+        return true;
     }
 
     /** 저장 상태를 해제하고 두 상태가 꺼지면 행을 삭제한다. */
@@ -65,16 +70,20 @@ public class PreferenceService {
                 });
     }
 
-    /** 사용자 잠금 아래 공고를 멱등하게 숨긴다. */
+    /** 사용자 잠금 아래 공고를 멱등하게 숨기고 실제 전환 여부를 반환한다. */
     @Transactional
-    public void hide(Long userId, Long opportunityId) {
+    public boolean hide(Long userId, Long opportunityId) {
         User user = getLockedUser(userId);
         Opportunity opportunity = getOpportunity(opportunityId);
         Optional<UserOpportunityPreference> existing = preferenceRepository
                 .findByUserIdAndOpportunityId(userId, opportunityId);
         if (existing.isPresent()) {
-            existing.get().markHidden();
-            return;
+            UserOpportunityPreference preference = existing.get();
+            if (!preference.isHidden()) {
+                preference.markHidden();
+                return true;
+            }
+            return false;
         }
 
         UserOpportunityPreference preference = UserOpportunityPreference.builder()
@@ -83,6 +92,7 @@ public class PreferenceService {
                 .build();
         preference.markHidden();
         preferenceRepository.save(preference);
+        return true;
     }
 
     /** 숨김 상태를 해제하고 두 상태가 꺼지면 행을 삭제한다. */
@@ -133,6 +143,15 @@ public class PreferenceService {
             return Set.of();
         }
         return Set.copyOf(preferenceRepository.findSavedOpportunityIds(userId, opportunityIds));
+    }
+
+    /** 지정한 공고 중 사용자가 숨긴 공고 ID를 일괄 조회한다. */
+    @Transactional(readOnly = true)
+    public Set<Long> getHiddenOpportunityIds(Long userId, Collection<Long> opportunityIds) {
+        if (opportunityIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(preferenceRepository.findHiddenOpportunityIds(userId, opportunityIds));
     }
 
     /** 저장 사용자 ID를 커서 다음부터 조회하며 첫 호출의 커서는 0이다. */

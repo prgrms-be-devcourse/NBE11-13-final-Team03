@@ -2,6 +2,10 @@ package com.team3.dataservice.opportunity.normalization;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -44,5 +48,18 @@ class NcsClassificationTest {
         assertThat(NcsClassification.majorName("99010101")).isEmpty();
         assertThat(NcsClassification.middleName("200")).isEmpty();
         assertThat(NcsClassification.middleName("20990101")).isEmpty();
+    }
+
+    /** 추천(backend RecommendationInterestMatcher)은 관심 분야를 중분류 이름으로 맞추므로, 같은 이름이 다른 대분류에 있으면 안 된다 */
+    @Test
+    void 중분류_이름은_대분류가_달라도_겹치지_않는다() {
+        Map<String, Set<String>> majorsByMiddleName = new HashMap<>();
+        NcsClassification.load().forEach((code, name) -> {
+            if (code.length() == 4) {
+                majorsByMiddleName.computeIfAbsent(name, ignored -> new HashSet<>()).add(code.substring(0, 2));
+            }
+        });
+        assertThat(majorsByMiddleName).isNotEmpty();
+        assertThat(majorsByMiddleName).allSatisfy((name, majors) -> assertThat(majors).as(name).hasSize(1));
     }
 }

@@ -1,4 +1,7 @@
 spring:
+  grpc:
+    server:
+      port: 0
   datasource:
     url: jdbc:h2:mem:yon-data;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver
@@ -10,14 +13,13 @@ spring:
       ddl-auto: create-drop
     open-in-view: false
 
-internal:
-  api-key: test-internal-api-key
-
 collection:
   schedule:
     enabled: false
 
 yon:
+  data-service:
+    internal-api-key: test-internal-api-key
   normalization:
     ingest:
       enabled: false

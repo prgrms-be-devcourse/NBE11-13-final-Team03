@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'com.google.protobuf' version '0.9.6'
     id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
 }
@@ -18,10 +19,24 @@ repositories {
     mavenCentral()
 }
 
+sourceSets.main.proto.srcDir '../contracts/proto'
+
+// Code generators match the Spring Boot 4.1.1 managed runtime versions.
+protobuf {
+    protoc { artifact = 'com.google.protobuf:protoc:4.35.1' }
+    plugins {
+        grpc { artifact = 'io.grpc:protoc-gen-grpc-java:1.83.1' }
+    }
+    generateProtoTasks {
+        all().configureEach { plugins { grpc {} } }
+    }
+}
+
 dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-grpc-server'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    // 외부 API 호출(RestClient)과 이후 내부 API. JSON(Jackson 3)도 여기서 들어온다
-    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    // 외부 API 호출과 Jackson 3는 유지하되 HTTP 수신 서버는 두지 않는다
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     // 공식 원문 HTML → 텍스트 (정규화 근거 추출)
     implementation 'org.jsoup:jsoup:1.21.1'
@@ -29,8 +44,9 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
+    testImplementation 'io.grpc:grpc-inprocess'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
-    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter:2.0.5'
     testImplementation 'org.testcontainers:testcontainers-postgresql:2.0.5'
     testCompileOnly 'org.projectlombok:lombok'

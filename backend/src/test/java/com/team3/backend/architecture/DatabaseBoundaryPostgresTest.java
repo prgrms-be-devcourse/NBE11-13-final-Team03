@@ -168,6 +168,35 @@ class DatabaseBoundaryPostgresTest {
         assertDenied(connection, "CREATE SCHEMA unauthorized", "42501");
     }
 
+    @Test
+    void trackingDdlIsOwnedByApplicationAndDoesNotResetExistingData() throws Exception {
+        String url = newDatabase();
+        try (var admin = admin(url)) {
+            script(admin, "database-boundaries.sql");
+            setTestPasswords(admin);
+        }
+        try (var application = login(url, "application_user")) {
+            execute(application, "CREATE TABLE opportunities(id bigint PRIMARY KEY)");
+            execute(application, "CREATE TABLE opportunity_versions(id bigint PRIMARY KEY)");
+            script(application, "date-tracking.sql");
+            execute(application, "INSERT INTO event_scan_history "
+                    + "(scan_date,status,execution_id,started_at,retry_count,created_at,updated_at) "
+                    + "VALUES ('2026-10-20','RUNNING','execution',now(),0,now(),now())");
+            assertThatThrownBy(() -> script(application, "date-tracking.sql")).isInstanceOf(SQLException.class);
+            execute(application, "ROLLBACK");
+            assertThat(scalar(application, "SELECT count(*) FROM event_scan_history")).isEqualTo("1");
+            assertThat(scalar(application, "SELECT pg_get_userbyid(relowner) FROM pg_class "
+                    + "WHERE oid='application.opportunity_events'::regclass")).isEqualTo("application_user");
+            assertThat(scalar(application, "SELECT count(*) FROM information_schema.columns "
+                    + "WHERE table_schema='application' AND table_name='opportunity_events' "
+                    + "AND column_name IN ('event_id','correlation_id','next_retry_at') AND is_nullable='NO'"))
+                    .isEqualTo("3");
+        }
+        try (var notification = login(url, "notification_user")) {
+            assertDenied(notification, "SELECT * FROM application.opportunity_events", "42501");
+        }
+    }
+
     private void assertStartupGuard(String url) {
         var runner = new ApplicationContextRunner()
                 .withInitializer(context -> context.getEnvironment().setActiveProfiles("database-boundary"))
@@ -179,6 +208,56 @@ class DatabaseBoundaryPostgresTest {
             String password = user.equals(POSTGRES.getUsername()) ? POSTGRES.getPassword() : "boundary-test-password";
             runner.withBean(DataSource.class, () -> new DriverManagerDataSource(url, user, password))
                     .run(context -> assertThat(context).hasFailed());
+        }
+    }
+
+    @Test
+    void fanoutMigrationPreservesEventsAndEnforcesOutboxUniquenessAndOwnership() throws Exception {
+        String url = newDatabase();
+        try (var admin = admin(url)) {
+            script(admin, "database-boundaries.sql");
+            setTestPasswords(admin);
+        }
+        try (var application = login(url, "application_user")) {
+            execute(application, "CREATE TABLE opportunities(id bigint PRIMARY KEY)");
+            execute(application, "CREATE TABLE opportunity_versions(id bigint PRIMARY KEY)");
+            execute(application, "INSERT INTO opportunities VALUES (1)");
+            execute(application, "INSERT INTO opportunity_versions VALUES (1)");
+            script(application, "date-tracking.sql");
+            execute(application, """
+                    INSERT INTO opportunity_events(event_id,correlation_id,opportunity_id,opportunity_version_id,
+                        event_type,event_date,dedup_key,payload,notification_eligible,processing_status,
+                        retry_count,next_retry_at,occurred_at,created_at)
+                    VALUES(gen_random_uuid(),gen_random_uuid(),1,1,'DEADLINE_SOON','2026-10-23',
+                        'preserved','{}',true,'PENDING',0,now(),now(),now())
+                    """);
+            script(application, "event-fanout-outbox.sql");
+            assertThat(scalar(application, "SELECT count(*) FROM opportunity_events WHERE dedup_key='preserved' "
+                    + "AND last_user_id=0 AND lease_token IS NULL")).isEqualTo("1");
+            String insert = """
+                    INSERT INTO outbox_events(message_id,dedup_key,event_type,user_id,payload,status,retry_count,
+                        next_retry_at,created_at)
+                    VALUES(gen_random_uuid(),'stable-key','NOTIFICATION_REQUESTED',999,'{}','PENDING',0,now(),now())
+                    """;
+            execute(application, insert);
+            assertDenied(application, insert, "23505");
+            assertDenied(application, """
+                    INSERT INTO outbox_events(message_id,dedup_key,event_type,user_id,payload,status,retry_count,
+                        next_retry_at,created_at)
+                    SELECT message_id,'different-key',event_type,user_id,payload,status,retry_count,next_retry_at,
+                        created_at FROM outbox_events LIMIT 1
+                    """, "23505");
+            assertThat(scalar(application, "SELECT pg_get_userbyid(relowner) FROM pg_class "
+                    + "WHERE oid='application.outbox_events'::regclass")).isEqualTo("application_user");
+            assertThat(scalar(application, "SELECT count(*) FROM pg_constraint WHERE conrelid="
+                    + "'application.outbox_events'::regclass AND contype='f'")).isEqualTo("0");
+            assertThatThrownBy(() -> script(application, "event-fanout-outbox.sql")).isInstanceOf(SQLException.class);
+            execute(application, "ROLLBACK");
+            assertThat(scalar(application, "SELECT count(*) FROM outbox_events")).isEqualTo("1");
+            assertThat(scalar(application, "SELECT count(*) FROM opportunity_events")).isEqualTo("1");
+        }
+        try (var notification = login(url, "notification_user")) {
+            assertDenied(notification, "SELECT * FROM application.outbox_events", "42501");
         }
     }
 
@@ -209,8 +288,8 @@ class DatabaseBoundaryPostgresTest {
     }
 
     private void script(Connection connection, String name) throws Exception {
-        String directory = name.equals("normalization-notifications.sql") ? "db/scripts/" : "db-boundary/";
-        execute(connection, new ClassPathResource(directory + name).getContentAsString(StandardCharsets.UTF_8));
+        // 관리자 SQL은 모두 저장소 루트 database/scripts에 있고 processTestResources가 db-boundary로 복사한다
+        execute(connection, new ClassPathResource("db-boundary/" + name).getContentAsString(StandardCharsets.UTF_8));
     }
 
     private void execute(Connection connection, String sql) throws SQLException {

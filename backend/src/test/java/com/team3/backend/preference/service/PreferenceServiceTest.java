@@ -315,6 +315,40 @@ class PreferenceServiceTest {
         }
     }
 
+    @Test
+    void hiddenOpportunityIdsAreScopedToUserAndCandidatesWithOneQuery() {
+        Long userId = createUser(211L);
+        Long otherUserId = createUser(212L);
+        Long hiddenId = createOpportunity("Hidden candidate");
+        Long bothId = createOpportunity("Saved and hidden candidate");
+        Long savedOnlyId = createOpportunity("Saved candidate");
+        Long otherUserHiddenId = createOpportunity("Other user's hidden candidate");
+        Long outsideCandidatesId = createOpportunity("Hidden outside candidates");
+
+        preferenceService.hide(userId, hiddenId);
+        preferenceService.save(userId, bothId);
+        preferenceService.hide(userId, bothId);
+        preferenceService.save(userId, savedOnlyId);
+        preferenceService.hide(otherUserId, otherUserHiddenId);
+        preferenceService.hide(userId, outsideCandidatesId);
+
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        boolean statisticsEnabled = statistics.isStatisticsEnabled();
+        statistics.setStatisticsEnabled(true);
+        try {
+            long beforeEmpty = statistics.getPrepareStatementCount();
+            assertEquals(Set.of(), preferenceService.getHiddenOpportunityIds(userId, List.of()));
+            assertEquals(0, statistics.getPrepareStatementCount() - beforeEmpty);
+
+            long beforeCandidates = statistics.getPrepareStatementCount();
+            assertEquals(Set.of(hiddenId, bothId), preferenceService.getHiddenOpportunityIds(userId,
+                    List.of(hiddenId, bothId, bothId, savedOnlyId, otherUserHiddenId, Long.MAX_VALUE)));
+            assertEquals(1, statistics.getPrepareStatementCount() - beforeCandidates);
+        } finally {
+            statistics.setStatisticsEnabled(statisticsEnabled);
+        }
+    }
+
     private Long createUser(Long kakaoId) {
         User user = userRepository.saveAndFlush(User.builder()
                 .kakaoId(kakaoId)

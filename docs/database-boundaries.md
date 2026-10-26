@@ -71,6 +71,19 @@ application_user는 application 스키마만 소유하므로 update가 다른 �
 update는 컬럼 타입 변경·삭제를 하지 않으므로, 그런 변경은 application_user로 명시적 DDL을 적용한다.
 Flyway 도입과 backend validate 전환은 후속 작업으로 팀이 함께 결정한다.
 
+**database/scripts에 SQL이 있는 변경은 새 버전 서버를 기동하기 전에 먼저 적용한다.**
+update가 먼저 실행되면 다음 문제가 생긴다.
+
+- SQL에만 있는 CHECK 제약·기본값이 빠진 채 테이블·컬럼이 만들어지고, 이후 SQL은 객체가 이미 있어 실패한다.
+- 이미 행이 있는 테이블에 NOT NULL 컬럼을 추가하지 못한다.
+  예: event-fanout-outbox.sql의 `opportunity_events.last_user_id`는 `NOT NULL DEFAULT 0`으로 추가해야 하는데,
+  update는 기본값 없이 NOT NULL 컬럼을 추가하려다 실패한다.
+
+적용 순서는 각 SQL 파일 머리말과 기능 문서([date-tracking.md](date-tracking.md),
+[event-fanout-outbox.md](event-fanout-outbox.md), [notification-user-api.md](notification-user-api.md),
+[notification-withdrawal.md](notification-withdrawal.md), [notification-delivery.md](notification-delivery.md))를 따른다.
+Application 테이블이 없는 새 로컬 DB는 첫 기동의 update가 테이블을 만들므로 SQL을 실행하지 않는다.
+
 ### data-service (backend와 DB 공유 1단계)
 
 data-service는 수집·정규화를 backend에서 떼어 낸 서버다. 1단계에서는 backend와 같은 application_user·application 스키마를 쓰고,
@@ -90,22 +103,26 @@ data-service/.env에는 DB_URL과 APPLICATION_DB_PASSWORD(backend와 같은 값)
 
 ## 로컬 개발 DB
 
-backend/docker-compose.yml은 데이터 볼륨이 비어 있을 때 다음을 자동 실행한다.
+로컬 DB는 docker/compose.yaml의 postgres-db로 띄운다(전체 실행은 docker/start.sh, docker/README.md 참고).
+데이터 볼륨이 비어 있을 때 다음을 파일명 순서로 자동 실행한다.
 
 1. database/scripts/database-boundaries.sql: 두 계정과 스키마 생성
 2. database/local/02-set-local-passwords.sh: 두 계정의 비밀번호 설정 (로컬 전용)
+3. database/local/03-apply-notification-ddl.sh: Notification 수동 DDL을 notification_user 소유로 적용
+   (Notification은 validate라 기동 전에 테이블이 있어야 한다. 새 Notification DDL 파일은 이 스크립트 목록에 추가한다.)
 
-backend/.env에 APPLICATION_DB_PASSWORD와 NOTIFICATION_DB_PASSWORD를 둘 다 넣어야 compose가 실행된다
-(backend/.env.example 참고). notification-service/.env의 NOTIFICATION_DB_PASSWORD도 같은 값을 쓴다.
-backend는 첫 bootRun에서 update로 application 스키마의 테이블을 만든다.
+docker/.env에 APPLICATION_DB_PASSWORD와 NOTIFICATION_DB_PASSWORD를 둘 다 넣어야 compose가 실행된다.
+bootRun으로 개발할 때 backend/.env, notification-service/.env의 비밀번호도 같은 값을 쓴다.
+application 스키마의 테이블은 backend가 첫 기동에서 update로 만든다.
+backend/docker-compose.yml은 이전 방식으로, docker/compose.yaml로 대체한다.
 
 초기화 스크립트는 빈 볼륨에서만 실행된다. 기존 로컬 볼륨에 public 테이블이 있으면 둘 중 하나를 선택한다.
 
 - 데이터를 유지할 때: 아래 관리자 SQL 1·2단계(프로비저닝, public 이전)를 로컬 DB에 직접 실행하고 비밀번호를 설정한다.
-- 데이터가 필요 없을 때: `docker compose down -v`로 볼륨을 지우고 다시 올린다. 로컬 데이터가 모두 삭제된다.
+- 데이터가 필요 없을 때: `docker/`에서 `docker compose down -v`로 볼륨을 지우고 다시 올린다. 로컬 데이터가 모두 삭제된다.
 
-운영 compose(#33 docker-compose.prod.yml)에도 같은 프로비저닝 단계가 필요하다.
-두 PR 중 나중에 병합되는 쪽에서 초기화 SQL 마운트와 .env.example 항목을 맞춘다.
+운영 DB 서버 compose(`deploy/db/docker-compose.yml`)도 빈 볼륨에서 같은 초기화 SQL을 실행한다.
+비밀번호 설정, 기존 볼륨 이전, NOTIFY 트리거 설치 절차는 `deploy/README.md`의 "DB 준비"를 따른다.
 
 ## 관리자 SQL: 자동 실행 금지
 
@@ -155,7 +172,13 @@ notify_raw_normalization_request() 함수도 이동한다.
 알 수 없는 테이블, 중복된 대상 테이블, 별도 시퀀스/함수, View/외부 테이블,
 스키마 간 FK는 임의 처리하지 않고 전체 이전 트랜잭션을 롤백한다.
 추가 객체/확장 모듈이 있다면 별도 검토해 명시적 이전안을 준비한다.
-테이블 추가 시 allowlist도 검토한다. 별도 날짜 추적 브랜치의 테이블은 아직 포함하지 않는다.
+테이블 추가 시 allowlist도 검토한다. 3단계 날짜 추적의 opportunity_events와
+event_scan_history, 4단계 outbox_events도 포함한다. 구 추적 테이블에 없는 event_id/correlation_id의
+추가·백필은 이 스키마 이동 SQL이 수행하지 않는다. 구 구조 DB는 별도 이전안이 필요하다.
+
+3단계 설치 DB의 이벤트 lease/cursor 추가와 Outbox 최초 설치는 별도
+event-fanout-outbox.sql을 사용한다. 상세 순서와 검증 범위는
+[이벤트 Outbox 문서](event-fanout-outbox.md)를 따른다.
 
 실패 시 두 스키마 데이터를 수동 합치거나 public을 삭제하지 않는다.
 프로비저닝과 이전은 별도 트랜잭션이므로 이전 실패 시에도 프로비저닝 권한 변경은 남는다.
