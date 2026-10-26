@@ -239,6 +239,50 @@ class YouthPolicyNormalizationServiceTest {
     }
 
     @Test
+    void 본문에만_있는_주거_재산_병역_조건은_원문_확인_조건으로_저장한다() {
+        YouthPolicyRaw raw = YouthPolicyRaw.builder()
+                .plcyNo("R2026-1").plcyNm("청년 월세 지원")
+                .sprtTrgtMinAge("19").sprtTrgtMaxAge("34").sprtTrgtAgeLmtYn("Y")
+                .aplyPrdSeCd("0057001").aplyYmd("20261001 ~ 20261031")
+                .plcyExplnCn("부모와 별도 거주하는 무주택 청년 세대주에게 임차료 지원")
+                .sbmsnDcmntCn("월세지원 신청서, 소득·재산 신고서")
+                .build();
+
+        NormalizationResult result = service.normalize(command(raw, DAY1, List.of()));
+        flushAndClear();
+
+        OpportunityCondition body = conditionRepository.findByVersionId(result.versionId()).stream()
+                .filter(c -> "bodyQualification".equals(c.getConditionField())).findFirst().orElseThrow();
+        assertThat(body.getConditionType()).isEqualTo(ConditionType.OTHER);
+        assertThat(body.getRequirementType()).isEqualTo(RequirementType.REQUIRED);
+        assertThat(body.getValidationStatus()).isEqualTo(ValidationStatus.NEEDS_REVIEW);
+        assertThat(body.getExpression()).containsEntry("status", "UNSTRUCTURED")
+                .containsEntry("kinds", List.of("HOUSING", "PROPERTY"));
+        assertThat(body.getEvidence()).containsEntry("evidenceText",
+                "[plcyExplnCn] 부모와 별도 거주하는 무주택 청년 세대주에게 임차료 지원\n[sbmsnDcmntCn] 월세지원 신청서, 소득·재산 신고서");
+
+        OpportunityVersion version = versionRepository.findById(result.versionId()).orElseThrow();
+        assertThat(version.getNormalizedSnapshot()).containsEntry("bodyConditions", List.of("HOUSING", "PROPERTY"));
+        assertThat(version.getNormalizedSnapshot().get("usage")).asInstanceOf(InstanceOfAssertFactories.MAP)
+                .extractingByKey("exclusionReasons").asInstanceOf(InstanceOfAssertFactories.LIST)
+                .contains("UNSTRUCTURED_CONDITION_TEXT");
+
+        // 다시 읽은 스냅샷과 비교해도 같으면 새 버전을 만들지 않는다
+        assertThat(service.normalize(command(raw, DAY2, List.of())).newVersion()).isFalse();
+    }
+
+    @Test
+    void 본문_조건이_없으면_조건_행과_스냅샷_항목을_만들지_않는다() {
+        NormalizationResult result = service.normalize(command(detailRaw("월 최대 20만 원 지원"), DAY1, List.of()));
+        flushAndClear();
+
+        assertThat(conditionRepository.findByVersionId(result.versionId()))
+                .noneMatch(c -> "bodyQualification".equals(c.getConditionField()));
+        assertThat(versionRepository.findById(result.versionId()).orElseThrow().getNormalizedSnapshot())
+                .doesNotContainKey("bodyConditions");
+    }
+
+    @Test
     void 상세_정보를_버전별_상세와_스냅샷에_저장한다() {
         NormalizationResult result = service.normalize(command(detailRaw("월 최대 20만 원 지원\n최대 12개월"), DAY1, List.of()));
         flushAndClear();
