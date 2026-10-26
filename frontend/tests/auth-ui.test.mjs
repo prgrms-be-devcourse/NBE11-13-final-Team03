@@ -91,3 +91,24 @@ test('public search/detail remain accessible during auth errors and login return
   const anonymousSearch = render({ path: '/opportunities?keyword=test&page=2', auth: null })
   assert.match(anonymousSearch, /returnTo=%2Fopportunities%3Fkeyword%3Dtest%26page%3D2/)
 })
+
+test('header keeps the existing five destinations and marks the parent menu active on nested pages', () => {
+  for (const [path, label] of [['/', '홈'], ['/opportunities/42', '기회 탐색'], ['/saved', '저장한 기회'], ['/notifications', '알림'], ['/mypage/profile', '마이페이지']]) {
+    const header = render({ path, auth: user }).match(/<header[\s\S]*?<\/header>/)[0]
+    assert.equal((header.match(/aria-current="page"/g) || []).length, 1)
+    assert.match(header, new RegExp(`<a[^>]*aria-current="page"[^>]*>${label}</a>`))
+    for (const destination of ['/', '/opportunities', '/saved', '/notifications', '/mypage']) assert.ok(header.includes(`href="${destination}"`))
+    assert.match(header, /aria-label="Y:ON 홈"/)
+  }
+})
+
+test('header separates primary navigation from authentication while keeping a named collapsed mobile menu', () => {
+  const header = render({ path: '/opportunities?page=2', auth: null }).match(/<header[\s\S]*?<\/header>/)[0]
+  assert.match(header, /<button[^>]*type="button"[^>]*aria-expanded="false"[^>]*aria-controls="primary-navigation"/)
+  assert.match(header, /메뉴 열기/)
+  assert.match(header, /<nav id="primary-navigation"/)
+  const nav = header.match(/<nav[\s\S]*?<\/nav>/)[0]
+  assert.match(nav, /aria-label="주요 메뉴"/)
+  assert.doesNotMatch(nav, /로그인|로그아웃/)
+  assert.match(header.slice(header.indexOf('</nav>')), /returnTo=%2Fopportunities%3Fpage%3D2/)
+})

@@ -53,24 +53,24 @@ function Header() {
         <nav
           id="primary-navigation"
           aria-label="주요 메뉴"
-          className={`${styles.navigation} ${isMenuOpen ? styles.open : ''}`}
+          className={`${styles.navigation} ${styles.primaryNavigation} ${isMenuOpen ? styles.open : ''}`}
         >
-          <ul className={styles.menuList}>
-            {navigation.map(({ to, label }) => (
-              <li key={to}>
-                <NavLink
-                  to={to}
-                  end={to === '/'}
-                  className={({ isActive }) => `${styles.menuLink} ${isActive ? styles.active : ''}`}
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  {label}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-          <AuthControls />
+            <ul className={styles.menuList}>
+              {navigation.map(({ to, label }) => (
+                <li key={to}>
+                  <NavLink
+                    to={to}
+                    end={to === '/'}
+                    className={({ isActive }) => `${styles.menuLink} ${isActive ? styles.active : ''}`}
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    {label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
         </nav>
+        <AuthControls menuOpen={isMenuOpen} />
       </div>
     </header>
   )
