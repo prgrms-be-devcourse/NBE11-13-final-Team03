@@ -1,6 +1,6 @@
 # Y:ON Frontend
 
-청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. `/`는 홈, `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세, `/login`은 카카오 로그인 진입 화면이다. 서버 사용자 조회에 기반한 인증 상태·로그아웃과 인증 후 홈 추천을 연결했다. 그 외 주요 메뉴는 플레이스홀더다.
+청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. `/`는 홈, `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세, `/login`은 카카오 로그인 진입 화면이다. 서버 사용자 조회에 기반한 인증 상태·로그아웃과 인증 후 홈 추천을 연결했다. `/mypage`에서 내 정보, `/mypage/profile`에서 맞춤 조건, `/mypage/interests`에서 관심 분야를 관리하며 `/onboarding`은 초기 설정 흐름이다.
 
 ## 기술 스택
 
@@ -39,7 +39,7 @@ frontend/
 │   ├── auth/           # 사용자 Query·인증 전환·안전한 복귀 경로
 │   ├── components/ui/  # Button, Card, TextField, StatusBadge, AsyncState
 │   ├── layouts/        # AppLayout, Header 및 CSS Modules
-│   ├── pages/          # home, auth, opportunities 검색·상세, PlaceholderPage
+│   ├── pages/          # home, auth, opportunities 검색·상세, profile 설정, PlaceholderPage
 │   ├── routes/         # AppRoutes
 │   ├── App.tsx
 │   ├── main.tsx        # BrowserRouter, QueryClientProvider
@@ -77,7 +77,9 @@ await apiClient.get('/users/me', { requiresAuth: true })
 
 ## 현재 미구현 사항
 
-프로필·관심 분야 수정, 저장·숨김 변경, 신청 가능성 검색 필터, 알림 기능은 구현하지 않았다. 지역 선택은 공개 지역 옵션 API가 없어 보류한다. 저장 여부는 응답에 따른 읽기 전용 표시다. 프로필·저장 목록·마이페이지·알림 화면은 플레이스홀더다. 실제 카카오·브라우저 쿠키·배포 통합은 미검증이다.
+저장·숨김 변경, 신청 가능성 검색 필터, 알림 기능은 구현하지 않았다. 계층형 지역 선택 UI는 외부 데이터 연결이 가능하도록 준비했으며 실제 API는 아직 연결하지 않았다. 현재 신규 프로필 등록 및 거주·학교 지역 변경은 제한하고, 기존 프로필의 지역 외 항목 수정과 관심 분야 설정은 사용할 수 있다. 저장 여부는 응답에 따른 읽기 전용 표시이며 저장 목록·알림 화면은 플레이스홀더다. 실제 카카오·브라우저 쿠키·배포 통합은 미검증이다.
+
+맞춤 조건·관심 분야 계약, 입력 정책과 지역 데이터 제한은 [프로필 문서](docs/profile.md)를 참고한다.
 
 로그인 흐름, 인증 상태와 배포 협의 사항은 [인증 UI 문서](docs/auth.md)를 참고한다.
 

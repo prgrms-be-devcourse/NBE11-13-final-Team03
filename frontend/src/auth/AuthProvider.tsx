@@ -3,14 +3,14 @@ import type { ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AuthContext } from './AuthContext'
-import { authObservationOptions, authStatus, createAuthActions } from './session'
+import { authObservationOptions, authStatus, authTransitionKey, createAuthActions } from './session'
 
 // 사용자 정보는 Query가 소유한다. Provider는 앱 전체 인증 전환·중복 로그아웃을 한 곳에서 조율한다.
 function AuthProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient()
   const location = useLocation()
   const actions = useMemo(() => createAuthActions(client), [client])
-  const transition = useMutation({ mutationFn: (kind: 'oauth' | 'logout') => kind === 'oauth' ? actions.completeOAuth() : actions.logout() })
+  const transition = useMutation({ mutationKey: authTransitionKey, mutationFn: (kind: 'oauth' | 'logout') => kind === 'oauth' ? actions.completeOAuth() : actions.logout() })
   const oauthPage = location.pathname === '/login-success.html'
   const query = useQuery(authObservationOptions(client, transition, oauthPage))
   const mutate = transition.mutateAsync

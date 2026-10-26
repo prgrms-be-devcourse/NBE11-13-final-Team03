@@ -52,7 +52,7 @@ function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUser
   } else if (result.isError) {
     const error = result.error
     if (error instanceof ApiError && error.status === 404 && error.code === 'ELIGIBILITY_001') {
-      content = <AsyncState status="empty" title="맞춤 조건 설정이 필요해요" description="판정 프로필이 등록되어 있지 않아요. 프로필 설정 기능은 준비 중이에요." />
+      content = <><AsyncState status="empty" title="맞춤 조건 설정이 필요해요" description="판정 프로필이 등록되어 있지 않아요. 맞춤 조건 설정에서 등록 가능 여부를 확인해 주세요." /><Link className={styles.textLink} to="/onboarding">맞춤 조건 설정하기 →</Link></>
     } else if (error instanceof ApiError && error.status === 401) {
       content = <><AsyncState status="error" title="로그인 상태를 다시 확인해 주세요" description="인증을 확인하지 못했어요. 추천 결과가 없는 상황과는 달라요." /><Link className={styles.textLink} to="/login?returnTo=%2F">카카오 로그인 다시 확인</Link></>
     } else {
