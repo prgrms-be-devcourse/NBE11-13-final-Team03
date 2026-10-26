@@ -14,6 +14,7 @@ import com.team3.contracts.collection.v1.GetRawRecordRequest;
 import com.team3.contracts.collection.v1.GetSyncJobRequest;
 import com.team3.contracts.collection.v1.ListSyncJobsByDateRequest;
 import com.team3.contracts.collection.v1.StartSyncRequest;
+import com.team3.contracts.collection.v1.RetrySyncRequest;
 import io.grpc.StatusRuntimeException;
 import java.net.URI;
 import java.time.LocalDate;
@@ -75,6 +76,13 @@ public class CollectionAdminController {
         var response = call(() -> collectionStub.withDeadlineAfter(10, TimeUnit.SECONDS).listSyncJobsByDate(
                 ListSyncJobsByDateRequest.newBuilder().setDate(date).build()));
         return response.getJobsList().stream().map(mapper::job).toList();
+    }
+
+    @PostMapping("/syncs/{jobId}/retry")
+    public ResponseEntity<SyncStartResponse> retrySync(@PathVariable String jobId) {
+        var request = argument(() -> RetrySyncRequest.newBuilder().setJobId(id(jobId)).build());
+        var response = mapper.start(call(() -> collectionStub.withDeadlineAfter(3, TimeUnit.SECONDS).retrySync(request)));
+        return ResponseEntity.accepted().location(URI.create("/api/admin/collection/syncs/" + response.jobId())).body(response);
     }
 
     @GetMapping("/syncs/{jobId}")

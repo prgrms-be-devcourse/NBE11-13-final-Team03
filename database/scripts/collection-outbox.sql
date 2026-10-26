@@ -29,6 +29,7 @@ CREATE TABLE collection_outbox_events (
     created_at timestamptz NOT NULL,
     CONSTRAINT uk_collection_outbox_message_id UNIQUE(message_id),
     CONSTRAINT uk_collection_outbox_dedup_key UNIQUE(dedup_key),
+    CONSTRAINT uk_collection_outbox_job UNIQUE(sync_job_id),
     CONSTRAINT ck_collection_outbox_event_type CHECK(event_type = 'COLLECTION_COMPLETED'),
     CONSTRAINT ck_collection_outbox_status CHECK(status IN ('PENDING', 'PROCESSING', 'PUBLISHED', 'FAILED')),
     CONSTRAINT ck_collection_outbox_retry_count CHECK(retry_count >= 0)

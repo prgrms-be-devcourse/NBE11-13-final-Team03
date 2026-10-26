@@ -72,7 +72,8 @@ public class SecurityConfig {
                                 HttpMethod.GET,
                                 "/api/opportunities",
                                 "/api/opportunities/{opportunityId}",
-                                "/api/interests/options"
+                                "/api/interests/options",
+                                "/api/regions"
                         )
                         .permitAll()
 

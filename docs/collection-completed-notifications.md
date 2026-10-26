@@ -1,59 +1,74 @@
-# 수집 완료 알림 — 메시지 보존과 관리자 큐 발행
+# 수집 실행 완료 알림
 
-## 범위
+## 실행과 최종 결과
 
-정기 수집 종료와 같은 트랜잭션에서 data-service 소유 `collection_outbox_events`에
-`COLLECTION_COMPLETED` 메시지를 저장한다. Publisher는 기본 비활성이며 명시적으로 켠 경우에만 관리자 큐로 전송한다.
-사용자 알림 Outbox·큐·notification 테이블을 사용하지 않는다.
+정기 실행(SCHEDULED)과 수동 등록(MANUAL)은 같은 Worker를 사용한다.
+페이지를 받은 뒤 최대 100건씩 트랜잭션으로 저장하고 다음 페이지를 가져온다.
+10,000건이면 정상 경로에서 100개 묶음을 저장한 뒤 **실행 전체의 최종 알림 한 건**을 기록한다.
+고용24의 NCS 01~24도 하나의 실행에 포함한다. 정규화 완료를 기다리는 알림은 아니다.
 
-| 단계 | 구현 범위 | 상태 |
-| --- | --- | --- |
-| 1 | 메시지 계약·SQL·완료 판정·Outbox 저장 | 구현 |
-| 2 | 관리자 큐 SQS Publisher·lease·재시도·전용 스케줄러·기본 비활성 설정 | 구현, 기본 비활성 |
-| 수신·운영 | notification-service 관리자 큐 Consumer·소비 중복 제거·Slack, 별도 큐·DLQ·IAM | 알림·배포 담당 후속 |
+- 두 출처 모두 모든 페이지의 일시 오류를 최초 시도 포함 최대 3회 시도한다. 재시도 전 100ms, 200ms 대기한다.
+- 인증·잘못된 요청·잘못된 응답 등 재시도 불가 오류는 반복하지 않는다. 기존 조기 종료·최대 페이지 안전장치는 유지한다.
+- 저장 중 일시 DB 오류(TransientDataAccessException)도 새 트랜잭션에서 최대 3회 시도한다.
+  묶음이 끝내 실패하면 롤백된 묶음을 건별로 처리한다. 건별 일시 오류도 최대 3회 시도한다.
+  유효성·제약 조건 오류는 같은 요청을 반복하지 않는다.
+- 재시도 중 회복한 오류는 실패 건수에 누적하지 않는다. 최종 실패한 페이지·항목만 이력에 남긴다.
+- 전체 순회와 저장이 끝나면 SUCCESS/PARTIAL_SUCCESS/FAILED를 확정한다. 최종 중단은 INTERRUPTED다.
+  작업 종료와 완료 Outbox 삽입은 같은 트랜잭션이다. 실행 중간·묶음별 알림은 만들지 않는다.
+- 서버 재시작으로 남은 작업도 INTERRUPTED로 확정하고 결과를 보존한다. 재시작 시 전체 수집 자동 재개는 하지 않는다.
 
-## 완료 기준과 계약
+## 수동 재시도
 
-- `SCHEDULED` 작업이 `SUCCESS`, `PARTIAL_SUCCESS`, `FAILED`로 전이될 때 기록한다.
-- `MANUAL`, `PENDING`, `RUNNING`, `INTERRUPTED`, 기동 중단 복구는 기록하지 않는다.
-- 이미 종료된 작업에 대한 늦은 실패 콜백도 새 메시지를 만들지 않는다.
-- 수집일은 `started_at`의 Asia/Seoul 날짜다. 자정을 넘어 종료돼도 시작일에 속한다.
-- 출처별 활성 작업은 기존 출처 잠금으로 하나만 허용된다. 고용24의 NCS·전 페이지도 한 작업 안에서 끝난다.
-- 집계는 종료한 정기 작업 하나의 값이며 같은 날 수동 작업의 값은 합산하지 않는다.
-- `COLLECTION_COMPLETED:{source}:{date}` 유일 제약과 `ON CONFLICT DO NOTHING`으로 출처·수집일당 한 건만 보존한다.
-  같은 날 나중에 끝난 정기 작업도 정상 종료하지만 최초 메시지를 교체하거나 추가하지 않는다.
+`POST /api/admin/collection/syncs/{jobId}/retry`는 ADMIN 전용이며 gRPC RetrySync를 호출한다.
+FAILED/PARTIAL_SUCCESS/INTERRUPTED 이력을 대상으로 **출처 전체를 새 MANUAL_RETRY 실행으로 재수집**한다.
+실패 항목만 골라 처리하지 않는다. 기본 pageSize=100/maxPages=1000이며 고용24는 재실행일 기준 기존 6개월 조회 범위를 사용한다.
+이전 실행 상태·집계를 보존하고 새 jobId를 반환한다(202 + 새 이력 Location).
+성공 원본의 재수집은 기존 fingerprint·출처/외부 ID 정합성 처리를 재사용한다.
+활성 실행·비활성 출처, 성공·대기·실행 중 이력의 재시도는 거부한다.
+반복 수동 재시도는 각각 별도 실행·최종 알림이며 같은 날짜여도 생략하지 않는다.
 
-계약 표본은 `contracts/collection-completed-v1.json`이다.
-envelope는 schemaVersion(1), messageId(UUID), eventType, correlationId(UUID), occurredAt(종료 시각 UTC), payload다.
-messageId와 전체 envelope를 DB에 저장하므로 후속 Publisher도 재전송 시 그대로 사용해야 한다.
+## 메시지와 중복 방지
 
-본문은 아래 **6개 필드만** 가진다. 사용자·정책 ID, 상태, 실패 사유, 상세 링크는 넣지 않는다.
+`application.collection_outbox_events`는 data-service 소유이며 사용자 Outbox·큐를 사용하지 않는다.
+`COLLECTION_COMPLETED:{jobId}` 및 `sync_job_id UNIQUE`로 **실행당 한 건**을 보장한다.
+늦은 종료 콜백은 이미 끝난 작업을 바꾸거나 메시지를 보충하지 않는다.
+기록기는 MANDATORY, INSERT는 ON CONFLICT DO NOTHING이다. 기존 messageId·본문은 덮어쓰지 않는다.
+같은 날 실패한 실행과 성공한 재실행은 서로 다른 메시지다. SQS 전송 재시도는 저장 본문·ID를 유지한다.
 
-| 필드 | 값 |
+새 생산 계약은 [collection-completed-v2.json](../contracts/collection-completed-v2.json)이다.
+envelope는 schemaVersion=2, messageId, eventType=COLLECTION_COMPLETED, correlationId, occurredAt(종료 UTC), payload다.
+기존 v1 표본은 이전 메시지 수신 호환성을 위해 보존한다. 기존 메시지에 상태·소요시간을 추정해 덧붙이지 않는다.
+
+| payload 필드 | 의미 |
 | --- | --- |
-| collectedDate | 시작 시각의 한국 날짜 |
-| dataSource | YOUTH_POLICY 또는 EMPLOYMENT24 |
-| newCount | 새 스냅샷 수 |
-| updatedCount | 변경으로 생성된 스냅샷 수 |
-| unchangedCount | 기존 해시와 같아 관측 시각만 갱신한 수 |
-| failedCount | 수신한 레코드의 저장·유효성 실패 수 |
+| collectedDate / dataSource | started_at의 KST 날짜 / YOUTH_POLICY 또는 EMPLOYMENT24 |
+| newCount / updatedCount / unchangedCount | 새 스냅샷 / 변경 스냅샷 / 유지 건수 |
+| failedCount | 최종 레코드 실패 수. 페이지 실패를 레코드 수로 환산하지 않는다 |
+| jobId / syncType | 실행 ID / SCHEDULED, MANUAL, MANUAL_RETRY |
+| status | SUCCESS, PARTIAL_SUCCESS, FAILED, INTERRUPTED |
+| failedPageCount | 재시도까지 소진한 최종 조회 실패 페이지 수 |
+| durationMillis | started_at~finished_at 경과 밀리초. 자동 재시도 포함, SQS·Slack 전달 대기 제외 |
 
-페이지 조회 실패나 미완료 NCS는 레코드 수로 환산하지 않는다.
-따라서 failedCount=0만으로 전체 수집 성공을 판단할 수 없다.
-작업 상태·실패 상세는 기존 관리자 API `/api/admin/collection/syncs?date=yyyy-MM-dd`로 확인한다.
+기존 started_at은 접수 시각이므로 실행기 대기가 있으면 소요시간에 포함된다.
+시스템 시계 역전으로 음수가 되면 0으로 표시한다. occurredAt과 finished_at은 PostgreSQL 마이크로초 정밀도로 맞춘다.
+실패 사유·원문·사용자 ID·정책 ID·상세 링크는 알림에 넣지 않는다.
+페이지 실패·미완료 순회는 레코드 실패가 0이어도 status로 구분한다.
 
-## 트랜잭션과 소유권
+## 배포와 검증
 
-`SyncJobService.complete/fail`에서 잠근 작업을 종료하고 `CollectionCompletionOutbox`를 호출한다.
-기록기는 `MANDATORY` 전파를 사용하므로 독립 트랜잭션을 만들지 않는다.
-Outbox 삽입 전에 작업 변경을 flush하고, 중복이면 예외 대신 삽입 건수 0을 반환한다.
-저장 실패는 숨기지 않고 작업 종료와 함께 롤백한다. 뒤에서 호출자가 롤백해도 둘 다 남지 않는다.
-삽입 로그는 시도 결과이며 최종 커밋이나 SQS 수락을 의미하지 않는다.
+새 DB는 계정·스키마 준비 후 application_user로 `database/scripts/collection-outbox.sql`을 앱 기동 전에 적용한다.
+이전 SQL을 이미 설치한 DB는 `collection-outbox-per-job.sql`을 선적용한다. 기존 메시지는 수정·삭제하지 않는다.
+동일 작업의 legacy 날짜 키도 job UNIQUE가 중복을 막는다. SQL은 앱이 자동 실행하지 않는다.
+운영 SQL·실제 env·외부 API·AWS·Slack 자원은 이번 변경으로 적용하지 않는다.
 
-`application.collection_outbox_events`는 data-service가 소유한다.
-backend `outbox_events`에 쓰지 않으며 사용자 ID 열·다른 서비스 테이블로의 FK가 없다.
-sync_job_id는 추적용 숫자이며 FK가 없어 작업 이력 정리 후에도 메시지가 남는다.
-모든 새 행은 `PENDING`, retry_count=0이며 Publisher 활성화 여부와 무관하게 저장된다.
+1단계는 수집·재시도 API·메시지 보존까지다. 2단계 Publisher는 별도 관리자 SQS 큐에 발행하며 기본 비활성이다.
+3단계 notification-service가 v1/v2를 수신하고 Slack에 최종 결과·소요시간을 표시한다.
+Consumer를 먼저 올린 뒤 v2 생산자를 배포하고 별도 큐·DLQ·IAM·Webhook 준비 후 활성화한다.
+사용자 Consumer는 이 메시지를 처리할 수 없다.
+
+검증은 10,000건/100건 묶음·중간 장애 복구·마지막 페이지 전 무알림,
+수동 전체 재시도와 원본 중복 방지, 실행별 알림·동시 콜백·원자적 롤백·legacy SQL 전환을 포함한다.
+CI는 PostgreSQL 통합 테스트의 실행 > 0, 실패·오류·건너뜀 = 0을 검사한다.
 
 ## SQS Publisher와 복구
 
@@ -88,35 +103,3 @@ backend Outbox의 저장소·Worker·SQS 전송·오류 분류를 data-service �
 batch-size(10), max-attempts(5), lease-timeout(PT1M), retry-delay(PT1M)는 속성 접두사 아래에서 조정할 수 있다.
 lease는 SDK 10초 호출과 복구 여유를 포함해 15초보다 길어야 한다.
 운영 큐 URL은 해당 region의 HTTPS SQS 호스트여야 하며 FIFO·인증정보·query·fragment URL은 거부한다.
-
-## 배포 순서
-
-1. DB 계정·application 스키마를 먼저 준비한다(`database-boundaries.sql`).
-2. **새 data-service 기동 전에** application_user로 아래 SQL을 한 번 적용한다.
-   새 DB도 이 순서를 따른다. Hibernate update가 먼저 테이블을 만들면 CHECK·기본값이 빠지고 SQL이 실패한다.
-3. 이 버전 data-service를 배포한다. 정기 수집 종료 후 Outbox PENDING을 확인한다.
-
-```sh
-psql -v ON_ERROR_STOP=1 -f database/scripts/collection-outbox.sql
-```
-
-연결 정보는 안전한 인증 설정으로 주입한다. 앱이 SQL을 자동 실행하지 않는다.
-실제 큐·IAM·Slack은 이 코드로 생성하거나 변경하지 않는다.
-현재 사용자 Consumer는 이 계약을 처리할 수 없으므로 사용자 큐로 메시지를 보내면 안 된다.
-관리자 큐·DLQ는 `deploy/sqs/queues.cloudformation.yaml`을 별도 QueueName/스택으로 배포한다.
-데이터 서버 Instance Role에는 그 관리자 큐 ARN의 `sqs:SendMessage`만 부여한다. 사용자 큐·DLQ 접근·큐 생성 권한은 주지 않는다.
-SQS HTTPS 아웃바운드 443을 허용하고 자격증명은 SDK 기본 공급자 체인/Instance Role로 주입한다.
-알림 담당의 관리자 Consumer·중복 소비 제거·Slack을 준비하고 검증한 후 Publisher를 활성화한다.
-활성화 전에 과거 PENDING을 모두 발행할지 운영에서 정리할지 결정해야 한다.
-발행 플래그를 false로 바꾸면 발행만 멈추고 수집·Outbox 저장은 계속된다. 테이블·기존 메시지는 유지한다.
-
-## 검증
-
-- 단위 테스트: 대상/비대상 상태, 수동 수집 제외, 자정 경계, UTC 시각, 6필드와 표본 구조·카운트 일치.
-- PostgreSQL Testcontainers: 실제 SQL 선적용 후 application_user로 서비스 실행,
-  출처·날짜 유일성, 동시 무시 삽입, 양쪽 롤백, 기록 실패 시 종료 롤백, 중단 복구·늦은 콜백 제외.
-- data-service CI는 새 PostgreSQL 테스트의 실행 > 0, 실패·오류·건너뜀 = 0을 검사한다.
-- SDK 단위 테스트: 본문·ID 불변, 잘못된 메시지/MD5, 자격증명·권한·throttle·timeout 분류와 민감 본문 비노출.
-- LocalStack+PostgreSQL: 실제 SDK 전송, 커밋 전 미발행, 응답 유실·DB ACK 실패 시 동일 본문 재발행,
-  잘못된 큐 지연, 지수 백오프·최대 횟수, lease 복구·CAS·동시 선점. CI는 실행 > 0·실패/오류/스킵 = 0을 검사한다.
-- 실제 관리자 Consumer·Slack E2E와 운영 검증은 후속 단계다.

@@ -15,13 +15,13 @@
 
 ## 수집 완료 관리자 알림
 
-정기 수집의 SUCCESS·PARTIAL_SUCCESS·FAILED 종료와 같은 트랜잭션에서
-출처·한국 기준 시작일당 한 건을 `collection_outbox_events`에 저장합니다.
-수동 수집과 INTERRUPTED는 제외하며 본문은 날짜·출처·신규·교체·유지·실패 수 6개입니다.
+정기·수동 수집과 수동 전체 재시도는 100건 단위 저장·최대 3회 일시 오류 재시도 후
+실행당 한 건을 `collection_outbox_events`에 저장합니다. 같은 날 후속 실행도 별도 알립니다.
+v2 본문에 실행 종류·최종 상태·페이지 실패 수·소요시간을 포함합니다.
+수동 재시도는 `POST /api/admin/collection/syncs/{jobId}/retry`로 전체 출처를 새 실행으로 수집합니다.
 **새 버전 기동 전에 application_user로 `database/scripts/collection-outbox.sql`을 적용해야 합니다. 새 DB도 포함합니다.**
-관리자 큐 SQS Publisher는 기본 비활성입니다. `COLLECTION_NOTIFICATION_PUBLISHER_ENABLED=true`와 전용 region·관리자 큐 URL을
-주입하면 저장된 PENDING을 발행합니다. 사용자 큐와 별도 큐/DLQ·SendMessage IAM, notification 관리자 Consumer·Slack 검증을 먼저 준비해야 합니다.
-사용자 알림의 `NOTIFICATION_*` 플래그로는 켜지지 않습니다. 실제 .env·AWS 자원·Slack 설정은 변경하지 않았습니다.
+기존 SQL 설치 DB는 `collection-outbox-per-job.sql`을 먼저 적용합니다. 이전 메시지는 유지합니다.
+관리자 큐 SQS Publisher는 기본 비활성입니다. COLLECTION_NOTIFICATION_PUBLISHER_ENABLED=true와 전용 region·관리자 큐 URL을 주입하면 저장된 PENDING을 발행합니다. 별도 관리자 큐/DLQ·IAM과 v2 호환 Consumer·Slack을 먼저 준비합니다. 사용자 NOTIFICATION_* 플래그로는 켜지지 않습니다.
 자세한 계약과 운영 절차는 [완료 알림 문서](../docs/collection-completed-notifications.md)를 확인합니다.
 
 ## 내부 API
@@ -33,6 +33,7 @@ backend의 `/api/admin/collection/**` 공개 HTTP API·ADMIN 권한은 유지된
 | RPC | 메인 서비스 관리자 API |
 |---|---|
 | StartSync | POST `/api/admin/collection/syncs/{source}` |
+| RetrySync | POST `/api/admin/collection/syncs/{jobId}/retry` |
 | ListSyncJobsByDate | GET `/api/admin/collection/syncs?date=` |
 | GetSyncJob | GET `/api/admin/collection/syncs/{jobId}` |
 | SaveRawRecord | POST `/api/admin/collection/raw-records` |
@@ -90,6 +91,23 @@ backend의 `/api/admin/collection/**` 공개 HTTP API·ADMIN 권한은 유지된
 - 기동할 때 계정·스키마·`public` 미이전 테이블 등을 검사하고 어긋나면 뜨지 않습니다 (`DataServiceDatabaseBoundaryConfig`, 메인 서비스 `ApplicationDatabaseBoundaryConfig`와 같은 검사). `postgres` 계정으로 떠서 `public`에 빈 테이블을 만드는 일을 막습니다.
 - 스키마 변경(`ddl-auto: update`)은 테이블을 소유한 서비스가 합니다. 소유 표와 규칙은 `docs/database-boundaries.md`.
 - 테스트는 `main()`을 거치지 않아 테스트용 DB 설정(H2, Testcontainers)을 그대로 씁니다.
+
+## 본문 자격 조건 확인 (`bodyQualification`)
+
+청년정책 본문(설명·지원내용·제출서류 등)에만 적힌 주거·재산·병역 조건은 `BodyConditionDetector`가 키워드로 찾아 원문 확인 조건(`OTHER` / `bodyQualification`, `NEEDS_REVIEW`)으로 저장합니다. 이 조건이 있으면 판정은 최대 `POSSIBLY_ELIGIBLE`입니다.
+
+- 찾지 않는 것: 지식재산권·자산취득비 같은 비자격 표현, 재산세 감면·면제 같은 **혜택 문맥**
+- 일부러 찾는 것: 소득·재산 신고서 같은 **제출서류 문맥** (서류에만 재산 기준이 드러나는 정책이 있음)
+- 키워드 규칙이라 자격이 아닌 문장을 잡을 수 있습니다. 새로 잡힌 정책은 아래 SQL로 근거 줄을 보고, 오탐 표현은 `BodyConditionDetector`의 제외 규칙과 테스트에 추가합니다.
+
+```sql
+select o.id, o.title, c.expression ->> 'kinds' as kinds, c.evidence ->> 'evidenceText' as evidence, c.created_at
+from application.opportunity_conditions c
+join application.opportunities o on o.current_version_id = c.version_id
+where c.condition_field = 'bodyQualification'
+order by c.created_at desc
+limit 50;
+```
 
 ## 테스트
 ```bash
