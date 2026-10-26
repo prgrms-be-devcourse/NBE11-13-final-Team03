@@ -302,7 +302,7 @@ class RawIngestBenchmarkTest {
                     ORDER BY src.ord
                     """.formatted(schema), sourceIds[1], sourceIds[0], syncIds[1], syncIds[0],
                     Timestamp.valueOf(LocalDateTime.of(2026, 10, 20, 9, 0)), Timestamp.valueOf(LocalDateTime.of(2026, 10, 20, 9, 0)), size);
-            jdbc.execute("ANALYZE");
+            analyzeSources();
             return jdbc.queryForList("SELECT id FROM raw_external_record ORDER BY id", Long.class)
                     .stream().mapToLong(Long::longValue).toArray();
         }
@@ -319,9 +319,19 @@ class RawIngestBenchmarkTest {
                 INSERT INTO raw_external_record (source_id, sync_id, external_id, payload_hash, payload, first_seen_at, last_seen_at)
                 VALUES (?, ?, ?, ?, ?::jsonb, ?, ?)
                 """, rows.stream().map(r -> new Object[]{r[0], r[1], r[2], r[3], r[4], r[5], r[5]}).toList());
-        jdbc.execute("ANALYZE");
+        analyzeSources();
         return jdbc.queryForList("SELECT id FROM raw_external_record ORDER BY id", Long.class)
                 .stream().mapToLong(Long::longValue).toArray();
+    }
+
+    /**
+     * 원본·지역 테이블만 통계를 갱신한다. 비운 정규화 테이블까지 ANALYZE하면 "행 0건" 통계가 생겨,
+     * 외래 키 확인(opportunities, opportunity_versions 등을 찾는 조회)이 순차 스캔 계획으로 캐시된다.
+     * 그러면 표가 커질수록 건당 확인이 느려지다가 autovacuum이 다시 ANALYZE할 때(최대 1분 주기)에야 풀려서
+     * 회차마다 첫 적재 시간이 크게 흔들린다 (E7b). TRUNCATE 직후의 "통계 없음" 상태로 두면 인덱스 계획을 쓴다.
+     */
+    private void analyzeSources() {
+        jdbc.execute("ANALYZE raw_external_record, regions");
     }
 
     /** 원본 count건에 새 스냅샷(내용 변경)과 정제 요청을 넣는다 (측정 밖 준비라 SQL 두 문장으로 한 번에) */
