@@ -4,6 +4,7 @@
   padding: var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
   color: var(--color-text-primary);
   overflow-wrap: anywhere;
 }

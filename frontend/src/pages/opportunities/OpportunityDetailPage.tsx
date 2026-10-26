@@ -53,18 +53,33 @@ function OpportunityDetailPage() {
     <article className={styles.page} aria-labelledby="detail-title" aria-busy={query.isFetching}>
       {backLink}
       <Card className={styles.hero}>
-        <div className={styles.meta}><span className={styles.type}>{typeLabels[data.type]}</span><PreferenceActions opportunityId={data.opportunityId} title={data.title} saved={data.saved} source="OTHER" disabled={query.isFetching} /></div>
+        <div className={styles.meta}><span className={styles.type}>{typeLabels[data.type]}</span></div>
         <h1 id="detail-title">{data.title || '제목 미확인'}</h1>
         <p className={styles.muted}>{[data.category, data.subCategory].filter(Boolean).join(' · ') || '분류 정보 미제공'}</p>
         <div className={styles.statuses}>
-          <span className={styles.applicationStatus}>모집 상태: {statusLabels[data.applicationStatus]}</span>
+          <span className={styles.applicationStatus} data-application-status={data.applicationStatus}>모집 상태: {statusLabels[data.applicationStatus]}</span>
           {data.eligibility && <span className={styles.eligibilityBadge}>신청 가능성 <StatusBadge status={data.eligibility.status} /></span>}
         </div>
       </Card>
       {query.isFetching && <p role="status" className={styles.muted}>최신 상세 정보를 확인하고 있어요.</p>}
       {!data.detail && <p role="status" className={styles.notice}>유형별 상세 정보가 일부 제공되지 않았어요. 확인 가능한 공통 정보만 표시해요.</p>}
       <div className={styles.columns}>
-        <div className={styles.stack}>
+        <div className={styles.summary}>
+          <Section title="핵심 요약">
+            <dl className={styles.info}>
+              <Info label="기회 유형" value={typeLabels[data.type]} />
+              <Info label="모집 상태" value={statusLabels[data.applicationStatus]} />
+              <Info label="지원 분야" value={[data.category, data.subCategory].filter(Boolean).join(' · ')} />
+              <Info label={data.type === 'YOUTH_POLICY' ? '주관 기관' : '교육기관'} value={policy?.supervisingInstitutionName ?? training?.institutionName} />
+            </dl>
+            <div className={styles.summaryActions}>
+              <ExternalLink label={safeExternalUrl(policy?.applicationUrl) ? '정책 신청 페이지' : '원문 공고 확인'} url={safeExternalUrl(policy?.applicationUrl) || data.detailUrl} />
+              <PreferenceActions opportunityId={data.opportunityId} title={data.title} saved={data.saved} source="OTHER" disabled={query.isFetching} />
+            </div>
+            <p className={styles.muted}>신청 조건과 기간은 제공 기관의 공식 공고에서 확인해 주세요.</p>
+          </Section>
+        </div>
+        <div className={`${styles.stack} ${styles.mainContent}`}>
           <Section title="신청기간">
             {data.applicationWindows.length ? <ul className={styles.items}>{data.applicationWindows.map((window, index) => <li key={index}>
               <p>{applicationWindowText(window)}</p>

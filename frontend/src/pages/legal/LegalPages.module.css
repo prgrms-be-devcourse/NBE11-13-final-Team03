@@ -1,8 +1,13 @@
 .document {
-  max-inline-size: 48rem;
+  max-inline-size: 56rem;
   min-inline-size: 0;
   margin-inline: auto;
   overflow-wrap: anywhere;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
 }
 
 .document .draft {
@@ -46,4 +51,18 @@
 
 .section p + p {
   margin-block-start: var(--space-3);
+}
+
+.document h1 { font-size: clamp(1.75rem, 3vw, 2.25rem); }
+.document header > p { font-size: var(--font-size-small); }
+.contents { padding: var(--space-3); background: var(--color-surface-muted); border-radius: var(--radius-md); font-size: var(--font-size-small); }
+.contents ol { margin: 0; }
+.contents a { text-decoration: none; }
+.contents a:hover { text-decoration: underline; }
+.section h2 { font-size: 1.2rem; margin-block: 0 var(--space-3); line-height: 1.5; }
+.section p { line-height: 1.85; }
+@media (min-width: 768px) {
+  .document { padding: var(--space-6); }
+  .contents ol { columns: 2; column-gap: var(--space-5); }
+  .contents li { break-inside: avoid; }
 }

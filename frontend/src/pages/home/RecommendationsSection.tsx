@@ -17,14 +17,14 @@ function RecommendationCard({ item, disabled }: { item: RecommendationItem; disa
   const date = training ? item.trainingStartDate : item.applicationEndDate
   return <HomeOpportunityCard item={item} source="RECOMMENDATION" allowHide disabled={disabled}>
     <div className={styles.recommendationInfo}>
-      <p>모집 상태: {statusLabels[item.applicationStatus]}</p>
+      <p data-application-status={item.applicationStatus}>모집 상태: {statusLabels[item.applicationStatus]}</p>
       {date && isValidDate(date) && <p>{training ? '교육 시작일' : '신청기간 마감일'} <time dateTime={date}>{date}</time></p>}
       {!training && date && isValidDate(date) && <p className={styles.help}>여러 신청기간이 있을 수 있어요. 전체 일정은 상세에서 확인해 주세요.</p>}
       {training && <p className={styles.help}>교육 시작일은 신청 마감일과 다른 정보예요.</p>}
       {item.regions.length > 0 && <ul className={styles.regions}>{item.regions.map((region, index) => <li key={index}>{regionText(region, training)}</li>)}</ul>}
       <div className={styles.reasons}>
         <p className={styles.reasonTitle}>추천 이유</p>
-        <ul className={styles.badges}>{item.recommendationReasons.badges.map((badge, index) => <li key={index}>{badge}</li>)}</ul>
+        <ul className={styles.badges}>{item.recommendationReasons.badges.map((badge, index) => <li key={index} data-badge={badge}>{badge}</li>)}</ul>
         <p>{item.recommendationReasons.description}</p>
       </div>
     </div>

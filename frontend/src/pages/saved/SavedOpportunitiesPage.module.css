@@ -1,7 +1,13 @@
-.page { display: grid; gap: var(--space-4); min-width: 0; }
+.page { display: grid; gap: var(--space-4); min-width: 0; max-inline-size: 64rem; margin-inline: auto; }
 .page h1, .page h2, .page p { margin: 0; }
+.page h1 { font-size: clamp(1.75rem, 3vw, 2.25rem); margin-block-end: var(--space-2); }
 .list { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-3); }
-.card { padding: var(--space-4); display: grid; gap: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
-.card h2 { font-size: var(--font-size-heading); }
-.pagination { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-@media (max-width: 767px) { .card { padding: var(--space-3); } }
+.card { padding: var(--space-5); display: grid; gap: var(--space-3); min-width: 0; overflow-wrap: anywhere; }
+.card > span:first-child { justify-self: start; font-size: 0.8rem; font-weight: 600; color: var(--color-primary); border-radius: var(--radius-sm); background: var(--color-primary-soft); padding: var(--space-1) var(--space-2); }
+.card h2 { font-size: 1.2rem; line-height: 1.5; }
+.card h2 a { color: var(--color-text-primary); text-decoration: none; }
+.card h2 a:hover { color: var(--color-primary); text-decoration: underline; }
+.card p { font-size: var(--font-size-small); }
+.pagination { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--space-2); }
+.pagination button { min-inline-size: 2.75rem; }
+@media (max-width: 767px) { .card { padding: var(--space-4); } }

@@ -25,7 +25,7 @@ const fixtures = []
 for (const width of [1024, 1244, 1440]) for (const authenticated of [false, true]) fixtures.push({ width, auth: authenticated ? { ...base, status: 'authenticated', user: { id: 1, nickname: '아주 긴 테스트용 사용자 닉네임', role: 'USER' } } : base })
 fixtures.push({ width: 1024, auth: { ...base, status: 'error' } }, { width: 1244, auth: { ...base, status: 'checking' } }, { width: 390, auth: base }, { width: 390, auth: base, open: true })
 
-test('Chrome renders desktop brand/menu/auth on one centered row and mobile disclosure without overlap or overflow', { skip: !browser && 'Chrome/Edge가 없어 실제 레이아웃 검증을 실행하지 않았다.' }, () => {
+test('Chrome renders desktop brand/search/auth above centered navigation and mobile disclosure without overlap or overflow', { skip: !browser && 'Chrome/Edge가 없어 실제 레이아웃 검증을 실행하지 않았다.' }, () => {
   const cache = path.join(root, 'node_modules', '.cache')
   fs.mkdirSync(cache, { recursive: true })
   const temporary = fs.mkdtempSync(path.join(cache, 'header-layout-'))
@@ -48,7 +48,7 @@ test('Chrome renders desktop brand/menu/auth on one centered row and mobile disc
           const doc = frame.contentDocument, view = frame.contentWindow;
           if (frame.dataset.open === 'true') { doc.querySelector('.navigation').classList.add('open'); doc.querySelector('.auth').classList.add('authOpen'); }
           const rect = selector => { const r = doc.querySelector(selector).getBoundingClientRect(); return { left:r.left,right:r.right,top:r.top,bottom:r.bottom,cx:r.x+r.width/2,cy:r.y+r.height/2,width:r.width,height:r.height }; };
-          return { width:doc.documentElement.clientWidth, scrollWidth:doc.documentElement.scrollWidth, open:frame.dataset.open === 'true', brand:rect('.brand'), nav:rect('.primaryNavigation'), auth:rect('.auth'), toggle:rect('.menuButton'), menuDisplay:view.getComputedStyle(doc.querySelector('.navigation')).display };
+          return { width:doc.documentElement.clientWidth, scrollWidth:doc.documentElement.scrollWidth, open:frame.dataset.open === 'true', brand:rect('.brand'), search:rect('.headerSearch'), nav:rect('.primaryNavigation'), auth:rect('.auth'), toggle:rect('.menuButton'), menuDisplay:view.getComputedStyle(doc.querySelector('.navigation')).display };
         });
         document.querySelector('#result').textContent = JSON.stringify(results);
       });
@@ -65,10 +65,11 @@ test('Chrome renders desktop brand/menu/auth on one centered row and mobile disc
       const context = JSON.stringify(result)
       assert.ok(result.scrollWidth <= result.width, context)
       if (result.width >= 1024) {
-        assert.ok(Math.abs(result.brand.cy - result.nav.cy) <= 1, context)
-        assert.ok(Math.abs(result.auth.cy - result.nav.cy) <= 1, context)
+        assert.ok(Math.abs(result.brand.cy - result.auth.cy) <= 1, context)
+        assert.ok(Math.abs(result.brand.cy - result.search.cy) <= 1, context)
+        assert.ok(result.nav.top >= result.brand.bottom && result.nav.top >= result.auth.bottom, context)
         assert.ok(Math.abs(result.nav.cx - result.width / 2) <= 1, context)
-        assert.ok(result.brand.right <= result.nav.left && result.nav.right <= result.auth.left, context)
+        assert.ok(result.brand.right <= result.search.left && result.search.right <= result.auth.left, context)
       } else {
         assert.ok(Math.abs(result.brand.cy - result.toggle.cy) <= 1, context)
         if (result.open) assert.ok(result.nav.top >= result.brand.bottom && result.auth.top >= result.nav.bottom, context)

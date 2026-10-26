@@ -89,10 +89,10 @@ test('filter markup restores applied values, labels native controls and exposes 
 
 test('applied OPEN label distinguishes policy recruitment from training start-date search', () => {
   const policy = renderPage(data, '/opportunities?type=YOUTH_POLICY&applicationStatus=OPEN')
-  assert.match(policy, /<div class="applied"><p>청년정책 · 모집 중<\/p>/)
+  assert.match(policy, /aria-label="적용된 검색 조건"><span>청년정책<\/span><span>모집 중<\/span>/)
   const training = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING' }] },
     '/opportunities?type=VOCATIONAL_TRAINING&applicationStatus=OPEN&startDateFrom=2026-10-25')
-  assert.match(training, /<div class="applied"><p>직업훈련 · 개강 예정 · 교육 시작일 2026-10-25부터<\/p>/)
+  assert.match(training, /aria-label="적용된 검색 조건"><span>직업훈련<\/span><span>개강 예정<\/span><span>교육 시작일 2026-10-25부터<\/span>/)
   assert.match(training, /실제 모집기간과 별개로/)
 })
 

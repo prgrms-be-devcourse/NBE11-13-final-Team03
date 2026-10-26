@@ -88,6 +88,7 @@ function OpportunitiesPage() {
 
   return (
     <section className={styles.page} aria-labelledby="search-title">
+      <header className={styles.searchHeader}>
       <div className={styles.intro}>
         <span className={styles.eyebrow}>나에게 필요한 기회 찾기</span>
         <h1 id="search-title">통합 기회 탐색</h1>
@@ -98,6 +99,7 @@ function OpportunitiesPage() {
           placeholder="어떤 기회를 찾고 있나요?" autoComplete="off" type="search" />
         <Button type="submit"><Search size={18} aria-hidden="true" />검색</Button>
       </form>
+      </header>
       {notices.length > 0 && <div className={styles.notices} role="status">{notices.map((notice) => <p key={notice}>{notice}</p>)}</div>}
       <div className={styles.mobileControls}>
         <Button ref={filterButtonRef} variant="secondary" aria-haspopup="dialog" aria-controls="search-filter-dialog"
@@ -118,7 +120,9 @@ function OpportunitiesPage() {
             </label>
           </div>
           <div className={styles.applied}>
-            <p>{params.keyword ? `‘${params.keyword}’ · ` : ''}{params.type ? typeLabels[params.type] : '전체 유형'}{[params.category, params.subCategory, params.detailCategory, params.applicationStatus && applicationStatusLabel(params.applicationStatus, params.type), ...appliedDates].filter(Boolean).map((value) => ` · ${value}`)}</p>
+            <div className={styles.chips} aria-label="적용된 검색 조건">
+              {[params.keyword && `‘${params.keyword}’`, params.type ? typeLabels[params.type] : '전체 유형', params.category, params.subCategory, params.detailCategory, params.applicationStatus && applicationStatusLabel(params.applicationStatus, params.type), ...appliedDates].filter(Boolean).map((value, index) => <span key={index}>{value}</span>)}
+            </div>
             <Button variant="ghost" onClick={() => { searchFormRef.current?.reset(); apply(defaultSearchParams()) }}>전체 초기화</Button>
           </div>
           {params.applicationStatus === 'OPEN' && params.type !== 'YOUTH_POLICY' && <p className={styles.help}>직업훈련은 실제 모집기간과 별개로, 교육 시작일 기준의 개강 예정 검색을 포함해요.</p>}

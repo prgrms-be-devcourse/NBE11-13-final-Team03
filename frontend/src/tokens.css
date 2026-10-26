@@ -1,16 +1,17 @@
 :root {
-  --color-background: #f7f8f6;
+  --color-background: #f8f9f6;
   --color-surface: #ffffff;
-  --color-primary: #486b53;
-  --color-primary-soft: #eaf1e7;
-  --color-accent-green: #d9e8cd;
-  --color-accent-yellow: #f6e8b4;
-  --color-text-primary: #253029;
-  --color-text-secondary: #68746c;
-  --color-border: #e3e8e1;
-  --color-surface-muted: #f1f4ef;
+  --color-primary: #377554;
+  --color-primary-dark: #24563f;
+  --color-primary-soft: #e3f1e5;
+  --color-accent-green: #bad9b1;
+  --color-accent-yellow: #f4d66a;
+  --color-text-primary: #202b29;
+  --color-text-secondary: #53625e;
+  --color-border: #d4ddd6;
+  --color-surface-muted: #f1f3f1;
   --color-error: #a33434;
-  --color-input-border: #7d887f;
+  --color-input-border: #7d8f83;
 
   --font-family-base: 'Pretendard', system-ui, -apple-system, BlinkMacSystemFont,
     'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
@@ -27,10 +28,21 @@
   --space-3: 1rem;
   --space-4: 1.5rem;
   --space-5: 2rem;
-  --radius-sm: 0.375rem;
-  --radius-md: 0.75rem;
+  --radius-sm: 0.625rem;
+  --radius-md: 1rem;
 
-  --content-max-width: 1200px;
+  --radius-lg: 1.5rem;
+  --space-6: 3rem;
+  --section-gap: clamp(1.5rem, 3vw, 2.5rem);
+  --color-accent-blue: #e7f1fc;
+  --color-accent-rose: #fcece6;
+  --color-status-warning-soft: #fff2ce;
+  --color-status-warning-text: #795312;
+  --color-status-info-text: #245f92;
+  --color-status-muted-soft: #e9edf0;
+  --color-status-muted-text: #4e5d66;
+  --shadow-card: 0 4px 20px rgb(37 48 41 / 3%);
+  --content-max-width: 1280px;
   --page-gutter: var(--space-3);
 }
 

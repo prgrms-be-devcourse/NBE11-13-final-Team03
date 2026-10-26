@@ -1,15 +1,14 @@
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { Link, Outlet } from 'react-router-dom'
 import Header from './Header'
 import styles from './AppLayout.module.css'
 
 function AppLayout() {
-  const { pathname } = useLocation()
   return (
     <>
       <a className={styles.skipLink} href="#main-content">본문으로 건너뛰기</a>
       <Header />
       <main id="main-content" className={styles.main} tabIndex={-1}>
-        <div className={`${styles.content}${pathname === '/login' ? ` ${styles.loginContent}` : ''}`}>
+        <div className={styles.content}>
           <Outlet />
         </div>
       </main>

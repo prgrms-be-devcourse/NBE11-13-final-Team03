@@ -1,14 +1,21 @@
-.page, .card, .form { display: grid; gap: var(--space-3); min-inline-size: 0; }
+.page, .card, .form { display: grid; gap: var(--space-4); min-inline-size: 0; }
+.page { max-inline-size: 64rem; margin-inline: auto; }
 .page h1, .page h2, .page p { margin: 0; }
+.page h1 { font-size: clamp(1.75rem, 3vw, 2.25rem); margin-block-end: var(--space-2); }
 .list { display: grid; gap: var(--space-3); list-style: none; padding: 0; margin: 0; }
-.card { padding: var(--space-4); overflow-wrap: anywhere; }
-.card h2 { font-size: var(--font-size-heading); }
-.unread { border-inline-start: 3px solid var(--color-primary); }
+.card { padding: var(--space-5); overflow-wrap: anywhere; }
+.card h2 { font-size: 1.125rem; line-height: 1.5; }
+.unread { border-inline-start: 3px solid var(--color-primary); background: var(--color-surface); }
 .meta, .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .meta { color: var(--color-text-secondary); font-size: var(--font-size-small); }
-.meta strong { color: var(--color-primary); }
-.toolbar a { display: inline-flex; align-items: center; min-block-size: 2.75rem; }
-.content { white-space: pre-wrap; }
-.toggle { display: flex; align-items: center; gap: var(--space-2); min-block-size: 2.75rem; }
+.meta strong { color: var(--color-primary); padding: var(--space-1) var(--space-2); background: var(--color-primary-soft); border-radius: 999px; font-size: 0.75rem; }
+.toolbar a { display: inline-flex; align-items: center; min-block-size: 2.75rem; font-size: var(--font-size-small); }
+.page > .toolbar { padding: var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.content { white-space: pre-wrap; line-height: 1.75; }
+.card time { font-size: var(--font-size-small); color: var(--color-text-secondary); }
+.toggle { display: flex; align-items: center; gap: var(--space-3); min-block-size: 2.75rem; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .toggle input { inline-size: 1.25rem; block-size: 1.25rem; flex-shrink: 0; accent-color: var(--color-primary); }
-@media (max-width: 767px) { .card { padding: var(--space-3); } }
+.form { margin-block-end: var(--space-5); padding-block-end: var(--space-5); border-block-end: 1px solid var(--color-border); }
+.form > p { font-size: var(--font-size-small); }
+.form > button { justify-self: start; }
+@media (max-width: 767px) { .card { padding: var(--space-4); } .page, .card, .form { gap: var(--space-3); } }

@@ -19,16 +19,21 @@
 
 .hero,
 .card {
-  padding: var(--space-3);
+  padding: var(--space-4);
 }
 
 .hero {
   margin-block-end: var(--space-4);
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  box-shadow: none;
 }
+.hero h1 { max-inline-size: 30ch; }
 
 .hero h1 {
   margin-block: var(--space-3);
-  font-size: clamp(1.5rem, 4vw, var(--font-size-title));
+  font-size: clamp(1.75rem, 3.5vw, 2.75rem);
+  letter-spacing: -0.04em;
 }
 
 .meta,
@@ -95,7 +100,9 @@
 
 .info dt {
   margin-block-end: var(--space-1);
-  font-weight: 600;
+  font-weight: 500;
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
 }
 
 .info dd {
@@ -154,12 +161,30 @@
 @media (min-width: 768px) {
   .hero,
   .card {
-    padding: var(--space-4);
+    padding: var(--space-5);
   }
 }
 
 @media (min-width: 1024px) {
   .columns {
-    grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(19rem, 0.45fr);
   }
 }
+
+.summaryActions { display: grid; gap: var(--space-3); margin-block: var(--space-4); }
+.summary { min-inline-size: 0; }
+.summaryActions > a { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-3); background: var(--color-primary); border-radius: var(--radius-sm); color: var(--color-surface); text-decoration: none; text-align: center; }
+.summaryActions > a span { color: inherit; }
+.summaryActions > a:hover { text-decoration: underline; }
+@media (min-width: 1024px) {
+  .mainContent { grid-column: 1; grid-row: 1 / span 2; }
+  .summary { grid-column: 2; grid-row: 1; }
+  .columns > aside { grid-column: 2; grid-row: 2; align-self: start; }
+}
+
+.applicationStatus[data-application-status='OPEN'],
+.applicationStatus[data-application-status='ALWAYS_OPEN'] { background: var(--color-primary-soft); color: var(--color-primary-dark); }
+.applicationStatus[data-application-status='UPCOMING'] { background: var(--color-accent-blue); color: var(--color-status-info-text); }
+.applicationStatus[data-application-status='CLOSED'] { background: var(--color-status-muted-soft); color: var(--color-status-muted-text); }
+.applicationStatus[data-application-status='UNKNOWN'] { background: var(--color-surface-muted); color: var(--color-text-secondary); }
+.summaryActions > a:hover { background: var(--color-primary-dark); }
