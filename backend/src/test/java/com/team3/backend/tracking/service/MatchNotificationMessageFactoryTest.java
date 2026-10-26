@@ -21,6 +21,9 @@ class MatchNotificationMessageFactoryTest {
     private final MatchNotificationMessageFactory factory=new MatchNotificationMessageFactory();
     private final MatchTrackingProperties settings=new MatchTrackingProperties(true,new MatchTrackingProperties.Possibly(1,true),"/test-recommendations");
     private MatchNotificationMessageFactory.Member member(long policy,MatchPairState.Reason reason,EligibilityStatus status) {
+        return member(policy,reason,status,Map.of("before","NOT_ELIGIBLE","after","ELIGIBLE"));
+    }
+    private MatchNotificationMessageFactory.Member member(long policy,MatchPairState.Reason reason,EligibilityStatus status,Map<String,Object> evidence) {
         var user=mock(User.class); when(user.getId()).thenReturn(7L);
         var opportunity=mock(Opportunity.class); when(opportunity.getId()).thenReturn(policy);
         var pair=mock(MatchPairState.class); when(pair.getId()).thenReturn(policy+100);
@@ -28,7 +31,7 @@ class MatchNotificationMessageFactoryTest {
         var event=mock(MatchCandidateEvent.class); when(event.getPair()).thenReturn(pair); when(event.getReason()).thenReturn(reason);
         when(event.getStatus()).thenReturn("PENDING"); when(event.getEventId()).thenReturn(UUID.randomUUID());
         when(event.getCreatedAt()).thenReturn(NOW.minusSeconds(60)); when(event.getOccurrenceNo()).thenReturn(2L);
-        when(event.getEvidence()).thenReturn(Map.of("before","NOT_ELIGIBLE","after","ELIGIBLE"));
+        when(event.getEvidence()).thenReturn(evidence);
         var input=new MatchObservation(policy+1000,2,3,1,"4","v1",status,OpportunityType.YOUTH_POLICY,
                 PersonalizationStatus.PERSONALIZABLE,ApplicationStatus.ALWAYS_OPEN,false,true,
                 status==EligibilityStatus.POSSIBLY_ELIGIBLE?1:0,0,LocalDate.of(2026,10,26));
@@ -69,9 +72,22 @@ class MatchNotificationMessageFactoryTest {
         Map<?,?> evidence=(Map<?,?>)actual.get("payload");
         Map<?,?> contract=(Map<?,?>)sample.get("payload");
         for(String key:List.of("reason","summary","summaryRunId","matchCount","eligibleCount",
-                "possiblyCount","maxUnresolved","membershipStoredIn","possiblyLabel")) {
+                "possiblyCount","maxUnresolved","transitionCount","membershipStoredIn","possiblyLabel")) {
             assertThat(evidence.get(key)).as("payload.%s",key).isEqualTo(contract.get(key));
         }
+    }
+    @Test void profileChangeTransitionJoinsSummaryAsEligibleMemberAndOtherTransitionsDoNot() {
+        var first=member(11,MatchPairState.Reason.FIRST_MATCH,EligibilityStatus.POSSIBLY_ELIGIBLE);
+        var profile=member(12,MatchPairState.Reason.TRANSITION,EligibilityStatus.ELIGIBLE,Map.of("trigger","PROFILE_CHANGED"));
+        var outbox=factory.summary(7,UUID.randomUUID(),List.of(first,profile),settings,NOW,NOW.plusSeconds(3600));
+        Map<?,?> evidence=(Map<?,?>)outbox.getPayload().get("payload");
+        assertThat(outbox.getPayload()).containsEntry("title","새로 신청 가능해진 정책 1건 포함 2건");
+        assertThat(evidence.get("matchCount")).isEqualTo(2); assertThat(evidence.get("eligibleCount")).isEqualTo(1);
+        assertThat(evidence.get("possiblyCount")).isEqualTo(1); assertThat(evidence.get("transitionCount")).isEqualTo(1);
+        var noLongerEligible=member(13,MatchPairState.Reason.TRANSITION,EligibilityStatus.POSSIBLY_ELIGIBLE,Map.of("trigger","PROFILE_CHANGED"));
+        assertThatThrownBy(()->factory.summary(7,UUID.randomUUID(),List.of(noLongerEligible),settings,NOW,NOW.plusSeconds(1))).isInstanceOf(IllegalArgumentException.class);
+        var policyChange=member(14,MatchPairState.Reason.TRANSITION,EligibilityStatus.ELIGIBLE,Map.of("trigger","POLICY_CHANGED"));
+        assertThatThrownBy(()->factory.summary(7,UUID.randomUUID(),List.of(policyChange),settings,NOW,NOW.plusSeconds(1))).isInstanceOf(IllegalArgumentException.class);
     }
     @Test void summaryRejectsEmptyDuplicateOrWrongReasonMembers() {
         var a=member(11,MatchPairState.Reason.FIRST_MATCH,EligibilityStatus.ELIGIBLE);

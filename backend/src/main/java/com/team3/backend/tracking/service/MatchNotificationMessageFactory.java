@@ -6,7 +6,6 @@ import com.team3.backend.tracking.domain.entity.MatchCandidateEvent;
 import com.team3.backend.tracking.domain.entity.MatchPairState;
 import com.team3.backend.tracking.domain.model.MatchObservation;
 import org.springframework.stereotype.Component;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -19,12 +18,15 @@ public class MatchNotificationMessageFactory {
         if (runId==null || members==null || members.isEmpty() || now==null || expiresAt==null
                 || !expiresAt.isAfter(now) || settings.summaryLink().isEmpty())
             throw new IllegalArgumentException("Nonempty current summary, explicit expiry and verified link required");
-        var seen=new HashSet<Long>(); int eligible=0,possibly=0,maxUnresolved=0;
+        var seen=new HashSet<Long>(); int eligible=0,possibly=0,maxUnresolved=0,transitions=0;
         for (var member:members) {
-            requireOwner(member,userId,MatchPairState.Reason.FIRST_MATCH);
+            requireOwner(member,userId,null);
             if (!seen.add(member.candidate().getPair().getId())) throw new IllegalArgumentException("Duplicate summary policy");
             var qualification=member.current().qualify(settings.possibly());
-            if (qualification==MatchObservation.Qualification.ELIGIBLE) eligible++;
+            if (member.candidate().getReason()==MatchPairState.Reason.TRANSITION) {
+                if (qualification!=MatchObservation.Qualification.ELIGIBLE) throw new IllegalArgumentException("A current eligible transition is required");
+                transitions++; eligible++;
+            } else if (qualification==MatchObservation.Qualification.ELIGIBLE) eligible++;
             else if (qualification==MatchObservation.Qualification.POSSIBLY) {
                 possibly++; maxUnresolved=Math.max(maxUnresolved,Math.addExact(member.current().userInfoMissing(),member.current().checkRequired()));
             } else throw new IllegalArgumentException("Summary member is no longer a candidate");
@@ -32,11 +34,14 @@ public class MatchNotificationMessageFactory {
         var payload=new LinkedHashMap<String,Object>();
         payload.put("reason","FIRST_MATCH"); payload.put("summary",true); payload.put("summaryRunId",runId.toString());
         payload.put("matchCount",members.size()); payload.put("eligibleCount",eligible); payload.put("possiblyCount",possibly);
-        payload.put("maxUnresolved",maxUnresolved); payload.put("evaluatedOn",members.getFirst().current().evaluatedOn().toString());
+        payload.put("maxUnresolved",maxUnresolved); payload.put("transitionCount",transitions);
+        payload.put("evaluatedOn",members.getFirst().current().evaluatedOn().toString());
         payload.put("membershipStoredIn","notification_match_candidates.outbox_id");
         if (possibly>0) payload.put("possiblyLabel","확인 필요 " + maxUnresolved + "개");
         var first=members.getFirst();
-        return envelope(userId,runId,first,"NEW_MATCH","가능성 있는 정책 " + members.size() + "건",
+        var title=transitions==0 ? "가능성 있는 정책 " + members.size() + "건"
+                : "새로 신청 가능해진 정책 " + transitions + "건 포함 " + members.size() + "건";
+        return envelope(userId,runId,first,"NEW_MATCH",title,
                 "새롭게 확인한 정책을 추천 페이지에서 확인해 주세요. 찜하면 마감 알림을 받아요.",
                 settings.summaryLink(),now,expiresAt,payload,now);
     }
@@ -47,7 +52,7 @@ public class MatchNotificationMessageFactory {
             throw new IllegalArgumentException("A current eligible transition is required");
         var occurredAt=member.candidate().getCreatedAt();
         if (occurredAt.isAfter(now)) throw new IllegalArgumentException("Transition cannot occur in the future");
-        var expiresAt=occurredAt.plus(Duration.ofDays(7));
+        var expiresAt=occurredAt.plus(MatchOutboxTransaction.TRANSITION_VALIDITY);
         if (!now.isBefore(expiresAt)) return Optional.empty();
         var payload=new LinkedHashMap<String,Object>(member.candidate().getEvidence());
         payload.put("reason","TRANSITION"); payload.put("occurrence",member.candidate().getOccurrenceNo());
@@ -59,9 +64,11 @@ public class MatchNotificationMessageFactory {
                 "/opportunities/"+policy,occurredAt,expiresAt,payload,now));
     }
 
+    /** reason=null accepts any summary member: first matches and profile-change transitions. */
     private void requireOwner(Member member,long userId,MatchPairState.Reason reason) {
         var candidate=Objects.requireNonNull(member.candidate()); Objects.requireNonNull(member.current());
-        if (!Objects.equals(candidate.getPair().getUser().getId(),userId) || candidate.getReason()!=reason
+        boolean accepted=reason==null ? MatchCandidateEvent.summarized(candidate.getReason(),candidate.getEvidence()) : candidate.getReason()==reason;
+        if (!Objects.equals(candidate.getPair().getUser().getId(),userId) || !accepted
                 || !"PENDING".equals(candidate.getStatus())) throw new IllegalArgumentException("Owned pending candidate required");
     }
     private OutboxEvent envelope(long userId,UUID source,Member member,String type,String title,String content,String link,

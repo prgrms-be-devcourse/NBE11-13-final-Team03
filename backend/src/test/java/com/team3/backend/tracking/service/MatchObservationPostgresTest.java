@@ -568,14 +568,97 @@ class MatchObservationPostgresTest {
         assertThat(candidates.findById(id).orElseThrow().getCloseReason()).isEqualTo("NOT_SAVED_BEFORE_SOURCE_VERSION");
         assertThat(outboxes.count()).isZero();
     }
-    @Test void savedSameVersionStillAllowsRealProfileTransition() {
+    @Test void savedSameVersionStillAllowsRealProfileTransitionDeliveredInTheSummary() {
         long p=policy(NOT_ELIGIBLE); saveCurrent(p); observations.observe(userId,p);
-        jdbc.update("UPDATE eligibility_profiles SET profile_version=2 WHERE user_id=?",userId);
-        status(p,ELIGIBLE); jdbc.update("UPDATE eligibility_set_results SET profile_version=2 WHERE user_id=?",userId);
-        long id=observations.observe(userId,p).candidateId();
+        long id=profileTransition(p);
         assertThat(candidates.findById(id).orElseThrow().getEvidence()).containsEntry("trigger","PROFILE_CHANGED");
-        assertThat(matchOutbox.transition(userId,id).status()).isEqualTo(MatchOutboxTransaction.Status.ENQUEUED);
+        var result=matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plusSeconds(3600));
+        assertThat(result.status()).isEqualTo(MatchOutboxTransaction.Status.ENQUEUED); assertThat(result.members()).isEqualTo(1);
         assertThat(outboxes.count()).isEqualTo(1);
+    }
+    @Test void profileChangeTransitionIsSummarizedNotPublishedIndividually() {
+        long a=policy(NOT_ELIGIBLE), b=policy(NOT_ELIGIBLE), c=policy(ELIGIBLE);
+        observations.observe(userId,a); observations.observe(userId,b); observations.observe(userId,c);
+        status(b,ELIGIBLE); long result=observations.observe(userId,b).candidateId(); // Same profile version: a result change.
+        assertThat(candidates.findById(result).orElseThrow().getEvidence()).containsEntry("trigger","RESULT_CHANGED");
+        long profile=profileTransition(a);
+        // The batch re-observes the user's other policies after a profile change; nothing new, only their keys move on.
+        assertThat(observations.observe(userId,b).candidateId()).isNull(); assertThat(observations.observe(userId,c).candidateId()).isNull();
+        var worker=new MatchAutomaticWorker(jdbc,matchOutbox,
+                new com.team3.backend.tracking.config.MatchAutomaticProperties(true,false,25,25,60000),Clock.fixed(NOW,ZoneOffset.UTC));
+        var daytime=worker.runOnce();
+        assertThat(daytime.transitionCalls()).isEqualTo(1); assertThat(daytime.summaryCalls()).isZero();
+        assertThat(candidates.findById(result).orElseThrow().getStatus()).isEqualTo("ENQUEUED");
+        assertThat(candidates.findById(profile).orElseThrow().getStatus()).isEqualTo("PENDING");
+        assertThatThrownBy(()->matchOutbox.transition(userId,profile)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(outboxes.count()).isEqualTo(1);
+        var morningTime=NOW.plus(Duration.ofHours(23)).plus(Duration.ofMinutes(35)); clock.set(morningTime); // Next day's 08:35 KST window.
+        var morning=new MatchAutomaticWorker(jdbc,matchOutbox,
+                new com.team3.backend.tracking.config.MatchAutomaticProperties(true,false,25,25,60000),Clock.fixed(morningTime,ZoneOffset.UTC));
+        assertThat(morning.runOnce().summaryCalls()).isEqualTo(1);
+        var summary=outboxes.findAll().stream().filter(o->"NEW_MATCH".equals(o.getNotificationType())).findFirst().orElseThrow();
+        var payload=(Map<?,?>)summary.getPayload().get("payload");
+        assertThat(payload.get("matchCount")).isEqualTo(2); assertThat(payload.get("transitionCount")).isEqualTo(1);
+        assertThat(payload.get("eligibleCount")).isEqualTo(2);
+        assertThat(candidates.findById(profile).orElseThrow().getOutboxId()).isEqualTo(summary.getId());
+        assertThat(morning.runOnce().summaryCalls()).isZero();
+    }
+    @Test void supersededOrExpiredProfileChangeTransitionIsClosedBySummaryNotSent() {
+        long a=policy(NOT_ELIGIBLE), b=policy(NOT_ELIGIBLE), first=policy(ELIGIBLE);
+        observations.observe(userId,a); observations.observe(userId,b); observations.observe(userId,first);
+        long superseded=profileTransition(a); status(a,NOT_ELIGIBLE); observations.observe(userId,a);
+        long expired=profileTransition(b);
+        for (long policy:List.of(a,b,first)) assertThat(observations.observe(userId,policy).candidateId()).isNull();
+        clock.set(NOW.plus(Duration.ofDays(7)));
+        var result=matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plus(Duration.ofDays(8)));
+        assertThat(result.status()).isEqualTo(MatchOutboxTransaction.Status.ENQUEUED); assertThat(result.members()).isEqualTo(1);
+        assertThat(candidates.findById(superseded).orElseThrow().getCloseReason()).isEqualTo("SUPERSEDED_OR_NO_LONGER_ELIGIBLE");
+        // The test budget is 2 candidates per run; the expired one is the next page and closes without any Outbox.
+        assertThat(candidates.findById(expired).orElseThrow().getStatus()).isEqualTo("PENDING");
+        assertThat(matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plus(Duration.ofDays(8))).status()).isEqualTo(MatchOutboxTransaction.Status.EMPTY);
+        assertThat(candidates.findById(expired).orElseThrow().getCloseReason()).isEqualTo("EXPIRED");
+        assertThat(outboxes.count()).isEqualTo(1);
+    }
+    @Test void normalizationChangeFirstQualificationIsAFirstMatchNotATransition() {
+        long p=policy(NOT_ELIGIBLE); observations.observe(userId,p);
+        jdbc.update("UPDATE opportunity_versions SET normalization_version='v2'"); status(p,ELIGIBLE);
+        var result=observations.observe(userId,p);
+        assertThat(result.status()).isEqualTo(MatchObservationTransaction.Status.CANDIDATE_CREATED);
+        var candidate=candidates.findById(result.candidateId()).orElseThrow();
+        assertThat(candidate.getReason()).isEqualTo(MatchPairState.Reason.FIRST_MATCH);
+        assertThat(candidate.getEvidence()).containsEntry("normalizationVersion","v2");
+        assertThat(matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plusSeconds(3600)).status()).isEqualTo(MatchOutboxTransaction.Status.ENQUEUED);
+        jdbc.update("UPDATE opportunity_versions SET normalization_version='v3'"); status(p,NOT_ELIGIBLE); observations.observe(userId,p);
+        jdbc.update("UPDATE opportunity_versions SET normalization_version='v4'"); status(p,ELIGIBLE);
+        assertThat(observations.observe(userId,p).candidateId()).isNull();
+    }
+    @Test void failedPublicationsAreCountedAndRetriedNeverDiscarded() {
+        var morningTime=NOW.minus(Duration.ofMinutes(25)); clock.set(morningTime);
+        long t=policy(NOT_ELIGIBLE); observations.observe(userId,t); status(t,ELIGIBLE);
+        long transition=observations.observe(userId,t).candidateId();
+        long summary=observations.observe(userId,policy(ELIGIBLE)).candidateId();
+        var morning=new MatchAutomaticWorker(jdbc,matchOutbox,
+                new com.team3.backend.tracking.config.MatchAutomaticProperties(true,false,25,25,60000),Clock.fixed(morningTime,ZoneOffset.UTC));
+        jdbc.execute("ALTER TABLE notification_match_candidates ADD CONSTRAINT test_no_enqueue_count CHECK (status <> 'ENQUEUED')");
+        try {
+            assertThat(morning.runOnce().failures()).isEqualTo(2);
+            assertThat(morning.runOnce().failures()).isEqualTo(2);
+        } finally { jdbc.execute("ALTER TABLE notification_match_candidates DROP CONSTRAINT test_no_enqueue_count"); }
+        for (long id:List.of(transition,summary)) {
+            var candidate=candidates.findById(id).orElseThrow();
+            assertThat(candidate.getStatus()).isEqualTo("PENDING"); assertThat(candidate.getAttemptCount()).isEqualTo(2);
+            assertThat(candidate.getLastFailedAt()).isEqualTo(morningTime);
+        }
+        assertThat(outboxes.count()).isZero();
+        var run=morning.runOnce();
+        assertThat(run.failures()).isZero(); assertThat(run.transitionCalls()).isEqualTo(1); assertThat(run.summaryCalls()).isEqualTo(1);
+        assertThat(candidates.findAll()).allSatisfy(c->{assertThat(c.getStatus()).isEqualTo("ENQUEUED"); assertThat(c.getAttemptCount()).isEqualTo(2);});
+    }
+    private long profileTransition(long policyId) {
+        jdbc.update("UPDATE eligibility_profiles SET profile_version=profile_version+1 WHERE user_id=?",userId);
+        status(policyId,ELIGIBLE);
+        jdbc.update("UPDATE eligibility_set_results SET profile_version=(SELECT profile_version FROM eligibility_profiles WHERE user_id=?) WHERE user_id=?",userId,userId);
+        return observations.observe(userId,policyId).candidateId();
     }
     private void saveCurrent(long policyId) {
         tx(()->{

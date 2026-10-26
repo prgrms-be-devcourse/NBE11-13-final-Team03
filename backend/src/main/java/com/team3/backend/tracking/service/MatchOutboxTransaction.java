@@ -13,7 +13,6 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
@@ -39,6 +38,8 @@ public class MatchOutboxTransaction {
     private final EntityManager em;
     private final Clock clock;
 
+    /** Shared with the message factory: a transition occurrence is deliverable for 7 days, in a summary or individually. */
+    public static final Duration TRANSITION_VALIDITY=Duration.ofDays(7);
     public enum Status { ENQUEUED, DUPLICATE, EMPTY, DEFERRED, SKIPPED, USER_UNAVAILABLE }
     public record Result(Status status,Long outboxId,int members) { }
 
@@ -50,8 +51,7 @@ public class MatchOutboxTransaction {
         if (existing!=null) return existing;
         // Bound this run, not the user's backlog. Older candidates progress first; the remainder stays pending.
         // The automatic worker's stable daily run ID prevents a second summary on the same day.
-        var cohort=candidates.findByPairUserIdAndReasonAndStatusOrderById(userId,MatchPairState.Reason.FIRST_MATCH,
-                "PENDING",PageRequest.of(0,limits.maxSummaryCandidates()));
+        var cohort=candidates.findPendingSummaryMembers(userId,limits.maxSummaryCandidates());
         if (cohort.isEmpty()) return result(Status.EMPTY);
         // Lock every parent policy before the user, including policies that no longer have a current version.
         for (long id:cohort.stream().map(c->c.getPair().getOpportunity().getId()).distinct().sorted().toList()) {
@@ -64,7 +64,7 @@ public class MatchOutboxTransaction {
         Instant now=clock.instant(); LocalDate date=LocalDate.ofInstant(now,KST);
         if (!expiresAt.isAfter(now)) throw new IllegalArgumentException("Summary expiry must be in the future");
         var members=new ArrayList<MatchNotificationMessageFactory.Member>();
-        var excluded=new ArrayList<MatchCandidateEvent>();
+        var excluded=new LinkedHashMap<MatchCandidateEvent,String>();
         var unavailable=new ArrayList<MatchCandidateEvent>();
         for (var candidate:cohort) {
             em.refresh(candidate,LockModeType.PESSIMISTIC_WRITE);
@@ -81,13 +81,18 @@ public class MatchOutboxTransaction {
             var input=current.input();
             if (!Objects.equals(candidate.getPair().getLastInputKey(),input.inputKey(settings.possibly())))
                 return result(Status.DEFERRED);
-            if (changedRules(candidate,input) || input.qualify(settings.possibly())==MatchObservation.Qualification.NONE)
-                excluded.add(candidate);
+            if (candidate.getReason()==MatchPairState.Reason.TRANSITION) {
+                // A profile-change transition keeps the individual transition's validity rules; only its delivery is the summary.
+                if (superseded(candidate,input)) excluded.put(candidate,"SUPERSEDED_OR_NO_LONGER_ELIGIBLE");
+                else if (!now.isBefore(candidate.getCreatedAt().plus(TRANSITION_VALIDITY))) excluded.put(candidate,"EXPIRED");
+                else members.add(new MatchNotificationMessageFactory.Member(candidate,input));
+            } else if (changedRules(candidate,input) || input.qualify(settings.possibly())==MatchObservation.Qualification.NONE)
+                excluded.put(candidate,"NO_LONGER_QUALIFIED_OR_RULE_CHANGED");
             else members.add(new MatchNotificationMessageFactory.Member(candidate,input));
         }
         checkDate(date);
         for (var candidate:unavailable) candidate.skip("POLICY_UNAVAILABLE",now);
-        for (var candidate:excluded) candidate.skip("NO_LONGER_QUALIFIED_OR_RULE_CHANGED",now);
+        excluded.forEach((candidate,reason)->candidate.skip(reason,now));
         if (members.isEmpty()) return result(Status.EMPTY);
         var outbox=outboxes.saveAndFlush(messages.summary(userId,runId,members,settings,now,expiresAt));
         for (var member:members) member.candidate().enqueue(outbox.getId(),now);
@@ -103,6 +108,7 @@ public class MatchOutboxTransaction {
         var candidate=found.orElseThrow();
         if (!Objects.equals(candidate.getPair().getUser().getId(),userId) || candidate.getReason()!=MatchPairState.Reason.TRANSITION)
             throw new IllegalArgumentException("Owned transition required");
+        if (candidate.summarized()) throw new IllegalArgumentException("Profile-change transitions are delivered in the daily summary");
         long policyId=candidate.getPair().getOpportunity().getId();
         jdbc.queryForList("SELECT id FROM opportunities WHERE id=? FOR SHARE",Long.class,policyId);
         policies.lockForNotification(policyId);
@@ -126,11 +132,7 @@ public class MatchOutboxTransaction {
                     ((Number)candidate.getEvidence().get("versionNo")).intValue(),List.of(userId)).isEmpty()))) {
             candidate.skip("NOT_SAVED_BEFORE_SOURCE_VERSION",now); return result(Status.SKIPPED);
         }
-        // A newer observation invalidates an old transition, even if the user is eligible again now.
-        if (changedRules(candidate,input) || candidate.getOccurrenceNo()!=candidate.getPair().getTransitionCount()
-                || input.qualify(settings.possibly())!=MatchObservation.Qualification.ELIGIBLE) {
-            candidate.skip("SUPERSEDED_OR_NO_LONGER_ELIGIBLE",now); return result(Status.SKIPPED);
-        }
+        if (superseded(candidate,input)) { candidate.skip("SUPERSEDED_OR_NO_LONGER_ELIGIBLE",now); return result(Status.SKIPPED); }
         var message=messages.transition(userId,new MatchNotificationMessageFactory.Member(candidate,input),settings,now);
         if (message.isEmpty()) { candidate.skip("EXPIRED",now); return result(Status.SKIPPED); }
         var outbox=outboxes.saveAndFlush(message.orElseThrow()); candidate.enqueue(outbox.getId(),now);
@@ -138,6 +140,11 @@ public class MatchOutboxTransaction {
         return new Result(Status.ENQUEUED,outbox.getId(),1);
     }
 
+    /** A newer observation invalidates an old transition, even if the user is eligible again now. */
+    private boolean superseded(MatchCandidateEvent candidate,MatchObservation input) {
+        return changedRules(candidate,input) || candidate.getOccurrenceNo()!=candidate.getPair().getTransitionCount()
+                || input.qualify(settings.possibly())!=MatchObservation.Qualification.ELIGIBLE;
+    }
     private boolean changedRules(MatchCandidateEvent candidate,MatchObservation input) {
         return !Objects.equals(candidate.getEvidence().get("ruleVersion"),input.ruleVersion())
                 || !Objects.equals(candidate.getEvidence().get("normalizationVersion"),input.normalizationVersion());

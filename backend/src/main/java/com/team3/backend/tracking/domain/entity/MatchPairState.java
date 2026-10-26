@@ -59,12 +59,13 @@ public class MatchPairState {
                 : input.profileId()!=lastProfileId || input.profileVersion()!=lastProfileVersion ? Trigger.PROFILE_CHANGED : Trigger.RESULT_CHANGED;
         boolean changedRules=lastRuleVersion!=null && (!lastRuleVersion.equals(input.ruleVersion())
                 || !lastNormalizationVersion.equals(input.normalizationVersion()));
-        if (!changedRules && qualification!=MatchObservation.Qualification.NONE) {
-            if (before==EligibilityStatus.NOT_ELIGIBLE && input.status()==EligibilityStatus.ELIGIBLE) {
+        if (qualification!=MatchObservation.Qualification.NONE) {
+            if (!changedRules && before==EligibilityStatus.NOT_ELIGIBLE && input.status()==EligibilityStatus.ELIGIBLE) {
                 notice=new Notice(Reason.TRANSITION,++transitionCount,before,qualification,trigger);
             } else if (!everMatched) notice=new Notice(Reason.FIRST_MATCH,0,before,qualification,trigger);
         }
-        // Rule-only rebaselining observes state without generating an initial/transition notice.
+        // Rule/normalization rebaselining never counts as a transition (the status may have moved because of the rules),
+        // but a pair that qualifies for the first time still gets its one FIRST_MATCH summary membership (team decision).
         everMatched|=qualification!=MatchObservation.Qualification.NONE;
         lastStatus=input.status(); lastInputKey=key; lastVersionNo=input.versionNo();
         lastProfileId=input.profileId(); lastProfileVersion=input.profileVersion(); lastRuleVersion=input.ruleVersion();
