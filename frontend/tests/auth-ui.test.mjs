@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import ts from 'typescript'
 
 const require = createRequire(import.meta.url)
+require.extensions['.svg'] = (module, filename) => { module.exports = filename }
 require.extensions['.css'] = (module) => { module.exports = { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) } }
 for (const extension of ['.ts', '.tsx']) require.extensions[extension] = (module, filename) => {
   module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename)
@@ -50,10 +51,61 @@ test('login page exposes actual OAuth entry, privacy information and public navi
   const html = render({ path: '/login?returnTo=%2Fopportunities%3Fpage%3D2', auth: null })
   assert.match(html, /<h1 id="login-title">/)
   assert.match(html, /href="\/oauth2\/authorization\/kakao"/)
+  assert.match(html, /<img[^>]*src="[^"]*kakao_login_kr_large\.svg"[^>]*alt="카카오로 로그인"[^>]*width="336" height="46"/)
   assert.match(html, /카카오로 로그인/)
   assert.match(html, /닉네임·이메일/)
   assert.match(html, /로그인 없이 기회 탐색하기/)
   assert.doesNotMatch(html, /type="password"/)
+})
+
+test('legal documents are public during anonymous and failed authentication states and disclose draft limits', () => {
+  for (const path of ['/privacy', '/terms']) {
+    for (const state of [{ auth: null }, { authError: new ApiError('network', 'private internal') }]) {
+      const html = render({ path, ...state })
+      assert.match(html, /<article[^>]*aria-labelledby="legal-title"/)
+      const document = html.match(/<article[\s\S]*?<\/article>/)?.[0]
+      assert.ok(document)
+      assert.doesNotMatch(document, /href="\/(privacy|terms)"|aria-label="관련 문서"/)
+      assert.match(html, /<h1 id="legal-title">/)
+      assert.match(html, /공개 전 확인이 필요한 초안/)
+      assert.match(html, /책임자·문의처·시행일 미정/)
+      assert.match(html, /서비스 Y:ON · 운영팀 기웃기웃/)
+      assert.doesNotMatch(html, /Y(?!:ON)[의에는]|서비스명: Y \/|서비스 Y ·/)
+      assert.equal((html.match(/<h2 id="legal-section-/g) || []).length, 11)
+      assert.doesNotMatch(html, /private internal|404 ·/)
+      for (let index = 1; index <= 11; index++) {
+        assert.match(html, new RegExp(`href="#legal-section-${index}"`))
+      }
+    }
+  }
+  const privacy = render({ path: '/privacy', auth: null })
+  assert.match(privacy, /삭제는 비동기로/)
+  assert.match(privacy, /메시지 처리 기록/)
+  assert.match(privacy, /민감한 정보/)
+  assert.match(privacy, /국외 이전 여부는 코드만으로 확정할 수 없습니다/)
+  assert.match(privacy, /프런트엔드의 탈퇴 화면은 아직 제공하지 않습니다/)
+  const terms = render({ path: '/terms', auth: null })
+  assert.match(terms, /실제 신청 자격이나 최종 선정 결과를 보장하지 않습니다/)
+  assert.match(terms, /제공 기관의 공식 공고/)
+  assert.match(terms, /법적 책임을 포괄적으로 면제/)
+})
+
+test('legal links remain in common footer only, without adding agreement or changing OAuth entry', () => {
+  const login = render({ path: '/login', auth: null })
+  const card = login.match(/<section[^>]*aria-labelledby="login-title"[\s\S]*?<\/section>/)?.[0]
+  assert.ok(card)
+  assert.doesNotMatch(card, /href="\/(privacy|terms)"|로그인 관련 정책/)
+  assert.match(login, /href="\/oauth2\/authorization\/kakao"/)
+  assert.doesNotMatch(login, /type="checkbox"/)
+  for (const path of ['/', '/login', '/privacy', '/terms', '/opportunities', '/saved']) {
+    const footer = render({ path, auth: null }).match(/<footer[\s\S]*?<\/footer>/)?.[0]
+    assert.ok(footer)
+    assert.match(footer, /aria-label="서비스 정책"/)
+    assert.match(footer, /href="\/privacy"/)
+    assert.match(footer, /href="\/terms"/)
+    assert.match(footer, /Y:ON · 기웃기웃/)
+    assert.doesNotMatch(footer, /초안|공개 전 확인/)
+  }
 })
 
 test('OAuth success URL only displays server verification, while failure has retry and public links', () => {

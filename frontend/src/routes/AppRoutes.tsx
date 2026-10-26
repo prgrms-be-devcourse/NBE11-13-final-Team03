@@ -10,6 +10,7 @@ import LoginResultPage from '../pages/auth/LoginResultPage'
 import { MyPage, OnboardingPage, ProfileSettingsPage } from '../pages/profile/ProfilePages'
 import SavedOpportunitiesPage from '../pages/saved/SavedOpportunitiesPage'
 import { NotificationsPage, NotificationSettingsPage } from '../pages/notifications/NotificationPages'
+import { PrivacyPage, TermsPage } from '../pages/legal/LegalPages'
 
 function AppRoutes() {
   return (
@@ -17,6 +18,8 @@ function AppRoutes() {
       <Route element={<AppLayout />}>
         <Route index element={<HomePage />} />
         <Route path="login" element={<LoginPage />} />
+        <Route path="privacy" element={<PrivacyPage />} />
+        <Route path="terms" element={<TermsPage />} />
         <Route path="login-success.html" element={<LoginResultPage success />} />
         <Route path="login-failure.html" element={<LoginResultPage success={false} />} />
         <Route path="opportunities" element={<OpportunitiesPage />} />

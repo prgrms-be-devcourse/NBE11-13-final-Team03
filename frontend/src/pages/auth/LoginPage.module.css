@@ -22,28 +22,33 @@
   margin-block-start: var(--space-3);
 }
 
-.kakao,
 .link {
   display: flex;
   align-items: center;
   justify-content: center;
   min-block-size: 2.75rem;
-  padding: var(--space-3);
-  margin-block-start: var(--space-3);
+  padding: var(--space-2);
+  margin-block-start: var(--space-2);
   border-radius: var(--radius-sm);
   overflow-wrap: anywhere;
 }
 
 .kakao {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 100%;
+  max-inline-size: 336px;
+  min-block-size: 2.75rem;
   margin-block: var(--space-4);
-  background: var(--color-accent-yellow);
-  color: var(--color-text-primary);
-  font-weight: 700;
+  margin-inline: auto;
   text-decoration: none;
 }
 
-.kakao:hover {
-  text-decoration: underline;
+.kakao img {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
 }
 
 .help {

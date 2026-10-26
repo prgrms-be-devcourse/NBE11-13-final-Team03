@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import ts from 'typescript'
 import { profile, user, options, regionRows } from './profile-fixtures.mjs'
 const require = createRequire(import.meta.url)
+require.extensions['.svg'] = (module, filename) => { module.exports = filename }
 require.extensions['.css'] = (module) => { module.exports = { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) } }
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (module, filename) => {
   module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename)
