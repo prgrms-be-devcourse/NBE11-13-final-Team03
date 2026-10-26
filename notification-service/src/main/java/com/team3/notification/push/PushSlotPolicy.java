@@ -47,6 +47,8 @@ public final class PushSlotPolicy {
             case APPLICATION_OPENED -> OptionalInt.of(2);
             case DEADLINE_EXTENDED -> OptionalInt.of(3);
             case BECAME_ELIGIBLE -> OptionalInt.of(5);
+            // Provisional until the team confirms where first-match summaries rank.
+            case NEW_MATCH -> OptionalInt.of(6);
             default -> OptionalInt.empty();
         };
     }

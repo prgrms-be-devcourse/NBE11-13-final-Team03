@@ -12,6 +12,7 @@ import com.team3.backend.user.domain.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,9 +36,12 @@ public class EligibilityOutboxTransaction {
     private final EntityManager em;
     private final JdbcTemplate jdbc;
     private final Clock clock;
+    @Value("${yon.tracking.match.outbox.enabled:false}")
+    private boolean matchOwnsPositiveTransitions;
 
     public enum Status { CREATED, EXISTING, SOURCE_SUPPRESSED, POLICY_UNAVAILABLE, USER_UNAVAILABLE,
-        NOT_SAVED, PROFILE_MISSING, REVALIDATION_REJECTED, POLICY_NOT_RELEVANT, EXPIRED }
+        NOT_SAVED, SAVED_VERSION_NOT_BEFORE_EVENT, PROFILE_MISSING, REVALIDATION_REJECTED, POLICY_NOT_RELEVANT, EXPIRED,
+        MATCH_ROUTE_OWNS_TRANSITION }
     public record Result(Status status, Long outboxId, EligibilityNotificationRevalidation evidence) { }
 
     @Transactional
@@ -63,6 +67,10 @@ public class EligibilityOutboxTransaction {
         if (preferences.lockSavedForNotification(policy.getId(), List.of(source.userId())).isEmpty()) {
             return new Result(Status.NOT_SAVED, null, null);
         }
+        if (preferences.lockSavedBeforeVersionForNotification(policy.getId(), event.getOpportunityVersion().getVersionNo(),
+                List.of(source.userId())).isEmpty()) {
+            return new Result(Status.SAVED_VERSION_NOT_BEFORE_EVENT, null, null);
+        }
         var profileIds = jdbc.queryForList("SELECT id FROM eligibility_profiles WHERE user_id = ? FOR SHARE", Long.class, source.userId());
         if (profileIds.isEmpty()) return new Result(Status.PROFILE_MISSING, null, null);
         em.refresh(em.find(EligibilityProfile.class, profileIds.getFirst()));
@@ -74,6 +82,10 @@ public class EligibilityOutboxTransaction {
         // source.toVersionId must be owned by the event's policy, not merely by a self-consistent other pair.
         if (!Objects.equals(policy.getCurrentVersion().getId(), result.revalidatedVersionId())) {
             throw new IllegalArgumentException("Revalidated policy does not match the locked source policy");
+        }
+        if (matchOwnsPositiveTransitions && result.decision()==EligibilityTransitionDecision.BECAME_ELIGIBLE) {
+            // New positive requests belong to the pair/occurrence route; saved loss/review remain IN_APP here.
+            return new Result(Status.MATCH_ROUTE_OWNS_TRANSITION,null,result);
         }
         var applicationStatus = result.latestJudgement().applicationStatus();
         // Conservative provisional guard: an already-closed or unknown application period is not a live candidate.

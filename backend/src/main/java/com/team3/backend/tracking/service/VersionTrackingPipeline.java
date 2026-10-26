@@ -9,7 +9,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Bounded discovery/comparison/analysis only. Does not infer baselines, publish or fan out users. */
+/** Bounded comparison/analysis, including first-version baselines. Does not publish or fan out users. */
 @Slf4j
 @Service
 @RequiredArgsConstructor

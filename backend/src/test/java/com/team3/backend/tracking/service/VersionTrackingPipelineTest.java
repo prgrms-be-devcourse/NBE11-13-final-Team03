@@ -44,6 +44,15 @@ class VersionTrackingPipelineTest {
     }
 
     @Test
+    void automaticFirstVersionBaselineDoesNotInvokeEventAnalysis() {
+        when(versions.runOnce(0,2)).thenReturn(new OpportunityVersionWorker.Batch(1,false,
+                List.of(attempt(1,BASELINE_RECORDED))));
+        var result=pipeline.runOnce();
+        assertThat(result.analysisCalls()).isZero(); assertThat(result.failures()).isZero();
+        verifyNoInteractions(analyses);
+    }
+
+    @Test
     void discoveryFailureKeepsCursorAndReleasesRunGuard() {
         when(versions.runOnce(0, 2)).thenReturn(new OpportunityVersionWorker.Batch(2, true, List.of()));
         pipeline.runOnce();

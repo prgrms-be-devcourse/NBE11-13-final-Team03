@@ -19,6 +19,29 @@ import org.springframework.data.jpa.repository.Lock;
 public interface UserOpportunityPreferenceRepository
         extends JpaRepository<UserOpportunityPreference, Long> {
 
+    /** Version changes only: compare per-policy version numbers, never globally generated IDs. */
+    @Query("""
+            select p.user.id from UserOpportunityPreference p
+            where p.opportunity.id = :opportunityId and p.isSaved = true and p.user.id > :afterUserId
+              and exists (select v.id from OpportunityVersion v where v.id = p.savedVersionId
+                  and v.opportunity.id = :opportunityId and v.versionNo < :eventVersionNo)
+            order by p.user.id
+            """)
+    List<Long> findSavedUserIdsForVersionChangeAfter(@Param("opportunityId") Long opportunityId,
+            @Param("eventVersionNo") Integer eventVersionNo, @Param("afterUserId") Long afterUserId, Pageable pageable);
+
+    /** Repeat the save-version condition while locking the current save state (including re-save races). */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("""
+            select p from UserOpportunityPreference p join fetch p.user
+            where p.opportunity.id = :opportunityId and p.isSaved = true and p.user.id in :userIds
+              and exists (select v.id from OpportunityVersion v where v.id = p.savedVersionId
+                  and v.opportunity.id = :opportunityId and v.versionNo < :eventVersionNo)
+            order by p.user.id
+            """)
+    List<UserOpportunityPreference> lockSavedBeforeVersionForNotification(@Param("opportunityId") Long opportunityId,
+            @Param("eventVersionNo") Integer eventVersionNo, @Param("userIds") Collection<Long> userIds);
+
     /** Revalidate saved state and keep it stable until the Outbox batch commits; hidden is irrelevant. */
     @Lock(LockModeType.PESSIMISTIC_READ)
     @Query("""

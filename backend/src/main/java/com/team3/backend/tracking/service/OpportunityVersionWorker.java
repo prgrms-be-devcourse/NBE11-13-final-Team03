@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/** Explicit invocation only: no scheduler, automatic baseline or eligibility event producer. */
+/** Bounded sequential comparison, including the first-version baseline; analysis is a separate step. */
 @Slf4j
 @Service
 @RequiredArgsConstructor

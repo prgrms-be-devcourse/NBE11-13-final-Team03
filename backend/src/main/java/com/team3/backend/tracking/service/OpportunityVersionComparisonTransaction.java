@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.util.Optional;
 
-/** Baseline-gated historical comparison. Event analysis completion remains a separate responsibility. */
+/** The actual first version becomes an automatic baseline; later versions remain sequentially gated. */
 @Service
 @RequiredArgsConstructor
 public class OpportunityVersionComparisonTransaction {
@@ -44,9 +44,12 @@ public class OpportunityVersionComparisonTransaction {
         var existing = tracking.findByOpportunityVersionId(toVersionId);
         // Baselines and in-progress analyses must not be replaced or implicitly completed on replay.
         if (existing.isPresent()) return Optional.of(existing.orElseThrow().getId());
-        var from = versions.findFirstByOpportunityIdAndVersionNoLessThanOrderByVersionNoDesc(
-                policy.getId(), to.getVersionNo()).orElseThrow(
-                        () -> new IllegalStateException("First version requires an explicit baseline contract"));
+        var predecessor = versions.findFirstByOpportunityIdAndVersionNoLessThanOrderByVersionNoDesc(policy.getId(), to.getVersionNo());
+        if (predecessor.isEmpty()) {
+            if (to.getVersionNo() != 1) throw new IllegalStateException("Missing historical predecessor is not a first-version baseline");
+            return Optional.of(tracking.saveAndFlush(OpportunityVersionTracking.baseline(to, clock.instant())).getId());
+        }
+        var from = predecessor.orElseThrow();
         var previous = tracking.findByOpportunityVersionId(from.getId());
         if (previous.isEmpty() || previous.orElseThrow().getProcessedAt() == null) {
             throw new IllegalStateException("Previous version must have an established baseline or completed analysis");
@@ -85,7 +88,10 @@ public class OpportunityVersionComparisonTransaction {
             return new Step(Outcome.WAITING_FOR_EVENT_ANALYSIS, target.getId(), record.orElseThrow().getId());
         }
         var from = versions.findFirstByOpportunityIdAndVersionNoLessThanOrderByVersionNoDesc(opportunityId, target.getVersionNo());
-        if (from.isEmpty()) return new Step(Outcome.WAITING_FOR_BASELINE, target.getId(), null);
+        if (from.isEmpty()) {
+            if (target.getVersionNo() != 1) return new Step(Outcome.WAITING_FOR_BASELINE, target.getId(), null);
+            return new Step(Outcome.BASELINE_RECORDED, target.getId(), compare(target.getId()).orElseThrow());
+        }
         var previous = tracking.findByOpportunityVersionId(from.orElseThrow().getId());
         if (previous.isEmpty() || previous.orElseThrow().getProcessedAt() == null) {
             // Defensive invariant check; normal earliest-unfinished discovery selects this predecessor first.
@@ -97,7 +103,7 @@ public class OpportunityVersionComparisonTransaction {
     }
 
     public enum Outcome {
-        COMPARED, WAITING_FOR_BASELINE, WAITING_FOR_PREDECESSOR,
+        COMPARED, BASELINE_RECORDED, WAITING_FOR_BASELINE, WAITING_FOR_PREDECESSOR,
         WAITING_FOR_EVENT_ANALYSIS, UP_TO_DATE, POLICY_UNAVAILABLE
     }
 

@@ -24,7 +24,7 @@ CREATE TABLE notification_push_bundles (
 CREATE TABLE notification_push_pending (
     notification_id bigint PRIMARY KEY REFERENCES notifications(id) ON DELETE CASCADE,
     user_id bigint NOT NULL,
-    priority integer CHECK (priority IS NULL OR priority BETWEEN 0 AND 5),
+    priority integer CHECK (priority IS NULL OR priority BETWEEN 0 AND 6),
     status varchar(20) NOT NULL CHECK (status IN ('PENDING','BUNDLED','SKIPPED')),
     bundle_id bigint REFERENCES notification_push_bundles(id) ON DELETE CASCADE,
     reason varchar(80),

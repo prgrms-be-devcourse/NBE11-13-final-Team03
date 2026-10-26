@@ -57,6 +57,7 @@ class PushSlotPolicyTest {
         assertThat(PushSlotPolicy.priority(NotificationType.DEADLINE_EXTENDED, null).orElseThrow()).isEqualTo(3);
         assertThat(PushSlotPolicy.priority(NotificationType.DEADLINE_SOON, "D-7").orElseThrow()).isEqualTo(4);
         assertThat(PushSlotPolicy.priority(NotificationType.BECAME_ELIGIBLE, null).orElseThrow()).isEqualTo(5);
+        assertThat(PushSlotPolicy.priority(NotificationType.NEW_MATCH, null).orElseThrow()).isEqualTo(6);
         for (var type : List.of(NotificationType.APPLICATION_CLOSED, NotificationType.ELIGIBILITY_DOWNGRADED, NotificationType.ELIGIBILITY_REVIEW_REQUIRED)) {
             assertThat(PushSlotPolicy.priority(type, null).isEmpty()).isTrue();
         }

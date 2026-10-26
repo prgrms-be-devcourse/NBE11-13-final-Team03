@@ -5,7 +5,9 @@ import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
 import tools.jackson.databind.json.JsonMapper;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import static org.assertj.core.api.Assertions.*;
@@ -58,6 +60,54 @@ class NotificationMessageContractTest {
             assertThat(inAppOnly.type().name()).isEqualTo(type);
             assertThat(inAppOnly.channels()).containsExactly(NotificationChannel.IN_APP);
         }
+    }
+
+    @Test
+    void readsNewMatchSummaryContractWithoutApplicationClasses() throws Exception {
+        var message = decoder.decode(newMatchJson(Map.of()));
+        assertThatCode(() -> validator.validate(message)).doesNotThrowAnyException();
+        assertThat(message.type()).isEqualTo(NotificationType.NEW_MATCH);
+        assertThat(message.channels()).containsExactly(NotificationChannel.IN_APP, NotificationChannel.PUSH);
+        assertThat(message.link()).isEqualTo("/test-recommendations");
+        assertThat(message.payload()).containsEntry("matchCount", 3).containsEntry("eligibleCount", 2)
+                .containsEntry("possiblyCount", 1).containsEntry("possiblyLabel", "확인 필요 1개");
+        assertThat(message.sourceEventId().toString()).isEqualTo(message.payload().get("summaryRunId"));
+    }
+
+    @Test
+    void newMatchRejectsMalformedRunAndInconsistentCountsBeforePersistence() throws Exception {
+        var valid = decoder.decode(newMatchJson(Map.of()));
+        for (Map<String, Object> changes : List.<Map<String, Object>>of(
+                Map.of("reason", "TRANSITION"), Map.of("summary", false),
+                Map.of("summaryRunId", UUID.randomUUID().toString()), Map.of("summaryRunId", "invalid"),
+                Map.of("evaluatedOn", "invalid"), Map.of("matchCount", 0),
+                Map.of("matchCount", 4), Map.of("eligibleCount", -1),
+                Map.of("possiblyCount", "1"), Map.of("maxUnresolved", 1.5),
+                Map.of("possiblyLabel", "확인 필요 2개"))) {
+            var payload = new LinkedHashMap<>(valid.payload());
+            payload.putAll(changes);
+            var invalid = decoder.decode(newMatchJson(Map.of("payload", payload)));
+            assertThatThrownBy(() -> validator.validate(invalid))
+                    .as("invalid NEW_MATCH payload: %s", changes).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void newMatchFingerprintChangesWhenMembershipCountChanges() throws Exception {
+        var original = decoder.decode(newMatchJson(Map.of()));
+        var payload = new LinkedHashMap<>(original.payload());
+        payload.put("matchCount", 4); payload.put("eligibleCount", 3);
+        var changed = decoder.decode(newMatchJson(Map.of("payload", payload)));
+        validator.validate(changed);
+        assertThat(fingerprints.fingerprint(changed)).isNotEqualTo(fingerprints.fingerprint(original));
+    }
+
+    @SuppressWarnings("unchecked")
+    private String newMatchJson(Map<String, ?> overrides) throws Exception {
+        var resource = new ClassPathResource("contracts/notification-new-match-v1.json");
+        Map<String, Object> fields = mapper.readValue(resource.getContentAsString(StandardCharsets.UTF_8), Map.class);
+        fields.putAll(overrides);
+        return mapper.writeValueAsString(fields);
     }
 
     @Test
