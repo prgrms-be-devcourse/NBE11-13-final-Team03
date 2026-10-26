@@ -58,8 +58,12 @@ import java.util.List;
  *
  * 실행 (홈서버, 일회용 DB): YON_BENCH_DB_URL=jdbc:postgresql://localhost:5432/yon_bench sh ./gradlew test --tests '*RawIngestBenchmarkTest'
  * 선택 환경변수: YON_BENCH_DB_USERNAME(postgres), YON_BENCH_DB_PASSWORD(1234), YON_BENCH_ENV_LABEL,
- *   YON_INGEST_BENCH_SIZES(1000,5000,10000), YON_INGEST_BENCH_TX_SIZES(1,100,500,1000: 트랜잭션 1개로 묶는 원본 수, 크기마다 전 시나리오 반복),
- *   YON_INGEST_BENCH_YOUTH_PERCENT(5: 원본 중 청년정책 비율), YON_INGEST_BENCH_BATCH_SIZE(100)
+ *   YON_INGEST_BENCH_SIZES(1000,5000,10000: all이면 실데이터 원본 전체), YON_INGEST_BENCH_TX_SIZES(1,100,500,1000: 트랜잭션 1개로 묶는 원본 수, 크기마다 전 시나리오 반복),
+ *   YON_INGEST_BENCH_YOUTH_PERCENT(5: 원본 중 청년정책 비율, 합성 데이터만), YON_INGEST_BENCH_BATCH_SIZE(100),
+ *   YON_INGEST_BENCH_SOURCE_SCHEMA(비우면 합성 데이터. 스키마 이름을 주면 그 스키마의 raw·regions 테이블(실데이터)에서 원본·지역 사전을 복사),
+ *   YON_INGEST_BENCH_FIRST_LOAD(reconcile: 대조로 첫 적재 / queue: 원본마다 PENDING 정제 요청을 넣고 요청 처리로 첫 적재 = 운영 첫 수집과 같은 경로),
+ *   YON_INGEST_BENCH_REPEAT(1: 같은 조건 반복 횟수. 2 이상이면 중앙값 표 추가),
+ *   YON_INGEST_BENCH_ASYNC_COMMIT(false: true면 정규화 트랜잭션만 synchronous_commit=off)
  */
 @DataJpaTest(showSql = false)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -72,7 +76,8 @@ import java.util.List;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.jpa.show-sql=false",
         "logging.level.com.team3.dataservice.opportunity.ingest=WARN",
-        "yon.normalization.ingest.batch-size=${YON_INGEST_BENCH_BATCH_SIZE:100}"
+        "yon.normalization.ingest.batch-size=${YON_INGEST_BENCH_BATCH_SIZE:100}",
+        "yon.normalization.ingest.async-commit=${YON_INGEST_BENCH_ASYNC_COMMIT:false}"
 })
 @Import({RawIngestBenchmarkTest.TimedDataSourceConfig.class,
         RawIngestProcessor.class, RawRecordReader.class, RawRecordNormalizer.class,
@@ -120,8 +125,9 @@ class RawIngestBenchmarkTest {
     private JdbcTemplate jdbc;
     private TransactionTemplate tx;
 
-    private record Measured(int txSize, String scenario, int size, int processed, long millis, long jdbcMillis,
-                            long[] counts, long[] kindMillis, long peakHeapMb, long gcCount, long gcMillis) {
+    private record Measured(int txSize, String scenario, int size, int run, int processed, long millis, long jdbcMillis,
+                            long[] counts, long[] kindMillis, long peakHeapMb, long gcCount, long gcMillis,
+                            java.util.Map<String, long[]> byTable) {
     }
 
     @Test
@@ -129,8 +135,11 @@ class RawIngestBenchmarkTest {
         jdbc = new JdbcTemplate(dataSource);
         tx = new TransactionTemplate(transactionManager);
         List<Integer> sizes = Arrays.stream(env("YON_INGEST_BENCH_SIZES", "1000,5000,10000").split(","))
-                .map(String::trim).map(Integer::parseInt).toList();
+                .map(String::trim).map(v -> v.equals("all") ? sourceCount() : Integer.parseInt(v)).toList();
         int youthPercent = Integer.parseInt(env("YON_INGEST_BENCH_YOUTH_PERCENT", "5"));
+        int repeat = Math.max(1, Integer.parseInt(env("YON_INGEST_BENCH_REPEAT", "1")));
+        boolean queueFirstLoad = env("YON_INGEST_BENCH_FIRST_LOAD", "reconcile").equals("queue");
+        String firstLoad = queueFirstLoad ? "1. 첫 적재 (요청 처리)" : "1. 첫 적재 (대조)";
 
         List<Integer> txSizes = Arrays.stream(env("YON_INGEST_BENCH_TX_SIZES", "1,100,500,1000").split(","))
                 .map(String::trim).map(Integer::parseInt).toList();
@@ -140,22 +149,60 @@ class RawIngestBenchmarkTest {
         for (int txSize : txSizes) {
             processor.changeTransactionSize(txSize);
             for (int size : sizes) {
-                long[] ids = prepare(size, youthPercent);
-                results.add(measure(txSize, "1. 첫 적재 (대조)", size, processor::reconcile));
-                results.add(measure(txSize, "2. 변경 없는 대조", size, processor::reconcile));
-                addChanges(ids, Math.max(1, size / 100));
-                results.add(measure(txSize, "3. 1% 변경 (요청 처리)", size, processor::processQueue));
+                for (int run = 1; run <= repeat; run++) {
+                    long[] ids = prepare(size, youthPercent);
+                    if (queueFirstLoad) {
+                        addFirstLoadRequests();
+                    }
+                    results.add(measure(txSize, firstLoad, size, run,
+                            queueFirstLoad ? processor::processQueue : processor::reconcile));
+                    results.add(measure(txSize, "2. 변경 없는 대조", size, run, processor::reconcile));
+                    addChanges(ids, Math.max(1, size / 100));
+                    results.add(measure(txSize, "3. 1% 변경 (요청 처리)", size, run, processor::processQueue));
+                }
             }
         }
-        writeReport(results, youthPercent, txSizes);
+        writeReport(results, youthPercent, txSizes, firstLoad, repeat);
     }
 
     private void warmUp(int youthPercent) {
-        prepare(200, youthPercent);
+        prepare(Math.min(200, sourceSchema() == null ? 200 : sourceCount()), youthPercent);
         processor.reconcile();
     }
 
-    private Measured measure(int txSize, String scenario, int size, java.util.function.IntSupplier action) {
+    // ── 실데이터 원본 (YON_INGEST_BENCH_SOURCE_SCHEMA) ──
+
+    /** 실데이터 스키마 이름. 비우면 null (합성 데이터) */
+    private static String sourceSchema() {
+        String schema = System.getenv("YON_INGEST_BENCH_SOURCE_SCHEMA");
+        if (schema == null || schema.isBlank()) {
+            return null;
+        }
+        if (!schema.matches("[a-z_][a-z0-9_]*")) {
+            throw new IllegalArgumentException("YON_INGEST_BENCH_SOURCE_SCHEMA 형식이 아닙니다: " + schema);
+        }
+        return schema;
+    }
+
+    private int sourceCount() {
+        String schema = sourceSchema();
+        if (schema == null) {
+            throw new IllegalStateException("all은 YON_INGEST_BENCH_SOURCE_SCHEMA를 지정해야 쓸 수 있습니다");
+        }
+        Integer count = new JdbcTemplate(dataSource).queryForObject("SELECT count(*) FROM " + schema + ".raw", Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    /** 모든 원본에 PENDING 정제 요청(CREATED)을 넣는다. 운영 첫 수집과 같은 경로(NOTIFY → 요청 처리)로 첫 적재를 잰다 */
+    private void addFirstLoadRequests() {
+        jdbc.update("""
+                INSERT INTO raw_normalization_request (raw_record_id, previous_raw_record_id, event_type, status, created_at)
+                SELECT id, NULL, 'CREATED', 'PENDING', now() FROM raw_external_record ORDER BY id
+                """);
+        jdbc.execute("ANALYZE raw_normalization_request");
+    }
+
+    private Measured measure(int txSize, String scenario, int size, int run, java.util.function.IntSupplier action) {
         System.gc();
         ManagementFactory.getMemoryPoolMXBeans().forEach(MemoryPoolMXBean::resetPeakUsage);
         long gcCount0 = gcCount();
@@ -174,10 +221,10 @@ class RawIngestBenchmarkTest {
         long peakHeap = ManagementFactory.getMemoryPoolMXBeans().stream()
                 .filter(p -> p.getType() == MemoryType.HEAP)
                 .mapToLong(p -> p.getPeakUsage().getUsed()).sum() / 1024 / 1024;
-        Measured m = new Measured(txSize, scenario, size, processed, millis, JdbcTimer.totalMillis(), counts, kindMillis,
-                peakHeap, gcCount() - gcCount0, gcMillis() - gcMillis0);
-        System.out.printf("[ingest-benchmark] tx=%d %s N=%d processed=%d %dms (jdbc %dms)%n",
-                txSize, scenario, size, processed, millis, m.jdbcMillis());
+        Measured m = new Measured(txSize, scenario, size, run, processed, millis, JdbcTimer.totalMillis(), counts, kindMillis,
+                peakHeap, gcCount() - gcCount0, gcMillis() - gcMillis0, JdbcTimer.byTable());
+        System.out.printf("[ingest-benchmark] tx=%d %s N=%d run=%d processed=%d %dms (jdbc %dms)%n",
+                txSize, scenario, size, run, processed, millis, m.jdbcMillis());
         return m;
     }
 
@@ -188,10 +235,17 @@ class RawIngestBenchmarkTest {
         jdbc.execute("""
                 TRUNCATE raw_normalization_request, raw_external_record, sync_history, external_source, raw_ingest_states,
                          application_windows, opportunity_conditions, opportunity_regions, training_course_details,
-                         opportunity_sources, opportunities, opportunity_versions, regions CASCADE
+                         opportunity_sources, opportunities, opportunity_versions, condition_sets, regions CASCADE
                 """);
-        for (String[] r : REGIONS) {
-            jdbc.update("INSERT INTO regions (region_code, region_name, parent_code) VALUES (?, ?, ?)", r[0], r[1], r[2]);
+        String schema = sourceSchema();
+        if (schema == null) {
+            for (String[] r : REGIONS) {
+                jdbc.update("INSERT INTO regions (region_code, region_name, parent_code) VALUES (?, ?, ?)", r[0], r[1], r[2]);
+            }
+        } else {
+            // 부모가 먼저 들어가도록 상위 코드 없는 것부터
+            jdbc.update("INSERT INTO regions (region_code, region_name, parent_code) SELECT region_code, region_name, parent_code FROM "
+                    + schema + ".regions ORDER BY parent_code NULLS FIRST, region_code");
         }
         regionDirectory.refresh();
         long[] syncIds = new long[2];
@@ -211,6 +265,20 @@ class RawIngestBenchmarkTest {
             syncIds[0] = work24Sync.getId();
             syncIds[1] = youthSync.getId();
         });
+        if (schema != null) {
+            jdbc.update("""
+                    INSERT INTO raw_external_record (source_id, sync_id, external_id, payload_hash, payload, first_seen_at, last_seen_at)
+                    SELECT CASE src.source_code WHEN 'YOUTH_POLICY' THEN ? ELSE ? END,
+                           CASE src.source_code WHEN 'YOUTH_POLICY' THEN ? ELSE ? END,
+                           src.external_id, md5(src.payload::text), src.payload, ?, ?
+                    FROM (SELECT * FROM %s.raw ORDER BY ord LIMIT ?) src
+                    ORDER BY src.ord
+                    """.formatted(schema), sourceIds[1], sourceIds[0], syncIds[1], syncIds[0],
+                    Timestamp.valueOf(LocalDateTime.of(2026, 10, 20, 9, 0)), Timestamp.valueOf(LocalDateTime.of(2026, 10, 20, 9, 0)), size);
+            jdbc.execute("ANALYZE");
+            return jdbc.queryForList("SELECT id FROM raw_external_record ORDER BY id", Long.class)
+                    .stream().mapToLong(Long::longValue).toArray();
+        }
         int youthCount = size * youthPercent / 100;
         List<Object[]> rows = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
@@ -274,7 +342,7 @@ class RawIngestBenchmarkTest {
 
     // ── 보고서 ──
 
-    private void writeReport(List<Measured> results, int youthPercent, List<Integer> txSizes) throws Exception {
+    private void writeReport(List<Measured> results, int youthPercent, List<Integer> txSizes, String firstLoad, int repeat) throws Exception {
         StringBuilder sb = new StringBuilder("# 수집 원본 → 정규화 연동 벤치마크\n\n");
         sb.append("측정 시각: ").append(LocalDateTime.now()).append("\n\n## 측정 환경\n\n| 항목 | 값 |\n|---|---|\n");
         row(sb, "환경 이름 (YON_BENCH_ENV_LABEL)", System.getenv().getOrDefault("YON_BENCH_ENV_LABEL", "(지정 안 함)"));
@@ -284,19 +352,52 @@ class RawIngestBenchmarkTest {
         row(sb, "JVM 최대 힙", Runtime.getRuntime().maxMemory() / 1024 / 1024 + " MB");
         row(sb, "PostgreSQL", show("server_version") + " (shared_buffers=" + show("shared_buffers")
                 + ", work_mem=" + show("work_mem") + ", synchronous_commit=" + show("synchronous_commit") + ")");
+        row(sb, "PostgreSQL WAL", "wal_buffers=" + show("wal_buffers") + ", max_wal_size=" + show("max_wal_size")
+                + ", checkpoint_timeout=" + show("checkpoint_timeout") + ", wal_compression=" + show("wal_compression")
+                + ", full_page_writes=" + show("full_page_writes"));
+        row(sb, "JDBC URL 옵션", jdbcOptions());
+        row(sb, "원본 데이터", sourceSchema() == null ? "합성 (청년정책 " + youthPercent + "%)" : "실데이터 (" + sourceSchema() + ".raw, 청년정책 " + sourceYouthPercent() + ")");
+        row(sb, "첫 적재 경로", firstLoad);
+        row(sb, "정규화 트랜잭션 비동기 커밋 (async-commit)", env("YON_INGEST_BENCH_ASYNC_COMMIT", "false"));
+        row(sb, "반복", repeat + "회");
         row(sb, "처리 묶음 크기 (yon.normalization.ingest.batch-size)", String.valueOf(batchSize));
         row(sb, "트랜잭션 크기 (비교 대상)", txSizes + " (원본 N건 = REQUIRES_NEW 1개, 원본마다 flush·clear)");
         row(sb, "대조 조회", "id 커서 + NOT EXISTS(더 새 원본) 순회");
-        row(sb, "청년정책 비율", youthPercent + "% (나머지 고용24)");
 
-        sb.append("\n## 처리 시간\n\n| 트랜잭션 크기 | 시나리오 | 원본 N | 처리 건수 | 전체(ms) | 건당(ms) | 초당 건수 | JDBC(ms) | JDBC 비중 | DB 밖(ms, 추정) |\n")
-                .append("|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+        sb.append("\n## 처리 시간\n\n| 트랜잭션 크기 | 시나리오 | 원본 N | 회차 | 처리 건수 | 전체(ms) | 건당(ms) | 초당 건수 | JDBC(ms) | JDBC 비중 | DB 밖(ms, 추정) |\n")
+                .append("|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
         for (Measured m : results) {
             double perItem = m.processed() == 0 ? 0 : (double) m.millis() / m.processed();
             double perSecond = m.millis() == 0 ? 0 : m.processed() * 1000.0 / m.millis();
             double share = m.millis() == 0 ? 0 : m.jdbcMillis() * 100.0 / m.millis();
-            sb.append(String.format("| %d | %s | %d | %d | %d | %.2f | %.0f | %d | %.0f%% | %d |%n", m.txSize(), m.scenario(), m.size(),
-                    m.processed(), m.millis(), perItem, perSecond, m.jdbcMillis(), share, m.millis() - m.jdbcMillis()));
+            sb.append(String.format("| %d | %s | %d | %d | %d | %d | %.2f | %.0f | %d | %.0f%% | %d |%n", m.txSize(), m.scenario(), m.size(),
+                    m.run(), m.processed(), m.millis(), perItem, perSecond, m.jdbcMillis(), share, m.millis() - m.jdbcMillis()));
+        }
+
+        if (repeat > 1) {
+            sb.append("\n## 중앙값 (반복 ").append(repeat).append("회)\n\n| 트랜잭션 크기 | 시나리오 | 원본 N | 전체(ms) 중앙값 | 최소 | 최대 | 건당(ms) | 초당 건수 |\n")
+                    .append("|---:|---|---:|---:|---:|---:|---:|---:|\n");
+            results.stream().collect(java.util.stream.Collectors.groupingBy(
+                            m -> m.txSize() + "|" + m.scenario() + "|" + m.size(), java.util.LinkedHashMap::new, java.util.stream.Collectors.toList()))
+                    .forEach((key, group) -> {
+                        long[] ms = group.stream().mapToLong(Measured::millis).sorted().toArray();
+                        long median = ms[ms.length / 2];
+                        Measured first = group.getFirst();
+                        double perItem = first.processed() == 0 ? 0 : (double) median / first.processed();
+                        double perSecond = median == 0 ? 0 : first.processed() * 1000.0 / median;
+                        sb.append(String.format("| %d | %s | %d | %d | %d | %d | %.2f | %.0f |%n", first.txSize(), first.scenario(),
+                                first.size(), median, ms[0], ms[ms.length - 1], perItem, perSecond));
+                    });
+        }
+
+        sb.append("\n## 첫 적재 테이블별 SQL (첫 회차, 시간 큰 순 15개, 괄호: 누적 ms, 처리 1건당 횟수)\n");
+        for (Measured m : results) {
+            if (!m.scenario().startsWith("1.") || m.run() != 1) {
+                continue;
+            }
+            sb.append(String.format("%n### 트랜잭션 %d, N=%d%n%n| SQL | 횟수 | 누적(ms) | 1건당 |%n|---|---:|---:|---:|%n", m.txSize(), m.size()));
+            m.byTable().entrySet().stream().limit(15).forEach(e -> sb.append(String.format("| %s | %d | %d | %.2f |%n",
+                    e.getKey(), e.getValue()[0], e.getValue()[1], m.processed() == 0 ? 0 : (double) e.getValue()[0] / m.processed())));
         }
 
         sb.append("\n## SQL 종류별 횟수 (괄호: 누적 ms)\n\n| 트랜잭션 크기 | 시나리오 | 원본 N | SELECT | INSERT | UPDATE | DELETE | 기타 | COMMIT | 처리 1건당 SQL |\n")
@@ -333,6 +434,26 @@ class RawIngestBenchmarkTest {
         Files.writeString(file, sb.toString());
         System.out.println(sb);
         System.out.println("[ingest-benchmark] report: " + file.toAbsolutePath());
+    }
+
+    private String sourceYouthPercent() {
+        try {
+            Double percent = jdbc.queryForObject("SELECT round(100.0 * count(*) FILTER (WHERE source_code = 'YOUTH_POLICY') / count(*), 1) FROM "
+                    + sourceSchema() + ".raw", Double.class);
+            return percent + "%";
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    private String jdbcOptions() {
+        try (var c = dataSource.getConnection()) {
+            String url = c.getMetaData().getURL();
+            int q = url.indexOf('?');
+            return q < 0 ? "(없음)" : url.substring(q + 1);
+        } catch (Exception e) {
+            return "?";
+        }
     }
 
     private static void row(StringBuilder sb, String k, String v) {
