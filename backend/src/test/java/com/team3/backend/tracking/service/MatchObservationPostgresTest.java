@@ -115,6 +115,9 @@ class MatchObservationPostgresTest {
                 WHERE o.id=? AND r.user_id=? AND r.condition_set_id=v.condition_set_id
                 """,status.name(),status==POSSIBLY_ELIGIBLE?1:0,policy,userId);
     }
+    private void unavailable(long policy) {
+        jdbc.update("UPDATE opportunity_versions v SET personalization_status='SPLIT_REQUIRED' FROM opportunities o WHERE o.id=? AND v.id=o.current_version_id",policy);
+    }
     private void interest() {
         tx(()->{em.persist(UserInterest.create(em.find(User.class,userId),InterestType.CATEGORY,"employment")); return null;});
     }
@@ -299,6 +302,28 @@ class MatchObservationPostgresTest {
         assertThat(matchOutbox.summarize(userId,run,NOW.plusSeconds(3600)).status()).isEqualTo(MatchOutboxTransaction.Status.EMPTY);
         assertThat(candidates.findAll().getFirst().getStatus()).isEqualTo("SKIPPED"); assertThat(outboxes.count()).isZero();
     }
+    @Test void summaryClosesOnlyUnavailablePolicyAndStillSendsTheRest() {
+        long gone=policy(ELIGIBLE), live=policy(ELIGIBLE);
+        long goneCandidate=observations.observe(userId,gone).candidateId(); long liveCandidate=observations.observe(userId,live).candidateId();
+        unavailable(gone);
+        var result=matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plusSeconds(3600));
+        assertThat(result.status()).isEqualTo(MatchOutboxTransaction.Status.ENQUEUED); assertThat(result.members()).isEqualTo(1);
+        var closed=candidates.findById(goneCandidate).orElseThrow();
+        assertThat(closed.getStatus()).isEqualTo("SKIPPED"); assertThat(closed.getCloseReason()).isEqualTo("POLICY_UNAVAILABLE"); assertThat(closed.getOutboxId()).isNull();
+        assertThat(candidates.findById(liveCandidate).orElseThrow().getOutboxId()).isEqualTo(result.outboxId());
+        assertThat(((Map<?,?>)outboxes.findById(result.outboxId()).orElseThrow().getPayload().get("payload")).get("matchCount")).isEqualTo(1);
+    }
+    @Test void summaryWithOnlyUnavailablePoliciesClosesThemWithoutOutbox() {
+        long gone=policy(ELIGIBLE); long c=observations.observe(userId,gone).candidateId(); unavailable(gone);
+        assertThat(matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plusSeconds(3600)).status()).isEqualTo(MatchOutboxTransaction.Status.EMPTY);
+        assertThat(candidates.findById(c).orElseThrow().getCloseReason()).isEqualTo("POLICY_UNAVAILABLE"); assertThat(outboxes.count()).isZero();
+    }
+    @Test void missingConditionSetDefersSummaryInsteadOfClosingCandidates() {
+        long a=policy(ELIGIBLE), b=policy(ELIGIBLE); observations.observe(userId,a); observations.observe(userId,b);
+        jdbc.update("UPDATE opportunity_versions v SET condition_set_id=NULL FROM opportunities o WHERE o.id=? AND v.id=o.current_version_id",b);
+        assertThat(matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plusSeconds(3600)).status()).isEqualTo(MatchOutboxTransaction.Status.DEFERRED);
+        assertThat(candidates.findAll()).allMatch(c->c.getStatus().equals("PENDING")); assertThat(outboxes.count()).isZero();
+    }
     @Test void invalidSummaryExpiryLeavesAllMembersPending() {
         observations.observe(userId,policy(ELIGIBLE));
         assertThatThrownBy(()->matchOutbox.summarize(userId,UUID.randomUUID(),NOW)).isInstanceOf(IllegalArgumentException.class);
@@ -343,6 +368,14 @@ class MatchObservationPostgresTest {
         assertThat(matchOutbox.transition(userId,old).status()).isEqualTo(MatchOutboxTransaction.Status.SKIPPED);
         assertThat(matchOutbox.transition(userId,current).status()).isEqualTo(MatchOutboxTransaction.Status.ENQUEUED);
         assertThat(outboxes.count()).isEqualTo(1);
+    }
+    @Test void transitionForUnavailablePolicyIsClosedInsteadOfRetriedForever() {
+        long p=policy(NOT_ELIGIBLE); observations.observe(userId,p); status(p,ELIGIBLE);
+        long candidate=observations.observe(userId,p).candidateId(); unavailable(p);
+        assertThat(matchOutbox.transition(userId,candidate).status()).isEqualTo(MatchOutboxTransaction.Status.SKIPPED);
+        assertThat(candidates.findById(candidate).orElseThrow().getCloseReason()).isEqualTo("POLICY_UNAVAILABLE");
+        assertThat(matchOutbox.transition(userId,candidate).status()).isEqualTo(MatchOutboxTransaction.Status.SKIPPED);
+        assertThat(outboxes.count()).isZero();
     }
     @Test void expiredTransitionDoesNotGetNewExpiryOnRetry() {
         long p=policy(NOT_ELIGIBLE); observations.observe(userId,p); status(p,ELIGIBLE);

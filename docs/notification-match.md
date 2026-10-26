@@ -39,7 +39,8 @@ null 제한은 정책 버전 변경에 대한 것이다. 같은 정책 버전에
    불가→가능의 실제 전환은 FIRST_MATCH보다 우선하며, 가능 상태 유지·같은 입력 재처리는 새 발생이 아니다.
 4. `MatchAutomaticWorker`가 PENDING 전환 후보와 요약 대상 사용자를 제한된 페이지로 처리한다.
    Outbox 직전 최신 입력과 찜 상태·버전·신청 상태·규칙을 다시 확인한다. 오래된 전환은 제외하고
-   신선한 판정/관측이 필요한 후보는 DEFERRED로 남긴다.
+   신선한 판정/관측이 필요한 후보는 DEFERRED로 남긴다. 정책이 더 이상 관측 대상이 아니면(청년정책 아님·
+   PERSONALIZABLE 아님·정책 삭제) 그 후보만 POLICY_UNAVAILABLE로 닫는다. 조건 묶음이 아직 없는 버전은 결과 대기로 본다.
 5. Outbox와 후보 ENQUEUED 전환을 같은 트랜잭션에서 저장한다. 기존 Publisher와 Notification 수신·슬롯 경로가 전달한다.
 
 최초 적합은 사용자·정책별 기록이며 요약은 사용자별 회차다. 같은 사용자가 서로 다른 날 새 정책을 처음 발견하면
@@ -67,6 +68,8 @@ Notification이 직접 읽지 않으며 notification 스키마와 FK를 만들�
 | notification_match_candidates | FIRST_MATCH/TRANSITION 발생, UUID event_id, 원본 근거 JSON, 후보 상태, outbox_id와 종료 사유 | UNIQUE(pair_id, reason, occurrence_no), UNIQUE(event_id), INDEX(status,id). 쌍 삭제 시 CASCADE |
 
 후보 상태는 PENDING → ENQUEUED 또는 SKIPPED다. DEFERRED는 호출 결과이며 후보를 종료하지 않는다.
+SKIPPED의 close_reason은 NO_LONGER_QUALIFIED_OR_RULE_CHANGED, SUPERSEDED_OR_NO_LONGER_ELIGIBLE, NOT_SAVED_BEFORE_SOURCE_VERSION,
+EXPIRED, POLICY_UNAVAILABLE이다. 영구적으로 회복되지 않는 조건만 닫고, 판정 결과 stale·조건 묶음 미생성은 DEFERRED로 기다린다.
 ENQUEUED는 Outbox 생성 완료를 뜻하고 실제 인앱 저장/FCM 성공을 뜻하지 않는다.
 요약에 포함된 모든 후보가 같은 outbox_id를 참조하며 전체 정책 목록을 Notification DB에 복제하지 않는다.
 기존 Outbox와 수신 측 `(userId, sourceEventId)` 멱등성도 유지한다.
@@ -99,6 +102,8 @@ fixedDelay에 실행 시간이 더해지고, 전환 처리·잠금 대기·DEFER
 기본값에서 620개라면 첫날 최대 500개, 나머지 120개는 다음 날 재검증 후 요약한다. 초과분을 버리거나 SKIPPED로 닫지 않는다.
 같은 날 재호출은 기존 회차 Outbox를 반환하므로 두 번째 요약을 만들지 않는다. 다음 날에는 새 회차 ID와 만료를 사용한다.
 선택된 페이지에 신선한 판정/관측이 필요한 후보가 있으면 그 페이지는 DEFERRED로 보류하며 부분 소비하지 않는다.
+단, 정책 자체가 관측 대상에서 벗어난 후보(POLICY_UNAVAILABLE)는 같은 호출에서 닫고 나머지 후보로 진행한다.
+그런 후보가 페이지를 영구히 막지 않도록 하기 위한 것이며, 전환 후보도 같은 조건에서 SKIPPED로 닫는다.
 현재 자격을 잃었거나 규칙이 바뀐 후보는 기존 제외 규칙을 적용하므로 실제 요약 건수는 조회한 후보 수보다 작을 수 있다.
 활성화 전 PENDING 사용자 수·후보 수·실제 완료율·poll 시간·다음 날 이월량을 측정해 예산/간격을 조정한다.
 
@@ -173,6 +178,7 @@ fixedDelay에 실행 시간이 더해지고, 전환 처리·잠금 대기·DEFER
 | backend: YON_TEST_DB_URL을 테스트 전용 yon_test로 지정해 `test bootJar --rerun-tasks` | 960개 중 958개 통과, 벤치마크 2개 건너뜀, 실패·오류 0. bootJar 성공 |
 | notification-service: `test --rerun-tasks` | 189개 통과, 건너뜀·실패·오류 0 |
 | 요약 예산 초과 수정 후: MatchObservationPostgresTest 39, MatchAutomaticWorkerTest 3, MatchAutomaticSchedulingTest 3, MatchSummaryWindowTest 2, IngestBoundaryTest 3 | 50개 통과, 건너뜀·실패·오류 0. 회차별 분할·당일 중복 차단·다음 날 잔여 처리 및 자격 재검증 확인 |
+| POLICY_UNAVAILABLE 후보 종료 수정 후: Match 10개 클래스 97(MatchObservationPostgresTest 43), DeadlineExtensionPostgresTest 40, EligibilityNotificationRevalidationPostgresTest 48, EventFanoutIntegrationTest 19, EligibilityBatchMatchEventTest 3 | 207개 통과, 건너뜀·실패·오류 0. 비가용 정책 후보만 닫고 나머지 요약 발행, 전부 비가용 시 Outbox 없이 종료, 조건 묶음 미생성은 DEFERRED 유지, 전환 후보 종료 확인 |
 
 실제 업무 DB의 DDL 적용·타이머 장시간 실행·운영 부하·외부 FCM은 미검증이다.
 로컬 테스트 통과는 위 관측 비용 P2 해결이나 운영 활성화 승인을 뜻하지 않는다.

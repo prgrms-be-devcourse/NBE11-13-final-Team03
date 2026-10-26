@@ -88,8 +88,10 @@ public class MatchObservationTransaction {
         var policy=locked.orElseThrow(); em.refresh(policy);
         var version=policy.getCurrentVersion();
         if (policy.getOpportunityType()!=OpportunityType.YOUTH_POLICY || version==null
-                || version.getPersonalizationStatus()!=PersonalizationStatus.PERSONALIZABLE || version.getConditionSetId()==null)
+                || version.getPersonalizationStatus()!=PersonalizationStatus.PERSONALIZABLE)
             return rejected(Status.POLICY_UNAVAILABLE);
+        // A current version still awaiting its condition set has no result yet: transient, unlike a closed policy.
+        if (version.getConditionSetId()==null) return rejected(Status.RESULT_STALE_OR_MISSING);
         // Same upper lock order as existing event processing and withdrawal, before preferences/profile/result/pair.
         var user=users.findByIdForUpdate(userId);
         if (user.isEmpty()) return rejected(Status.USER_UNAVAILABLE);

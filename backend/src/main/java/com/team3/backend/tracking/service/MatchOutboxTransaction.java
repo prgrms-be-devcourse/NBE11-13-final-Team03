@@ -65,12 +65,18 @@ public class MatchOutboxTransaction {
         if (!expiresAt.isAfter(now)) throw new IllegalArgumentException("Summary expiry must be in the future");
         var members=new ArrayList<MatchNotificationMessageFactory.Member>();
         var excluded=new ArrayList<MatchCandidateEvent>();
+        var unavailable=new ArrayList<MatchCandidateEvent>();
         for (var candidate:cohort) {
             em.refresh(candidate,LockModeType.PESSIMISTIC_WRITE);
             if (!"PENDING".equals(candidate.getStatus())) continue;
             var current=observations.current(userId,candidate.getPair().getOpportunity().getId());
-            // Do not consume any part of a summary while another member awaits fresh observation/results.
-            if (!current.available()) return result(Status.DEFERRED);
+            if (!current.available()) {
+                // A policy that is no longer an observable youth policy does not recover: close only that candidate
+                // so it cannot hold the user's summary page back forever.
+                if (current.rejection()==MatchObservationTransaction.Status.POLICY_UNAVAILABLE) { unavailable.add(candidate); continue; }
+                // Do not consume any part of a summary while another member awaits fresh observation/results.
+                return result(Status.DEFERRED);
+            }
             em.refresh(candidate.getPair());
             var input=current.input();
             if (!Objects.equals(candidate.getPair().getLastInputKey(),input.inputKey(settings.possibly())))
@@ -80,6 +86,7 @@ public class MatchOutboxTransaction {
             else members.add(new MatchNotificationMessageFactory.Member(candidate,input));
         }
         checkDate(date);
+        for (var candidate:unavailable) candidate.skip("POLICY_UNAVAILABLE",now);
         for (var candidate:excluded) candidate.skip("NO_LONGER_QUALIFIED_OR_RULE_CHANGED",now);
         if (members.isEmpty()) return result(Status.EMPTY);
         var outbox=outboxes.saveAndFlush(messages.summary(userId,runId,members,settings,now,expiresAt));
@@ -105,7 +112,11 @@ public class MatchOutboxTransaction {
         em.refresh(candidate,LockModeType.PESSIMISTIC_WRITE);
         if (!"PENDING".equals(candidate.getStatus())) return result(Status.SKIPPED);
         var current=observations.current(userId,policyId);
-        if (!current.available()) return result(Status.DEFERRED);
+        if (!current.available()) {
+            // Same rule as the summary: a permanently unavailable policy closes the candidate instead of deferring forever.
+            if (current.rejection()!=MatchObservationTransaction.Status.POLICY_UNAVAILABLE) return result(Status.DEFERRED);
+            candidate.skip("POLICY_UNAVAILABLE",clock.instant()); return result(Status.SKIPPED);
+        }
         em.refresh(candidate.getPair());
         var input=current.input(); Instant now=clock.instant();
         if (!Objects.equals(candidate.getPair().getLastInputKey(),input.inputKey(settings.possibly()))) return result(Status.DEFERRED);
