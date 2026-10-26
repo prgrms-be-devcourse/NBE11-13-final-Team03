@@ -269,7 +269,7 @@ class CollectionSqsOutboxPostgresTest {
     }
 
     @Test
-    void completionsReachAdminStandardQueueWithCorrelation() {
+    void sameDayFailureAndSuccessfulManualRetryReachTheQueueAsSeparateV2Results() {
         saveCompletion();
         saveCompletion();
         worker.runOnce();
@@ -278,6 +278,10 @@ class CollectionSqsOutboxPostgresTest {
         assertThat(messages).hasSize(2);
         assertThat(messages.stream().map(message -> MAPPER.readTree(message.body()).path("eventType").asText()))
                 .containsExactlyInAnyOrder("COLLECTION_COMPLETED", "COLLECTION_COMPLETED");
+        assertThat(messages.stream().map(message -> MAPPER.readTree(message.body()).path("payload").path("status").asText()))
+                .containsExactlyInAnyOrder("FAILED", "SUCCESS");
+        assertThat(messages.stream().map(message -> MAPPER.readTree(message.body()).path("payload").path("collectedDate").asText()))
+                .containsOnly("2026-10-27");
         for (var message : messages) {
             assertThat(message.messageAttributes().get("correlationId").stringValue())
                     .isEqualTo(MAPPER.readTree(message.body()).path("correlationId").asText());
@@ -287,15 +291,22 @@ class CollectionSqsOutboxPostgresTest {
     private String state() { return jdbc.queryForObject("SELECT status FROM collection_outbox_events", String.class); }
     private void saveCompletion() {
         try {
-            String json = new ClassPathResource("contracts/collection-completed-v1.json").getContentAsString(StandardCharsets.UTF_8);
+            String json = new ClassPathResource("contracts/collection-completed-v2.json").getContentAsString(StandardCharsets.UTF_8);
             Map<String, Object> fields = MAPPER.readValue(json, Map.class);
             var id = UUID.randomUUID();
-            var date = LocalDate.of(2026, 10, 27).plusDays(sequence++);
+            long jobId = 7L + sequence++;
             fields.put("messageId", id.toString());
-            ((Map<String, Object>) fields.get("payload")).put("collectedDate", date.toString());
+            var payload = (Map<String, Object>) fields.get("payload");
+            payload.put("jobId", jobId);
+            payload.put("syncType", sequence == 1 ? "SCHEDULED" : "MANUAL_RETRY");
+            payload.put("status", sequence == 1 ? "FAILED" : "SUCCESS");
+            if (sequence > 1) {
+                payload.put("failedCount", 0);
+                payload.put("failedPageCount", 0);
+            }
             String body = MAPPER.writeValueAsString(fields);
             new TransactionTemplate(transactions).executeWithoutResult(transaction -> outboxes.insertIfAbsent(
-                    id, "COLLECTION_COMPLETED:EMPLOYMENT24:" + date, 7L, body, NOW));
+                    id, "COLLECTION_COMPLETED:" + jobId, jobId, body, NOW));
         } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
     }
     private List<Message> drain() {

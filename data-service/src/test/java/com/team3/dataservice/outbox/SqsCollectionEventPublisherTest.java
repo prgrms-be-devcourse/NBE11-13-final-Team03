@@ -28,7 +28,7 @@ class SqsCollectionEventPublisherTest {
 
     @Test
     void sendsCollectionEnvelopeUnchangedWithoutFifoFieldsAndRetriesKeepIdentity() throws Exception {
-        for (var fixture : new String[]{"collection-completed-v1.json"}) {
+        for (var fixture : new String[]{"collection-completed-v1.json", "collection-completed-v2.json"}) {
             reset(sqs);
             var publication = publication(fixture);
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("MD5")
