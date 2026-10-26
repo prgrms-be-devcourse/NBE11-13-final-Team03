@@ -1,13 +1,13 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, CircleCheck, CircleDashed, LogOut, SlidersHorizontal, Tags, UserRound } from 'lucide-react'
+import { CircleCheck, CircleDashed, LogOut, SlidersHorizontal, Tags, UserRound } from 'lucide-react'
 import { useAuth } from '../../auth/AuthContext'
 import type { AuthUser } from '../../api/auth'
 import { ApiError } from '../../api/ApiError'
 import { interestsQuery, profileQuery } from '../../api/profile'
 import AsyncState from '../../components/ui/AsyncState'
 import Button from '../../components/ui/Button'
+import ArrowLink from '../../components/ui/ArrowLink'
 import ProfileGate from './ProfileGate'
 import ProfileError from './ProfileError'
 import ProfileForm from './ProfileForm'
@@ -26,12 +26,12 @@ function MyPageContent({ user }: { user: AuthUser }) {
   const status = (done: boolean, label: string) => <span className={styles.status} data-state={done ? 'done' : 'todo'}>
     {done ? <CircleCheck size={14} aria-hidden="true" /> : <CircleDashed size={14} aria-hidden="true" />}{label}
   </span>
-  return <div className={styles.page}>
-    <section className={styles.summary} aria-labelledby="mypage-title">
+  return <>
+    <section className={styles.summary} aria-labelledby="account-summary-title">
       <span className={styles.avatar} aria-hidden="true"><UserRound size={24} /></span>
       <div className={styles.summaryText}>
-        <h1 id="mypage-title">{nickname ? `${nickname}님` : '마이페이지'}</h1>
-        <p className={styles.help}>{email || '이메일 미제공'}{!nickname && ' · 닉네임 미제공'}</p>
+        <h2 id="account-summary-title">{nickname ? `${nickname}님` : '닉네임 미제공'}</h2>
+        <p className={styles.help}>{email || '이메일 미제공'}</p>
       </div>
       {user.role === 'ADMIN' && <span className={styles.status} data-state="done">관리자</span>}
     </section>
@@ -41,7 +41,7 @@ function MyPageContent({ user }: { user: AuthUser }) {
           {profile.isSuccess && status(!!profile.data, profile.data ? '등록됨' : '미등록')}</div>
         {profile.isPending ? <AsyncState status="loading" /> : profile.isError ? <ProfileError error={profile.error} onRetry={() => { void profile.refetch() }} /> : <>
           <div className={styles.lines}><p className={styles.state}>{profile.data ? '맞춤 조건이 등록되어 있어요.' : '맞춤 조건이 아직 등록되지 않았어요.'}</p><p className={styles.note}>추천과 신청 가능성 판정에 사용돼요.</p></div>
-          <Link className={styles.cta} to={profile.data ? '/mypage/profile' : '/onboarding'}>{profile.data ? '맞춤 조건 수정' : '맞춤 조건 설정 시작'}<ArrowRight size={16} aria-hidden="true" /></Link>
+          <ArrowLink className={styles.cta} to={profile.data ? '/mypage/profile' : '/onboarding'}>{profile.data ? '맞춤 조건 수정' : '맞춤 조건 설정 시작'}</ArrowLink>
         </>}
       </section>
       <section className={styles.manageCard} aria-labelledby="interests-title">
@@ -51,7 +51,7 @@ function MyPageContent({ user }: { user: AuthUser }) {
           {/* 관심 분야가 없으면 추천은 분야 제한 없이 동작한다(RecommendationInterestMatcher). */}
           <div className={styles.lines}>{interests.data.length ? <><p className={styles.state}>관심 분야 {interests.data.length}개를 설정했어요.</p><p className={styles.note}>기회 추천에 반영돼요.</p></>
             : <><p className={styles.state}>관심 분야가 설정되지 않았어요.</p><p className={styles.note}>선택 사항이에요. 설정하지 않으면 분야 제한 없이 추천해요.</p></>}</div>
-          <Link className={styles.cta} to="/mypage/interests">{interests.data.length ? '관심 분야 수정' : '관심 분야 설정'}<ArrowRight size={16} aria-hidden="true" /></Link>
+          <ArrowLink className={styles.cta} to="/mypage/interests">{interests.data.length ? '관심 분야 수정' : '관심 분야 설정'}</ArrowLink>
         </>}
       </section>
     </div>
@@ -76,7 +76,7 @@ function MyPageContent({ user }: { user: AuthUser }) {
         {auth.withdrawError && <p className={styles.error} role="alert">{withdrawErrorMessage(auth.withdrawError)}</p>}
       </div>
     </section>
-  </div>
+  </>
 }
 function withdrawErrorMessage(error: Error): string {
   if (error instanceof ApiError) {
@@ -90,18 +90,18 @@ function withdrawErrorMessage(error: Error): string {
 }
 export function MyPage() {
   const auth = useAuth()
-  if (auth.withdrawn) return <div className={styles.page}>
-    <AsyncState status="empty" title="회원 탈퇴가 완료됐어요" description="그동안 Y:ON을 이용해 주셔서 감사합니다." />
-    <Link to="/">홈으로 이동</Link>
-  </div>
-  return <ProfileGate>{(user) => <MyPageContent key={user.id} user={user} />}</ProfileGate>
+  // 저장 목록·알림처럼 로그인 여부와 관계없이 같은 제목과 폭을 쓴다.
+  return <section className={styles.page} aria-labelledby="mypage-title"><h1 id="mypage-title">마이페이지</h1>
+    {auth.withdrawn ? <><AsyncState status="empty" title="회원 탈퇴가 완료됐어요" description="그동안 Y:ON을 이용해 주셔서 감사합니다." /><ArrowLink to="/">홈으로 이동</ArrowLink></>
+      : <ProfileGate>{(user) => <MyPageContent key={user.id} user={user} />}</ProfileGate>}
+  </section>
 }
 
 function SettingsContent({ user, kind, regions }: { user: AuthUser; kind: 'profile' | 'interests'; regions?: RegionSource }) {
   const regionSource = useRegions(kind === 'profile' && regions === undefined)
   const profile = useQuery({ ...profileQuery(user.id), enabled: kind === 'profile' })
   const interests = useQuery({ ...interestsQuery(user.id), enabled: kind === 'interests' })
-  return <div className={styles.page}><Link className={styles.backLink} to="/mypage" aria-label="마이페이지로 돌아가기"><ArrowLeft size={18} aria-hidden="true" />마이페이지</Link><h1>{kind === 'profile' ? '맞춤 조건 설정' : '관심 분야 설정'}</h1><section className={styles.panel}>
+  return <div className={styles.page}><ArrowLink direction="back" to="/mypage" aria-label="마이페이지로 돌아가기">마이페이지</ArrowLink><h1>{kind === 'profile' ? '맞춤 조건 설정' : '관심 분야 설정'}</h1><section className={styles.panel}>
     {kind === 'profile' ? profile.isPending ? <AsyncState status="loading" /> : profile.isError ? <ProfileError error={profile.error} onRetry={() => { void profile.refetch() }} /> : <ProfileForm user={user} initial={profile.data} regions={regions ?? regionSource} />
       : interests.isPending ? <AsyncState status="loading" /> : interests.isError ? <ProfileError error={interests.error} onRetry={() => { void interests.refetch() }} /> : <InterestsForm user={user} initial={interests.data} />}
   </section></div>
@@ -114,13 +114,16 @@ function OnboardingContent({ user, regions }: { user: AuthUser; regions?: Region
   const interests = useQuery(interestsQuery(user.id))
   const [step, setStep] = useState<'profile' | 'interests' | 'done'>('profile')
   const currentStep = profile.data ? step : 'profile'
-  return <div className={styles.page}><h1>나에게 맞는 기회 준비하기</h1><p className={styles.help}>맞춤 조건은 추천에 필요하고, 관심 분야는 선택 사항이에요. 각 단계에서 저장한 정보는 중간에 나가도 유지돼요.</p>
-    <nav className={styles.actions} aria-label="설정 메뉴"><Link to="/mypage/interests">관심 분야만 먼저 설정</Link><Link to="/mypage">마이페이지로 돌아가기</Link></nav>
+  return <div className={styles.page}>
+    {/* 뒤로가기는 왼쪽, 다른 설정으로 가는 링크는 같은 줄 오른쪽 끝에 둔다. */}
+    <div className={styles.topLinks}><ArrowLink direction="back" to="/mypage" aria-label="마이페이지로 돌아가기">마이페이지</ArrowLink>
+      <nav aria-label="설정 메뉴"><ArrowLink to="/mypage/interests">관심 분야만 먼저 설정</ArrowLink></nav></div>
+    <h1>나에게 맞는 기회 준비하기</h1><p className={styles.help}>맞춤 조건은 추천에 필요하고, 관심 분야는 선택 사항이에요. 각 단계에서 저장한 정보는 중간에 나가도 유지돼요.</p>
     <section className={styles.panel}>
       {profile.isPending ? <AsyncState status="loading" /> : profile.isError ? <ProfileError error={profile.error} onRetry={() => { void profile.refetch() }} />
         : currentStep === 'profile' ? <><h2>1. 맞춤 조건</h2>{profile.data ? <p>이미 등록된 맞춤 조건이 있어요. 확인·수정하거나 다음 단계로 이동할 수 있어요.</p> : <p>필수 조건을 등록해 주세요. 거주지역은 마지막 하위 지역까지 선택해 주세요.</p>}<ProfileForm user={user} initial={profile.data} regions={regions ?? regionSource} onSaved={() => setStep('interests')} onContinue={profile.data ? () => setStep('interests') : undefined} /></>
           : currentStep === 'interests' ? <><h2>2. 관심 분야 (선택)</h2>{interests.isPending ? <><AsyncState status="loading" /><Button variant="secondary" onClick={() => setStep('profile')}>이전 단계로 돌아가기</Button></> : interests.isError ? <><ProfileError error={interests.error} onRetry={() => { void interests.refetch() }} /><Button variant="ghost" onClick={() => setStep('done')}>관심 분야를 변경하지 않고 완료</Button><Button variant="secondary" onClick={() => setStep('profile')}>이전 단계로 돌아가기</Button></> : <InterestsForm user={user} initial={interests.data} onSaved={() => setStep('done')} onSkip={() => setStep('done')} onBack={() => setStep('profile')} />}</>
-            : <><h2>설정을 완료했어요</h2><p>저장된 조건에 따른 추천을 홈에서 확인할 수 있어요. 판정 반영에는 시간이 걸릴 수 있어요.</p><Link to="/">홈으로 이동</Link><Link to="/mypage">내 설정 확인</Link></>}
+            : <><h2>설정을 완료했어요</h2><p>저장된 조건에 따른 추천을 홈에서 확인할 수 있어요. 판정 반영에는 시간이 걸릴 수 있어요.</p><div className={styles.actions}><ArrowLink to="/">홈으로 이동</ArrowLink><ArrowLink to="/mypage">내 설정 확인</ArrowLink></div></>}
     </section>
   </div>
 }

@@ -10,6 +10,7 @@ import HomeOpportunityCard from './HomeOpportunityCard'
 import { homeErrorMessage } from './homeQueries'
 import { isValidDate, statusLabels } from '../opportunities/searchParams'
 import { applicationWindowText, regionText } from '../opportunities/detailPresentation'
+import { formatDate, formatDatesInText } from '../../utils/date'
 import styles from './HomePage.module.css'
 
 function RecommendationCard({ item, disabled }: { item: RecommendationItem; disabled: boolean }) {
@@ -18,13 +19,12 @@ function RecommendationCard({ item, disabled }: { item: RecommendationItem; disa
   const detailOptions = opportunityDetailQuery(String(item.opportunityId))
   const detail = useQuery({ ...detailOptions, enabled: !training })
   const periods = detail.data?.applicationWindows ?? []
-  const formatDate = (value: string) => value.replace(/-/g, '.')
   const badges = item.recommendationReasons.badges.filter(badge => !(item.eligibilityStatus === 'ELIGIBLE' && badge === '신청 조건 충족'))
   const sentences = item.recommendationReasons.description.trim().split(/(?<=[.!?;。！？])\s+|\r?\n+/u).filter(Boolean).map(sentence => sentence.replace(/;$/, '.'))
   return <HomeOpportunityCard item={item} source="RECOMMENDATION" allowHide disabled={disabled} recommendation>
     <div className={styles.recommendationInfo}>
       {training ? date && isValidDate(date) && <p className={styles.facts}>교육 시작일 <time dateTime={date}>{formatDate(date)}</time></p>
-        : periods.length > 0 ? periods.map((period, index) => <p className={styles.facts} key={index}>신청기간 {applicationWindowText(period).replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$1.$2.$3')}</p>)
+        : periods.length > 0 ? periods.map((period, index) => <p className={styles.facts} key={index}>신청기간 {formatDatesInText(applicationWindowText(period))}</p>)
           : <p className={styles.facts}>신청기간 {detail.isPending ? '확인 중' : '시작일 미확인'}{date && isValidDate(date) && <> ~ <time dateTime={date}>{formatDate(date)}</time></>}</p>}
       <div className={styles.reasons}>
         {badges.length > 0 && <ul className={styles.badges} aria-label="추천 이유">{badges.map((badge, index) => <li key={index} data-badge={badge}>{badge}</li>)}</ul>}

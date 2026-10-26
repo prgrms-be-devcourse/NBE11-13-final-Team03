@@ -135,9 +135,11 @@ test('unknown eligibility joins the header badges and unknown application period
 
 test('detail keeps type colors and uses a labeled bookmark without changing save semantics', () => {
   const html = renderDetail({ ...training, category: '교육･직업훈련', subCategory: '직업훈련' }, { path: '/opportunities/43', auth: { status: 'authenticated', user: { id: 11 } } })
-  assert.match(html, /class="type" data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
-  assert.doesNotMatch(html, /교육･직업훈련 · 직업훈련/)
-  assert.match(html, /교육･직업훈련/)
+  assert.match(html, /class="typeBadge" data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
+  // NCS 분류가 없으면 카드와 같이 '직업훈련'을 한 번만 표시한다.
+  assert.doesNotMatch(html, /교육･직업훈련|직업훈련 · 직업훈련/)
+  assert.equal((html.match(/<li>직업훈련<\/li>/g) ?? []).length, 1)
+  assert.match(renderDetail(training, { path: '/opportunities/43' }), /<li>정보통신<\/li>/)
   assert.match(html, /aria-pressed="(?:true|false)"/)
   assert.match(html, /lucide-bookmark/)
   assert.match(html, /저장하기|저장됨/)
@@ -148,8 +150,13 @@ test('detail keeps type colors and uses a labeled bookmark without changing save
   assert.doesNotMatch(duplicate, /일자리 · 일자리/)
   assert.match(anonymous, /class="facts">2026\.10\.01 ~ 2026\.10\.31/)
   assert.match(anonymous, /사업기간과 신청기간은 다를 수 있습니다/)
-  const css = fs.readFileSync(new URL('../src/pages/opportunities/OpportunityDetailPage.module.css', import.meta.url), 'utf8')
+  // 유형 배지는 홈·검색·상세·저장 목록이 같은 공용 배지를 쓴다.
+  const css = fs.readFileSync(new URL('../src/components/opportunities/OpportunityTypeBadge.module.css', import.meta.url), 'utf8')
+  assert.match(css, /\.typeBadge \{[^}]*background: var\(--color-primary-soft\);[^}]*font-size: 0\.75rem;/)
   assert.match(css, /data-opportunity-type='VOCATIONAL_TRAINING'[\s\S]*?var\(--color-accent-blue\)/)
+  for (const page of ['home/HomePage', 'opportunities/OpportunitiesPage', 'opportunities/OpportunityDetailPage', 'saved/SavedOpportunitiesPage']) {
+    assert.doesNotMatch(fs.readFileSync(new URL(`../src/pages/${page}.module.css`, import.meta.url), 'utf8'), /data-opportunity-type/, page)
+  }
 })
 
 test('detail groups metadata, hides absent fields and presents an unconfirmed zero course fee as needing confirmation', () => {
@@ -260,6 +267,9 @@ test('detail back link preserves supplied search state and remains usable on dir
   assert.match(renderDetail(policy, { state: { searchReturn: '/opportunities?keyword=test&page=2' } }), /href="\/opportunities\?keyword=test&amp;page=2"/)
   assert.match(renderDetail(policy), /href="\/opportunities"/)
   assert.match(renderDetail(policy, { state: { searchReturn: 'https://evil.example' } }), /href="\/opportunities"/)
+  // 마이페이지 설정 화면과 같이 화살표 아이콘과 짧은 문구를 쓰고, 보조기기에는 전체 의미를 전달한다.
+  assert.match(renderDetail(policy), /<a aria-label="검색 목록으로 돌아가기" class="arrowLink backLink" href="\/opportunities"[^>]*><svg[^>]*lucide-arrow-left[^>]*aria-hidden="true"[\s\S]*?<\/svg>검색 목록<\/a>/)
+  assert.doesNotMatch(renderDetail(policy), /← 검색 목록/)
 })
 
 test('search result Link carries the current search URL into detail navigation state', () => {

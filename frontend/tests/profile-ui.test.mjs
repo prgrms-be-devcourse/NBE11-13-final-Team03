@@ -48,8 +48,13 @@ test('all profile routes require confirmed auth and never expose cached personal
     const html = render({ path, auth: null })
     assert.match(html, /로그인이 필요해요/)
     assert.doesNotMatch(html, /fixture@example.org|1998-05-15|맞춤 조건 저장/)
-    assert.match(html, /카카오로 로그인하기/)
+    assert.match(html, /<a class="loginLink" href="\/login\?returnTo=[^"]+"[^>]*>카카오로 로그인하기<\/a>/)
   }
+  // 비로그인 마이페이지도 저장 목록·알림처럼 제목과 같은 폭(.page)의 안내 카드를 쓴다.
+  assert.match(render({ path: '/mypage', auth: null }), /<section class="page" aria-labelledby="mypage-title"><h1 id="mypage-title">마이페이지<\/h1><div class="state"[^>]*>[\s\S]*?로그인이 필요해요/)
+  // 로그인 후에도 같은 제목을 쓰고, 닉네임은 요약 카드의 소제목으로 둔다.
+  assert.match(render({ path: '/mypage' }), /<section class="page" aria-labelledby="mypage-title"><h1 id="mypage-title">마이페이지<\/h1><section class="summary"/)
+  assert.equal((render({ path: '/mypage' }).match(/<h1/g) ?? []).length, 1)
 })
 test('mypage shows actual account and registration state without invented account editing, raw profile or interest values', () => {
   const html = render({ interests: [{ type: 'NCS', code: '20010101' }] })
@@ -61,7 +66,7 @@ test('mypage shows actual account and registration state without invented accoun
 })
 test('mypage summarizes the account at the top, manages settings in cards and keeps logout in account management', () => {
   const html = render({ interests: [{ type: 'NCS', code: '20010101' }] })
-  assert.match(html, /<h1 id="mypage-title">프로필 테스트 회원님<\/h1>/)
+  assert.match(html, /<h2 id="account-summary-title">프로필 테스트 회원님<\/h2>/)
   assert.doesNotMatch(html, /Y:ON 마이페이지|계정 유형|일반 회원|관리자/)
   assert.match(html, /<div class="lines"><p class="state">맞춤 조건이 등록되어 있어요\.<\/p><p class="note">추천과 신청 가능성 판정에 사용돼요\.<\/p><\/div>/)
   assert.match(html, /<div class="lines"><p class="state">관심 분야 1개를 설정했어요\.<\/p><p class="note">기회 추천에 반영돼요\.<\/p><\/div>/)
@@ -79,8 +84,7 @@ test('mypage summarizes the account at the top, manages settings in cards and ke
   assert.doesNotMatch(unset, />관심 분야 수정/)
   assert.match(render({ auth: { ...user, role: 'ADMIN' } }), /data-state="done">관리자/)
   const missing = render({ auth: { ...user, nickname: ' ', email: null } })
-  assert.match(missing, /<h1 id="mypage-title">마이페이지<\/h1>/)
-  assert.match(missing, /이메일 미제공 · 닉네임 미제공/)
+  assert.match(missing, /<h2 id="account-summary-title">닉네임 미제공<\/h2><p class="help">이메일 미제공<\/p>/)
   const css = fs.readFileSync(new URL('../src/pages/profile/Profile.module.css', import.meta.url), 'utf8')
   assert.match(css, /\.manageGrid \{[^}]*repeat\(2, minmax\(0, 1fr\)\)/)
   assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*?\.manageGrid, \.interestList \{ grid-template-columns: minmax\(0, 1fr\); \}/)
@@ -106,7 +110,7 @@ test('withdrawal shows server failures without claiming success and a completion
   }
   const done = renderMyPage({ ...base, status: 'anonymous', user: undefined, withdrawn: true })
   assert.match(done, /회원 탈퇴가 완료됐어요/)
-  assert.match(done, /href="\/"/)
+  assert.match(done, /<a class="arrowLink " href="\/"[^>]*>홈으로 이동<svg[^>]*lucide-arrow-right/)
   assert.doesNotMatch(done, /로그인이 필요해요|fixture@example.org/)
 })
 test('profile errors remain errors instead of unregistered and use safe 401/403/400/server messaging', () => {
@@ -126,7 +130,7 @@ test('profile form labels required and optional fields, folds sensitive extras a
   assert.match(html, /<fieldset class="formSection"><legend>필수 정보<\/legend>/)
   assert.match(html, /class="actions formActions"><button type="submit"/)
   assert.doesNotMatch(html, /필수 정보만으로 등록할 수 있어요|시·도부터 하위 지역을 차례로|말단 지역만 거주지로/)
-  assert.match(html, /<a class="backLink" aria-label="마이페이지로 돌아가기" href="\/mypage"[^>]*><svg[^>]*aria-hidden="true"[\s\S]*?<\/svg>마이페이지<\/a><h1>맞춤 조건 설정<\/h1>/)
+  assert.match(html, /<a aria-label="마이페이지로 돌아가기" class="arrowLink " href="\/mypage"[^>]*><svg[^>]*lucide-arrow-left[^>]*aria-hidden="true"[\s\S]*?<\/svg>마이페이지<\/a><h1>맞춤 조건 설정<\/h1>/)
   assert.match(html, /<form class="form"/)
   assert.doesNotMatch(html, /<form class="page"/)
   // select와 TextField(3rem)의 입력 높이·글자 크기를 맞춘다.
@@ -247,6 +251,10 @@ test('profile form already accepts supplied region data while unchanged edits an
   const blocked = render({ path: '/onboarding', profileData: null })
   assert.match(blocked, /disabled=""[^>]*>맞춤 조건 저장/)
   assert.match(blocked, /href="\/mypage\/interests"[^>]*>관심 분야만 먼저 설정/)
+  // 뒤로가기(왼쪽)와 관심 분야 바로가기(오른쪽 끝)는 제목 위 같은 줄에 둔다.
+  assert.match(blocked, /<div class="topLinks"><a aria-label="마이페이지로 돌아가기"[^>]*href="\/mypage"[\s\S]*?마이페이지<\/a><nav aria-label="설정 메뉴"><a [^>]*href="\/mypage\/interests"[^>]*>관심 분야만 먼저 설정[\s\S]*?<\/nav><\/div><h1>나에게 맞는 기회 준비하기<\/h1>/)
+  const css = fs.readFileSync(new URL('../src/pages/profile/Profile.module.css', import.meta.url), 'utf8')
+  assert.match(css, /\.topLinks \{[^}]*justify-content: space-between;[^}]*flex-wrap: wrap;/)
   assert.doesNotMatch(blocked, /설정을 완료했어요|기존 조건으로 다음 단계/)
   const interests = renderComponent(InterestsForm, { user, initial: [], onBack: () => {} })
   assert.match(interests, /이전 단계로 돌아가기/)

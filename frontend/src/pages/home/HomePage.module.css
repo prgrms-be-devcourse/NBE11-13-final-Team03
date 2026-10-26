@@ -46,8 +46,6 @@
 .grid > li { min-inline-size: 0; }
 .opportunityCard { padding: var(--space-4); block-size: 100%; min-inline-size: 0; box-shadow: none; }
 .cardMeta, .cardFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-small); }
-.type { padding: var(--space-1) var(--space-2); background: var(--color-primary-soft); border-radius: var(--radius-sm); color: var(--color-primary); font-size: 0.8rem; font-weight: 600; }
-.type[data-opportunity-type='VOCATIONAL_TRAINING'] { background: var(--color-accent-blue); color: var(--color-status-info-text); }
 .opportunityCard h3 { font-size: 1.125rem; margin: var(--space-2) 0; line-height: 1.5; }
 .opportunityCard h3 a { display: block; min-block-size: 2.75rem; padding-block: var(--space-2); color: var(--color-text-primary); text-decoration: none; overflow-wrap: anywhere; }
 .opportunityCard h3 a:hover { color: var(--color-primary); text-decoration: underline; }
@@ -65,7 +63,7 @@
 .vacantSlot { display: none; }
 .recommendationCard .recommendationInfo { margin-block-start: var(--space-2); padding-block-start: 0; border-block-start: 0; }
 .recommendationCard .cardFooter { border-block-start: 1px solid var(--color-border); padding-block-start: var(--space-3); }
-.recommendationCard .type, .recommendationCard .cardFooter > span, .recommendationCard .badges li { font-size: 0.75rem; padding: 0.15rem var(--space-2); line-height: 1.5; }
+.recommendationCard .cardFooter > span, .recommendationCard .badges li { font-size: 0.75rem; padding: 0.15rem var(--space-2); line-height: 1.5; }
 .recommendationCard .reasons { border-block-start: 1px solid var(--color-border); padding-block-start: var(--space-3); margin-block-start: var(--space-3); }
 .recommendationCard .regions { border-block-start: 1px solid var(--color-border); padding-block-start: var(--space-3); margin-block-start: var(--space-3); }
 .badges { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: 0; margin-block: var(--space-2); list-style: none; }

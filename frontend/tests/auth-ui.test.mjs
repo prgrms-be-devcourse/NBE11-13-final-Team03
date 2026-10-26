@@ -126,6 +126,15 @@ test('logout pending disables duplicate button; uncertain completion and explici
   assert.match(controls({ logoutError: new ApiError('network', 'private') }), /서버 로그아웃 완료 여부를 확인하지 못했어요/)
   assert.match(controls({ logoutError: new ApiError('http', 'private', 401) }), /로그아웃 요청이 완료되지 않았어요/)
   assert.match(controls({ logoutError: new ApiError('http', 'private', 403) }), /role="alert"/)
+  // 오류는 헤더 메뉴 안이 아니라 별도 팝업으로, 모바일 메뉴가 닫혀 있어도 보인다.
+  const closedMenu = renderToStaticMarkup(element(MemoryRouter, null, element(AuthContext.Provider, { value: { ...base, logoutError: new ApiError('http', 'private', 401) } }, element(AuthControls, { menuOpen: false }))))
+  assert.match(closedMenu, /<div class="authError" role="alert"><div class="authErrorText"><p class="authErrorTitle">로그아웃하지 못했어요<\/p>/)
+  assert.match(closedMenu, /<div class="authErrorActions"><button[^>]*>로그인 상태 다시 확인<\/button><button[^>]*>닫기<\/button><\/div>/)
+  assert.doesNotMatch(closedMenu, /authErrorOpen/)
+  const css = fs.readFileSync(new URL('../src/layouts/Header.module.css', import.meta.url), 'utf8')
+  // 헤더 오른쪽 로그인 링크는 메뉴 탭 모양을 따르지 않고 네 모서리를 같게 둥글린다.
+  assert.match(css, /\.auth > a \{[^}]*border-radius: var\(--radius-sm\);/)
+  assert.match(css, /\.authError \{ position: fixed;[^}]*inset-block-end: calc\(var\(--space-4\) \+ env\(safe-area-inset-bottom, 0px\)\);[^}]*max-inline-size: 26rem;/)
 })
 
 test('OAuth completion error offers the page-owned retry instead of a header user-query retry', () => {

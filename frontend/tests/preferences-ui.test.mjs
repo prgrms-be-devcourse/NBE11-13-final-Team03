@@ -32,7 +32,7 @@ test('saved page gates on verified authentication and never renders old-account 
   for (const status of ['anonymous', 'checking', 'error']) {
     const html = render({ auth: { ...base, status, user: undefined } })
     assert.doesNotMatch(html, /테스트 저장 공고|2026-10-26/)
-    if (status === 'anonymous') assert.match(html, /href="\/login\?returnTo=%2Fsaved"/)
+    if (status === 'anonymous') assert.match(html, /<a class="loginLink" href="\/login\?returnTo=%2Fsaved"[^>]*>카카오로 로그인하기<\/a>/)
     if (status === 'checking') assert.match(html, /로그인 상태를 확인하고/)
     if (status === 'error') assert.match(html, /로그인 상태를 확인하지 못했어요/)
   }
@@ -40,7 +40,7 @@ test('saved page gates on verified authentication and never renders old-account 
 test('saved cards use only DTO fields, real detail links, saved time and accessible unsave controls', () => {
   const html = render()
   assert.match(html, /href="\/opportunities\/42"/)
-  assert.match(html, /<time dateTime="2026-10-26T09:12:34">2026\.10\.26 09:12:34/)
+  assert.match(html, /<time dateTime="2026-10-26T09:12:34">2026\.10\.26 09:12<\/time>/)
   assert.match(html, /aria-label="테스트 저장 공고 저장됨, 저장 해제" aria-pressed="true"/)
   assert.match(html, /aria-label="1페이지"/)
   assert.doesNotMatch(html, /마감일|신청 가능성|숨김 여부|추천에서 숨기기/)

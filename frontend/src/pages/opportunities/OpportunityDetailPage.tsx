@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError } from '../../api/ApiError'
 import { isOpportunityId, opportunityDetailQuery } from '../../api/opportunityDetail'
@@ -8,8 +8,11 @@ import Card from '../../components/ui/Card'
 import AsyncState from '../../components/ui/AsyncState'
 import StatusBadge from '../../components/ui/StatusBadge'
 import PreferenceActions from '../../components/opportunities/PreferenceActions'
-import { statusLabels, typeLabels } from './searchParams'
+import OpportunityTypeBadge from '../../components/opportunities/OpportunityTypeBadge'
+import ArrowLink from '../../components/ui/ArrowLink'
+import { categoryDisplayLabel, statusLabels, typeLabels } from './searchParams'
 import { applicationWindowText, conditionLabels, conditionPresentation, conditionResultLabels, dateRange, regionText, requirementLabels, safeExternalUrl, searchReturnPath, validationLabel } from './detailPresentation'
+import { formatDatesInText } from '../../utils/date'
 import styles from './OpportunityDetailPage.module.css'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -17,9 +20,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 function Info({ label, value }: { label: string; value?: string | null }) {
   return value?.trim() ? <div><dt>{label}</dt><dd>{value}</dd></div> : null
-}
-function displayDates(text: string): string {
-  return text.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$1.$2.$3')
 }
 function ExternalLink({ label, url }: { label: string; url?: string | null }) {
   const href = safeExternalUrl(url)
@@ -42,7 +42,7 @@ function OpportunityDetailPage() {
   const location = useLocation()
   const query = useQuery(opportunityDetailQuery(id))
   const data = query.data
-  const backLink = <Link className={styles.backLink} to={searchReturnPath(location.state)}>← 검색 목록으로 돌아가기</Link>
+  const backLink = <ArrowLink direction="back" className={styles.backLink} to={searchReturnPath(location.state)} aria-label="검색 목록으로 돌아가기">검색 목록</ArrowLink>
   if (!isOpportunityId(id)) return <div className={styles.page}>{backLink}<h1>기회 상세</h1><AsyncState status="error" title="공고 번호를 확인해 주세요" description="유효한 공고 주소가 아니에요. 검색 목록에서 공고를 다시 선택해 주세요." /></div>
   if (query.isPending) return <div className={styles.page}>{backLink}<h1>기회 상세</h1><AsyncState status="loading" title="기회 상세를 불러오는 중이에요" /></div>
   if (query.isError) return <div className={styles.page}>{backLink}<h1>기회 상세</h1><AsyncState status="error" {...detailError(query.error)} onRetry={query.error instanceof ApiError && query.error.status === 404 ? undefined : () => { void query.refetch() }} /></div>
@@ -59,7 +59,9 @@ function OpportunityDetailPage() {
     const url = safeExternalUrl(link.url)
     return url ? [{ label: link.label, url }] : []
   }).filter((link, index, links) => links.findIndex(other => other.url === link.url) === index)
-  const classification = [...new Set([data.category, data.subCategory].map(value => value?.trim()).filter(value => value && value !== typeLabels[data.type]))].join(' · ')
+  // 직업훈련에 NCS 분류가 없으면 카드와 같이 '직업훈련'으로 표시한다.
+  const classification = [...new Set([data.category?.trim() && categoryDisplayLabel(data.category.trim()), data.subCategory].map(value => value?.trim()).filter(value => value && value !== typeLabels[data.type]))].join(' · ')
+    || (data.type === 'VOCATIONAL_TRAINING' ? typeLabels.VOCATIONAL_TRAINING : '')
   const institution = policy?.supervisingInstitutionName ?? training?.institutionName
   const hasEligibilityEvidence = !!data.eligibility && (!!data.eligibility.reason?.trim() || data.eligibility.conditions.length > 0)
   const sameInstitution = !!policy?.supervisingInstitutionName?.trim() && policy.supervisingInstitutionName.trim() === policy.operatingInstitutionName?.trim()
@@ -74,7 +76,7 @@ function OpportunityDetailPage() {
   ]
   const trainingFields = [
     { label: '교육기관', value: training?.institutionName },
-    { label: '교육기간 (신청기간과 별개)', value: training?.trainingStartDate || training?.trainingEndDate ? displayDates(dateRange(training?.trainingStartDate, training?.trainingEndDate)) : null },
+    { label: '교육기간 (신청기간과 별개)', value: training?.trainingStartDate || training?.trainingEndDate ? formatDatesInText(dateRange(training?.trainingStartDate, training?.trainingEndDate)) : null },
     { label: '교육 장소', value: training?.address }, { label: '교육 대상', value: training?.trainingTargetName },
     { label: '실제 훈련비 (원본 제공값)', value: training?.actualTrainingCost != null ? training.actualTrainingCost.toLocaleString('ko-KR') : null },
     // 현재 상세 DTO에는 무료 여부를 확정하는 필드가 없다. 원본 0을 무료로 해석하지 않는다.
@@ -100,7 +102,7 @@ function OpportunityDetailPage() {
       {backLink}
       <Card className={styles.hero}>
         <div className={styles.meta}>
-          <span className={styles.type} data-opportunity-type={data.type}>{typeLabels[data.type]}</span>
+          <OpportunityTypeBadge type={data.type} />
           <span className={styles.applicationStatus} data-application-status={data.applicationStatus}>{data.applicationStatus === 'UNKNOWN' ? '모집 상태 미확인' : statusLabels[data.applicationStatus]}</span>
           {data.eligibility && <StatusBadge status={data.eligibility.status} />}
         </div>
@@ -110,7 +112,7 @@ function OpportunityDetailPage() {
           {isPolicy && !sameInstitution && policy?.operatingInstitutionName?.trim() && <li>운영 기관: {policy.operatingInstitutionName}</li>}
           {classification && <li>{classification}</li>}
         </ul>}
-        {isPolicy && (policy?.businessStartDate || policy?.businessEndDate) && <p className={styles.muted}>사업기간 (신청기간과 별개): {displayDates(dateRange(policy.businessStartDate, policy.businessEndDate))}</p>}
+        {isPolicy && (policy?.businessStartDate || policy?.businessEndDate) && <p className={styles.muted}>사업기간 (신청기간과 별개): {formatDatesInText(dateRange(policy.businessStartDate, policy.businessEndDate))}</p>}
         {isPolicy && policy?.businessPeriodText?.trim() && <p className={styles.muted}>사업기간 원문 안내: {policy.businessPeriodText}</p>}
         {data.regions.length > 0 && <ul className={styles.headlineRegions}>{data.regions.map((region, index) => <li key={index}>{regionText(region, data.type === 'VOCATIONAL_TRAINING')}</li>)}</ul>}
         {data.regions.length === 0 ? <p className={styles.muted}>지역 정보 미제공 · 전국 대상 여부는 확인이 필요해요.</p>
@@ -146,7 +148,7 @@ function OpportunityDetailPage() {
         <div className={`${styles.stack} ${styles.mainContent}`}>
           <Section title={isPolicy ? '신청기간' : '모집기간'}>
             {data.applicationWindows.length ? <ul className={styles.items}>{data.applicationWindows.map((window, index) => <li key={index}>
-              <p className={styles.facts}>{displayDates(applicationWindowText(window, !isPolicy))}</p>
+              <p className={styles.facts}>{formatDatesInText(applicationWindowText(window, !isPolicy))}</p>
               {/* 검증된 기간은 원문이 매핑 결과와 중복되므로, 확인이 필요한 경우에만 근거로 보여 준다. */}
               {window.validationStatus !== 'VALID' && window.periodText?.trim() && <p className={styles.sourceText}>원문 기간 안내: {window.periodText}</p>}
             </li>)}</ul> : <p>{isPolicy ? '신청기간' : '모집기간'} 정보가 제공되지 않았어요.</p>}

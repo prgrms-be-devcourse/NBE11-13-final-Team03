@@ -222,20 +222,6 @@
   color: var(--color-text-secondary);
 }
 
-.type {
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-weight: 600;
-  font-size: 0.8rem;
-}
-
-.type[data-opportunity-type='VOCATIONAL_TRAINING'] {
-  background: var(--color-accent-blue);
-  color: var(--color-status-info-text);
-}
-
 .resultCard h3 {
   margin: var(--space-2) 0;
   font-size: 1.125rem;

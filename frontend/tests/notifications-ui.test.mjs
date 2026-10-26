@@ -36,13 +36,24 @@ test('notification pages gate confirmed authentication and never display cached 
     const html = render({ status, view })
     assert.doesNotMatch(html, /테스트 마감 알림|서버의 푸시 알림 설정|인앱 알림 받기/)
     if (status === 'anonymous') assert.match(html, view === 'list' ? /returnTo=%2Fnotifications/ : /returnTo=%2Fsettings%2Fnotifications/)
+    // 비로그인만 공용 그린 로그인 CTA를 보여 주고, 확인 중·오류 상태와 섞지 않는다.
+    if (status === 'anonymous') assert.match(html, /<a class="loginLink" href="\/login\?returnTo=[^"]+"[^>]*>카카오로 로그인하기<\/a>/)
+    else assert.doesNotMatch(html, /로그인이 필요해요|카카오로 로그인하기/)
   }
+})
+
+test('notification settings use the shared back link and list toolbar uses a forward arrow link', () => {
+  const settings = render({ view: 'settings' })
+  assert.match(settings, /<a aria-label="알림 목록으로 돌아가기" class="arrowLink " href="\/notifications"[^>]*><svg[^>]*lucide-arrow-left[\s\S]*?<\/svg>알림 목록<\/a><h1/)
+  assert.doesNotMatch(settings, /알림 목록으로<\/a>/)
+  assert.match(render({}), /<a class="arrowLink " href="\/settings\/notifications"[^>]*>알림 설정<svg[^>]*lucide-arrow-right/)
 })
 
 test('notification cards display actual type, timestamp, unread/read states and escaped text with named controls and cursor more', () => {
   const html = render({ more: true })
   assert.match(html, /마감 임박/); assert.match(html, /안 읽음/)
-  assert.match(html, /dateTime="2026-10-26T01:00:00Z"/)
+  assert.match(html, /dateTime="2026-10-26T01:00:00Z">2026\.10\.26 10:00<\/time>/)
+  assert.doesNotMatch(html, /오전|오후/)
   assert.match(html, /&lt;script&gt;/); assert.doesNotMatch(html, /<script>|href="javascript:/)
   assert.match(html, /aria-label="테스트 마감 알림 읽음 처리"/)
   assert.match(html, /전체 읽음 처리/); assert.match(html, /더 보기/)

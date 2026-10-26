@@ -64,7 +64,7 @@ test('result markup renders only supplied fields, accessible bookmark state and 
 
 test('search cards follow home type colors and classification rules without visible save labels', () => {
   const training = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: ' 교육･직업훈련 ', subCategory: '직업훈련', detailCategory: '정보기술' }] })
-  assert.match(training, /class="type" data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
+  assert.match(training, /class="typeBadge" data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
   assert.match(training, /class="category">정보기술<\/p>/)
   assert.doesNotMatch(training, /교육･직업훈련|직업훈련 · |class="category">직업훈련/)
   const ncs = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: ' 정보통신 ', detailCategory: '정보기술' }] })
@@ -78,7 +78,7 @@ test('search cards follow home type colors and classification rules without visi
   assert.match(authenticated, /aria-label="테스트 전용 검색 결과 저장 해제" aria-pressed="true"/)
   assert.match(authenticated, /fill="currentColor"/)
   assert.doesNotMatch(authenticated, />저장됨<|>저장 해제<|>저장 안 함<|>저장하려면 로그인</)
-  const css = fs.readFileSync(new URL('../src/pages/opportunities/OpportunitiesPage.module.css', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/components/opportunities/OpportunityTypeBadge.module.css', import.meta.url), 'utf8')
   assert.match(css, /data-opportunity-type='VOCATIONAL_TRAINING'[\s\S]*?var\(--color-accent-blue\)/)
 })
 
@@ -154,7 +154,7 @@ test('applied OPEN label distinguishes policy recruitment from training start-da
   assert.match(policy, /aria-label="적용된 검색 조건"><span>청년정책<\/span><span>모집 중<\/span>/)
   const training = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING' }] },
     '/opportunities?type=VOCATIONAL_TRAINING&applicationStatus=OPEN&startDateFrom=2026-10-25')
-  assert.match(training, /aria-label="적용된 검색 조건"><span>직업훈련<\/span><span>개강 예정<\/span><span>교육 시작일 2026-10-25부터<\/span>/)
+  assert.match(training, /aria-label="적용된 검색 조건"><span>직업훈련<\/span><span>개강 예정<\/span><span>교육 시작일 2026\.10\.25부터<\/span>/)
   assert.match(training, /교육 시작일 기준/)
 })
 

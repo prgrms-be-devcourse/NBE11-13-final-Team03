@@ -9,6 +9,8 @@ import Card from '../../components/ui/Card'
 import AsyncState from '../../components/ui/AsyncState'
 import StatusBadge from '../../components/ui/StatusBadge'
 import PreferenceActions from '../../components/opportunities/PreferenceActions'
+import OpportunityTypeBadge from '../../components/opportunities/OpportunityTypeBadge'
+import { formatDate } from '../../utils/date'
 import { searchErrorMessage } from './searchError'
 import { getInterestOptions, searchQueryOptions } from '../../api/opportunities'
 import { regionsQuery } from '../../api/regions'
@@ -89,8 +91,9 @@ function OpportunitiesPage() {
   const loading = results.isPending || results.isPlaceholderData
   const pages = data ? paginationPages(data.page, data.totalPages) : []
   const appliedDates = [
-    params.deadlineFrom && `마감일 ${params.deadlineFrom}부터`, params.deadlineTo && `마감일 ${params.deadlineTo}까지`,
-    params.startDateFrom && `교육 시작일 ${params.startDateFrom}부터`, params.startDateTo && `교육 시작일 ${params.startDateTo}까지`,
+    // URL 값(YYYY-MM-DD)은 그대로 두고 표시만 바꾼다.
+    params.deadlineFrom && `마감일 ${formatDate(params.deadlineFrom)}부터`, params.deadlineTo && `마감일 ${formatDate(params.deadlineTo)}까지`,
+    params.startDateFrom && `교육 시작일 ${formatDate(params.startDateFrom)}부터`, params.startDateTo && `교육 시작일 ${formatDate(params.startDateTo)}까지`,
   ].filter(Boolean)
 
   return (
@@ -147,11 +150,11 @@ function OpportunitiesPage() {
                 <ul className={styles.resultList}>
                   {data.content.map((item) => <li key={item.opportunityId}>
                     <Card className={styles.resultCard}>
-                      <div className={styles.cardMeta}><span className={styles.type} data-opportunity-type={item.type}>{typeLabels[item.type]}</span><PreferenceActions opportunityId={item.opportunityId} title={item.title} saved={item.saved} source="SEARCH" disabled={results.isFetching} iconOnly /></div>
+                      <div className={styles.cardMeta}><OpportunityTypeBadge type={item.type} /><PreferenceActions opportunityId={item.opportunityId} title={item.title} saved={item.saved} source="SEARCH" disabled={results.isFetching} iconOnly /></div>
                       <h3><Link to={`/opportunities/${item.opportunityId}`} state={{ searchReturn: `/opportunities${canonical ? `?${canonical}` : ''}` }}>{item.title || '제목 미확인'}</Link></h3>
                       {classificationLabel(item) && <p className={styles.category}>{classificationLabel(item)}</p>}
                       <div className={styles.cardFooter}>
-                        {/^\d{4}-\d{2}-\d{2}T/.test(item.createdAt) && <span>최초 등록일 <time dateTime={item.createdAt}>{item.createdAt.slice(0, 10)}</time></span>}
+                        {/^\d{4}-\d{2}-\d{2}T/.test(item.createdAt) && <span>최초 등록일 <time dateTime={item.createdAt}>{formatDate(item.createdAt)}</time></span>}
                         {item.eligibilityStatus !== null && <StatusBadge status={item.eligibilityStatus} />}
                       </div>
                     </Card>

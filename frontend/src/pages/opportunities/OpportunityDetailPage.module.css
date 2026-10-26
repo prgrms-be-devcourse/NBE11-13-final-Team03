@@ -4,7 +4,6 @@
   min-inline-size: 0;
 }
 
-.backLink,
 .externalLink {
   display: inline-flex;
   align-items: center;
@@ -13,6 +12,7 @@
   overflow-wrap: anywhere;
 }
 
+/* 모양은 공용 ArrowLink를 따르고, 상세 상단 여백만 지정한다. */
 .backLink {
   margin-block-end: var(--space-3);
 }
@@ -63,7 +63,6 @@
 .conditionHeader h3, .conditionHeader p { margin: 0; }
 .conditionResult { color: var(--color-text-primary); font-size: var(--font-size-small); font-weight: 600; }
 
-.type,
 .applicationStatus {
   padding: var(--space-1) var(--space-2);
   border: 1px solid transparent;
@@ -75,10 +74,6 @@
   line-height: 1.5;
 }
 
-.type[data-opportunity-type='VOCATIONAL_TRAINING'] {
-  background: var(--color-accent-blue);
-  color: var(--color-status-info-text);
-}
 
 .columns,
 .stack {

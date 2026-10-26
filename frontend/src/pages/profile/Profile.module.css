@@ -5,8 +5,7 @@
 .help { color: var(--color-text-secondary); font-size: var(--font-size-small); }
 /* 폼은 카드 너비를 그대로 쓴다. .page의 auto 여백을 쓰면 grid 안에서 내용 너비로 줄어든다. */
 .form { display: grid; gap: var(--space-4); min-width: 0; }
-.backLink { display: inline-flex; align-items: center; justify-self: start; gap: var(--space-1); min-block-size: 2.75rem; color: var(--color-primary); font-weight: 600; text-decoration: none; }
-.backLink:hover { color: var(--color-primary-dark); text-decoration: underline; }
+.topLinks { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
 .panel { padding: var(--space-5); display: grid; gap: var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); min-width: 0; box-shadow: var(--shadow-card); }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
 .field { display: grid; align-content: start; gap: var(--space-2); min-width: 0; font-size: var(--font-size-small); font-weight: 500; }
@@ -26,7 +25,7 @@
 .summary, .manageCard, .accountPanel { min-width: 0; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow-wrap: anywhere; }
 .summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-4); }
 .summaryText { display: grid; gap: var(--space-1); flex: 1 1 14rem; min-width: 0; }
-.page .summary h1 { margin: 0; font-size: clamp(1.5rem, 2.5vw, 1.875rem); line-height: var(--line-height-heading); }
+.page .summary h2 { margin: 0; font-size: clamp(1.375rem, 2.2vw, 1.625rem); line-height: var(--line-height-heading); }
 .avatar, .cardIcon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 50%; background: var(--color-primary-soft); color: var(--color-primary); }
 .avatar { inline-size: 3rem; block-size: 3rem; }
 .cardIcon { inline-size: 2rem; block-size: 2rem; }
@@ -37,8 +36,8 @@
 .status { display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 600; line-height: 1.5; }
 .status[data-state='done'] { background: var(--color-primary-soft); color: var(--color-primary-dark); }
 .status[data-state='todo'] { background: var(--color-surface-muted); color: var(--color-text-secondary); }
-.cta { display: inline-flex; align-items: center; align-self: flex-start; gap: var(--space-1); min-block-size: 2.75rem; margin-block-start: auto; color: var(--color-primary); font-weight: 600; text-decoration: none; }
-.cta:hover { color: var(--color-primary-dark); text-decoration: underline; }
+/* 모양은 공용 ArrowLink를 따르고, 카드 하단 정렬만 지정한다. */
+.cta { margin-block-start: auto; }
 .accountPanel { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-4); }
 .page .accountPanel h2 { font-size: 1.125rem; margin-block-end: var(--space-1); }
 .logout { gap: var(--space-2); }

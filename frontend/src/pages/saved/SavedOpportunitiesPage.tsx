@@ -10,7 +10,10 @@ import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import AsyncState from '../../components/ui/AsyncState'
 import PreferenceActions from '../../components/opportunities/PreferenceActions'
-import { classificationLabel, paginationPages, typeLabels } from '../opportunities/searchParams'
+import OpportunityTypeBadge from '../../components/opportunities/OpportunityTypeBadge'
+import LoginRequired from '../../components/auth/LoginRequired'
+import { classificationLabel, paginationPages } from '../opportunities/searchParams'
+import { formatDateTime } from '../../utils/date'
 import styles from './SavedOpportunitiesPage.module.css'
 
 function SavedList({ user }: { user: AuthUser }) {
@@ -29,12 +32,12 @@ function SavedList({ user }: { user: AuthUser }) {
     {result.isFetching && <p role="status">최신 저장 상태를 확인하고 있어요.</p>}
     <ul className={styles.list}>{data.content.map((item) => <li key={item.opportunityId}><Card className={styles.card}>
       <div className={styles.cardMeta}>
-        <span className={styles.type} data-opportunity-type={item.type}>{typeLabels[item.type]}</span>
+        <OpportunityTypeBadge type={item.type} />
         <PreferenceActions opportunityId={item.opportunityId} title={item.title} saved source="SAVED" disabled={result.isFetching} showSaveLabel />
       </div>
       <h2><Link to={`/opportunities/${item.opportunityId}`}>{item.title || '제목 미확인'}</Link></h2>
       {classificationLabel({ ...item, detailCategory: null }) && <p className={styles.muted}>{classificationLabel({ ...item, detailCategory: null })}</p>}
-      <p className={styles.muted}>저장 시각 <time dateTime={item.savedAt}>{item.savedAt.replace('T', ' ').replace(/\.\d+$/, '').replace(/-/g, '.')}</time></p>
+      <p className={styles.muted}>저장 시각 <time dateTime={item.savedAt}>{formatDateTime(item.savedAt)}</time></p>
     </Card></li>)}</ul>
     <nav className={styles.pagination} aria-label="저장 목록 페이지">
       <Button variant="secondary" disabled={page === 0 || result.isFetching} onClick={() => setPage(page - 1)}>이전</Button>
@@ -49,7 +52,7 @@ function SavedOpportunitiesPage() {
   return <section className={styles.page} aria-labelledby="saved-title"><h1 id="saved-title">저장한 기회</h1>
     {auth.status === 'checking' ? <AsyncState status="loading" title="로그인 상태를 확인하고 있어요" />
       : auth.status === 'error' ? <AsyncState status="error" title="로그인 상태를 확인하지 못했어요" onRetry={auth.retry} />
-        : auth.status !== 'authenticated' || !auth.user ? <><AsyncState status="empty" title="로그인이 필요해요" description="저장한 기회는 로그인 후 확인할 수 있어요." /><Link to={loginPath(location.pathname)}>카카오로 로그인하기</Link></>
+        : auth.status !== 'authenticated' || !auth.user ? <LoginRequired description="저장한 기회는 로그인 후 확인할 수 있어요." returnTo={location.pathname} />
           : <SavedList key={auth.user.id} user={auth.user} />}
   </section>
 }
