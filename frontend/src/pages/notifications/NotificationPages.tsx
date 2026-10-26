@@ -13,6 +13,7 @@ import AsyncState from '../../components/ui/AsyncState'
 import ArrowLink from '../../components/ui/ArrowLink'
 import LoginRequired from '../../components/auth/LoginRequired'
 import { formatDateTime } from '../../utils/date'
+import { ArrowRight } from 'lucide-react'
 import styles from './NotificationPages.module.css'
 import PushControls from '../../push/PushControls'
 import { parsePushClick } from '../../push/protocol'
@@ -60,30 +61,36 @@ function NotificationList({ owner }: { owner: AuthUser }) {
   const items = result.data?.pages.flatMap(page => page.items) ?? []
   const busy = pending || result.isFetching
   return <>
-    {click && <Card className={styles.card}><p>푸시 알림에서 연결됐어요. 본인 알림의 읽음·클릭 기록을 확인한 후 공고로 이동해요.</p><Button disabled={busy} onClick={() => open(click.notificationId, `/opportunities/${click.opportunityId}`)}>푸시 알림 공고 확인</Button></Card>}
-    <div className={styles.toolbar}><ArrowLink to="/settings/notifications">알림 설정</ArrowLink><Button variant="ghost" disabled={busy} onClick={retry}>새로고침</Button><Button variant="secondary" disabled={busy || !items.length} loading={pending} onClick={() => { void run({ kind: 'read-all' }) }}>전체 읽음 처리</Button></div>
+    {click && <Card className={styles.card}><p>푸시 알림으로 받은 공고를 확인해 보세요.</p><Button disabled={busy} onClick={() => open(click.notificationId, `/opportunities/${click.opportunityId}`)}>공고 보기</Button></Card>}
+    <div className={styles.toolbar}><ArrowLink to="/settings/notifications">알림 설정</ArrowLink>
+      <div className={styles.actions}><Button variant="ghost" disabled={busy} onClick={retry}>새로고침</Button><Button variant="secondary" disabled={busy || !items.length} loading={pending} onClick={() => { void run({ kind: 'read-all' }) }}>전체 읽음 처리</Button></div></div>
     {mutation.isSuccess && <p role="status">알림 처리를 완료했어요.</p>}
     {mutation.isError && <RequestError error={mutation.error} retry={retry} path="/notifications" />}
     {result.isError && <RequestError error={result.error} retry={retry} path="/notifications" />}
     {!items.length && !result.isError && <AsyncState status="empty" title="아직 알림이 없어요" description="새로운 기회 소식이 도착하면 이곳에서 확인할 수 있어요." />}
     <ul className={styles.list}>{items.map(item => {
       const target = notificationTarget(item)
-      return <li key={item.id}><Card className={`${styles.card} ${item.readAt === null ? styles.unread : ''}`}>
-        <div className={styles.meta}><span>{notificationLabels[item.type]}</span><strong>{item.readAt === null ? '안 읽음' : '읽음'}</strong></div>
+      const unread = item.readAt === null
+      // 다른 목록 카드처럼 위에는 종류·상태 배지, 아래에는 시각과 동작을 둔다. 읽음 여부는 색과 함께 글자로도 표시한다.
+      return <li key={item.id}><Card className={`${styles.card} ${unread ? styles.unread : ''}`}>
+        <div className={styles.meta}><span className={styles.kind}>{notificationLabels[item.type]}</span><span className={styles.readState} data-read={!unread}>{unread ? '안 읽음' : '읽음'}</span></div>
         <h2>{item.title || '제목 미제공'}</h2><p className={styles.content}>{item.content}</p>
-        <time dateTime={item.createdAt}>{formatDateTime(item.createdAt)}</time>
-        <div className={styles.toolbar}>
-          {item.readAt === null && <Button variant="secondary" disabled={busy} aria-label={`${item.title} 읽음 처리`} onClick={() => { void run({ kind: 'read', id: item.id }) }}>읽음 처리</Button>}
-          <Button variant="ghost" disabled={busy || !target} aria-label={`${item.title} 공고 보기`} onClick={() => {
-            if (!target) return
-            open(item.id, target)
-          }}>공고 보기</Button>
-          {!target && <span>이동할 수 있는 공고 경로가 없어요.</span>}
+        <div className={styles.footer}>
+          <time dateTime={item.createdAt}>{formatDateTime(item.createdAt)}</time>
+          <div className={styles.actions}>
+            {unread && <Button variant="secondary" disabled={busy} aria-label={`${item.title} 읽음 처리`} onClick={() => { void run({ kind: 'read', id: item.id }) }}>읽음 처리</Button>}
+            {/* 클릭 기록 후 이동해야 하므로 링크가 아닌 버튼이다. 모양은 다른 화면의 이동 링크와 맞춘다. */}
+            <Button variant="ghost" className={styles.openButton} disabled={busy || !target} aria-label={`${item.title} 공고 보기`} onClick={() => {
+              if (!target) return
+              open(item.id, target)
+            }}>공고 보기<ArrowRight size={16} aria-hidden="true" /></Button>
+          </div>
+          {!target && <p className={styles.note}>연결된 공고가 없어요.</p>}
         </div>
       </Card></li>
     })}</ul>
     {result.isFetching && <p role="status">최신 알림을 확인하고 있어요.</p>}
-    {result.hasNextPage && <Button variant="secondary" loading={result.isFetchingNextPage} disabled={busy} onClick={() => { if (!result.isFetching) void result.fetchNextPage({ cancelRefetch: false }) }}>더 보기</Button>}
+    {result.hasNextPage && <div className={styles.more}><Button variant="secondary" loading={result.isFetchingNextPage} disabled={busy} onClick={() => { if (!result.isFetching) void result.fetchNextPage({ cancelRefetch: false }) }}>더 보기</Button></div>}
   </>
 }
 function SettingsForm({ owner, settings, fetching }: { owner: AuthUser; settings: NotificationSettings; fetching: boolean }) {
@@ -91,20 +98,23 @@ function SettingsForm({ owner, settings, fetching }: { owner: AuthUser; settings
   const { mutation, pending, run } = useNotificationAction(owner)
   const client = useQueryClient()
   const enabled = draft ?? settings.inAppEnabled
-  return <Card className={styles.card}><form className={styles.form} onSubmit={event => {
-    event.preventDefault()
-    if (fetching) return
-    void run({ kind: 'settings', values: { inAppEnabled: enabled, pushEnabled: settings.pushEnabled } }).then(ok => { if (ok) setDraft(null) })
-  }}>
-    <label className={styles.toggle}><input type="checkbox" checked={enabled} disabled={pending || fetching} onChange={event => setDraft(event.target.checked)} />인앱 알림 받기</label>
-    <label className={styles.toggle}><input type="checkbox" checked={settings.pushEnabled} disabled readOnly aria-describedby="push-help" />서버의 푸시 알림 설정: {settings.pushEnabled ? '켜짐' : '꺼짐'}</label>
-    <p id="push-help">서버 설정이 켜져 있어도 이 브라우저의 푸시 구독 완료를 의미하지 않아요. 인앱 설정 저장 시 기존 푸시 설정은 유지해요. 브라우저 권한·Firebase·FCM 토큰·서비스 워커·엔드포인트 등록 상태는 아래 웹 푸시 영역에서 확인해 주세요.</p>
-    {settings.pushConsentAt && <p>서버 푸시 동의 시각: <time dateTime={settings.pushConsentAt}>{formatDateTime(settings.pushConsentAt)}</time></p>}
-    {settings.updatedAt && <p>설정 변경 시각: <time dateTime={settings.updatedAt}>{formatDateTime(settings.updatedAt)}</time></p>}
-    <Button type="submit" loading={pending} disabled={fetching || draft === null || enabled === settings.inAppEnabled}>설정 저장</Button>
-    {mutation.isSuccess && draft === null && <p role="status">알림 설정을 저장했어요.</p>}
-    {mutation.isError && <RequestError error={mutation.error} path="/settings/notifications" retry={() => { void client.invalidateQueries({ queryKey: notificationKeys.settings(owner.id) }, { throwOnError: true }).then(() => mutation.reset()).catch(() => {}) }} />}
-  </form><PushControls owner={owner} settings={settings} disabled={pending || fetching} /></Card>
+  // 마이페이지처럼 주제별 카드로 나눈다: 알림 받기(인앱) / 웹 푸시.
+  return <>
+    <Card className={styles.card}><form className={styles.form} aria-labelledby="in-app-title" onSubmit={event => {
+      event.preventDefault()
+      if (fetching) return
+      void run({ kind: 'settings', values: { inAppEnabled: enabled, pushEnabled: settings.pushEnabled } }).then(ok => { if (ok) setDraft(null) })
+    }}>
+      <h2 id="in-app-title">알림 받기</h2>
+      {/* 푸시 설정은 아래 브라우저 푸시 카드에서 다룬다. 저장 시 기존 푸시 설정 값은 그대로 보낸다. */}
+      <label className={styles.toggle}><input type="checkbox" checked={enabled} disabled={pending || fetching} onChange={event => setDraft(event.target.checked)} />Y:ON 안에서 알림 받기</label>
+      {settings.updatedAt && <p className={styles.note}>마지막 변경: <time dateTime={settings.updatedAt}>{formatDateTime(settings.updatedAt)}</time></p>}
+      {mutation.isSuccess && draft === null && <p role="status">알림 설정을 저장했어요.</p>}
+      {mutation.isError && <RequestError error={mutation.error} path="/settings/notifications" retry={() => { void client.invalidateQueries({ queryKey: notificationKeys.settings(owner.id) }, { throwOnError: true }).then(() => mutation.reset()).catch(() => {}) }} />}
+      <div className={styles.formActions}><Button type="submit" loading={pending} disabled={fetching || draft === null || enabled === settings.inAppEnabled}>설정 저장</Button></div>
+    </form></Card>
+    <Card className={styles.card}><PushControls owner={owner} settings={settings} disabled={pending || fetching} /></Card>
+  </>
 }
 function Settings({ owner }: { owner: AuthUser }) {
   const result = useQuery(notificationSettingsQuery(owner.id))
@@ -114,8 +124,8 @@ function Settings({ owner }: { owner: AuthUser }) {
 }
 export function NotificationsPage() {
   const location = useLocation()
-  return <section className={styles.page} aria-labelledby="notifications-title"><h1 id="notifications-title">알림 목록</h1><Access path={`/notifications${location.search}`}>{owner => <NotificationList key={owner.id} owner={owner} />}</Access></section>
+  return <section className={styles.page} aria-labelledby="notifications-title"><h1 id="notifications-title">알림</h1><Access path={`/notifications${location.search}`}>{owner => <NotificationList key={owner.id} owner={owner} />}</Access></section>
 }
 export function NotificationSettingsPage() {
-  return <section className={styles.page} aria-labelledby="notification-settings-title"><ArrowLink direction="back" to="/notifications" aria-label="알림 목록으로 돌아가기">알림 목록</ArrowLink><h1 id="notification-settings-title">알림 설정</h1><Access path="/settings/notifications">{owner => <Settings key={owner.id} owner={owner} />}</Access></section>
+  return <section className={styles.page} aria-labelledby="notification-settings-title"><ArrowLink direction="back" to="/notifications" aria-label="알림으로 돌아가기">알림</ArrowLink><h1 id="notification-settings-title">알림 설정</h1><Access path="/settings/notifications">{owner => <Settings key={owner.id} owner={owner} />}</Access></section>
 }

@@ -44,9 +44,31 @@ test('notification pages gate confirmed authentication and never display cached 
 
 test('notification settings use the shared back link and list toolbar uses a forward arrow link', () => {
   const settings = render({ view: 'settings' })
-  assert.match(settings, /<a aria-label="알림 목록으로 돌아가기" class="arrowLink " href="\/notifications"[^>]*><svg[^>]*lucide-arrow-left[\s\S]*?<\/svg>알림 목록<\/a><h1/)
+  // 제목은 헤더 메뉴 이름(알림)과 같고, 설정 화면의 뒤로가기도 같은 이름을 쓴다.
+  assert.match(settings, /<a aria-label="알림으로 돌아가기" class="arrowLink " href="\/notifications"[^>]*><svg[^>]*lucide-arrow-left[\s\S]*?<\/svg>알림<\/a><h1/)
   assert.doesNotMatch(settings, /알림 목록으로<\/a>/)
-  assert.match(render({}), /<a class="arrowLink " href="\/settings\/notifications"[^>]*>알림 설정<svg[^>]*lucide-arrow-right/)
+  const list = render({})
+  assert.match(list, /<h1 id="notifications-title">알림<\/h1>/)
+  assert.match(list, /<div class="toolbar"><a class="arrowLink " href="\/settings\/notifications"[^>]*>알림 설정<svg[^>]*lucide-arrow-right[\s\S]*?<div class="actions"><button[^>]*>새로고침<\/button><button[^>]*>전체 읽음 처리/)
+})
+
+test('notification cards follow the shared card pattern: badges on top, time and actions in a footer, centered more button', () => {
+  const html = render({ more: true })
+  assert.match(html, /<div class="meta"><span class="kind">마감 임박<\/span><span class="readState" data-read="false">안 읽음<\/span><\/div>/)
+  assert.match(html, /<div class="footer"><time dateTime="2026-10-26T01:00:00Z">2026\.10\.26 10:00<\/time><div class="actions">[\s\S]*?공고 보기<svg[^>]*lucide-arrow-right/)
+  assert.match(html, /<div class="more"><button[^>]*>더 보기<\/button><\/div>/)
+  assert.match(render({ items: [{ ...item, readAt: '2026-10-26T02:00:00Z' }] }), /data-read="true">읽음<\/span>/)
+  const css = fs.readFileSync(new URL('../src/pages/notifications/NotificationPages.module.css', import.meta.url), 'utf8')
+  assert.match(css, /\.card \{[^}]*box-shadow: none;/)
+  assert.match(css, /\.more \{ display: flex; justify-content: center; \}/)
+  assert.doesNotMatch(css, /\.page > \.toolbar/)
+})
+
+test('notification settings split in-app and web push into separate cards with the save action aligned right', () => {
+  const html = render({ view: 'settings' })
+  assert.match(html, /<form class="form" aria-labelledby="in-app-title"><h2 id="in-app-title">알림 받기<\/h2>/)
+  assert.match(html, /<div class="formActions"><button type="submit"[^>]*>설정 저장<\/button><\/div><\/form><\/div><div class="[^"]*"><section class="section" aria-labelledby="web-push-title">/)
+  assert.match(html, /<div class="actions"><button[^>]*>이 브라우저 연결<\/button><button[^>]*>이 브라우저 해제<\/button>/)
 })
 
 test('notification cards display actual type, timestamp, unread/read states and escaped text with named controls and cursor more', () => {
@@ -85,14 +107,14 @@ test('unread badge distinguishes zero, unavailable, loading and failure and hide
   for (const status of ['anonymous', 'checking', 'error']) assert.equal(render({ view: 'badge', status }), '')
 })
 
-test('settings retain server values and label push as disabled server preference rather than a completed browser subscription', () => {
+test('settings use plain language, show push state once in the push card and never claim a completed browser subscription', () => {
   const html = render({ view: 'settings' })
-  assert.match(html, /인앱 알림 받기/)
-  assert.match(html, /서버의 푸시 알림 설정: 켜짐/)
-  assert.match(html, /브라우저의 푸시 구독 완료를 의미하지 않아요/)
-  assert.match(html, /FCM 토큰·서비스 워커·엔드포인트 등록/)
-  assert.match(html, /disabled="" readOnly="" aria-describedby="push-help" checked=""/)
-  assert.match(html, /서버 푸시 동의 시각/)
+  assert.match(html, /<input type="checkbox" checked=""[^>]*\/>Y:ON 안에서 알림 받기<\/label>/)
+  // 푸시 설정은 브라우저 푸시 카드에서 한 번만 보여 준다.
+  assert.equal((html.match(/푸시 알림: 켜짐/g) ?? []).length, 1)
+  assert.match(html, /이 브라우저: 연결 확인 안 됨/)
+  assert.match(html, /푸시 알림 동의: <time/)
+  assert.doesNotMatch(html, /서버의 푸시 알림 설정|FCM|서비스 워커|엔드포인트|Firebase|VAPID|인앱|readOnly/)
   assert.match(html, /disabled=""[^>]*>설정 저장/)
 })
 

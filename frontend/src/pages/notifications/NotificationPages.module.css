@@ -3,19 +3,26 @@
 .page h1, .page h2, .page p { margin: 0; }
 .page h1 { font-size: clamp(1.75rem, 3vw, 2.25rem); margin-block-end: var(--space-2); }
 .list { display: grid; gap: var(--space-3); list-style: none; padding: 0; margin: 0; }
-.card { padding: var(--space-5); overflow-wrap: anywhere; }
+/* 저장 목록 카드와 같은 여백·그림자 없음 */
+.card { padding: var(--space-5); overflow-wrap: anywhere; box-shadow: none; }
 .card h2 { font-size: 1.125rem; line-height: 1.5; }
 .unread { border-inline-start: 3px solid var(--color-primary); background: var(--color-surface); }
-.meta, .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
-.meta { color: var(--color-text-secondary); font-size: var(--font-size-small); }
-.meta strong { color: var(--color-primary); padding: var(--space-1) var(--space-2); background: var(--color-primary-soft); border-radius: 999px; font-size: 0.75rem; }
-.toolbar a { display: inline-flex; align-items: center; min-block-size: 2.75rem; font-size: var(--font-size-small); }
-.page > .toolbar { padding: var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.toolbar, .meta, .footer, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.toolbar, .meta, .footer { justify-content: space-between; }
+.actions { gap: var(--space-2); }
+/* 알림 종류는 공고 유형 배지와 같은 크기의 중립 배지, 읽음 상태는 오른쪽 상태 배지 */
+.kind, .readState { display: inline-flex; align-items: center; padding: var(--space-1) var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 600; line-height: 1.5; white-space: nowrap; }
+.kind { background: var(--color-surface-muted); color: var(--color-text-primary); }
+.readState[data-read='false'] { background: var(--color-primary-soft); color: var(--color-primary-dark); }
+.readState[data-read='true'] { color: var(--color-text-secondary); border-color: var(--color-border); }
 .content { white-space: pre-wrap; line-height: 1.75; }
-.card time { font-size: var(--font-size-small); color: var(--color-text-secondary); }
+.footer { padding-block-start: var(--space-3); border-block-start: 1px solid var(--color-border); }
+.footer time { font-size: var(--font-size-small); color: var(--color-text-secondary); }
+.footer .note { flex-basis: 100%; }
+.openButton { gap: var(--space-1); color: var(--color-primary); font-weight: 600; }
+.more { display: flex; justify-content: center; }
 .toggle { display: flex; align-items: center; gap: var(--space-3); min-block-size: 2.75rem; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .toggle input { inline-size: 1.25rem; block-size: 1.25rem; flex-shrink: 0; accent-color: var(--color-primary); }
-.form { margin-block-end: var(--space-5); padding-block-end: var(--space-5); border-block-end: 1px solid var(--color-border); }
-.form > p { font-size: var(--font-size-small); }
-.form > button { justify-self: start; }
+.page .note { color: var(--color-text-secondary); font-size: 0.8125rem; line-height: var(--line-height-small); }
+.formActions { display: flex; justify-content: flex-end; }
 @media (max-width: 767px) { .card { padding: var(--space-4); } .page, .card, .form { gap: var(--space-3); } }

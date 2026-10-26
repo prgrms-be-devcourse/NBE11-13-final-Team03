@@ -45,7 +45,7 @@ test('missing Firebase fields and unsupported/secure-context capabilities never 
 })
 
 for (const [name, overrides, expected] of [
-  ['configuration missing', { ready: false }, /Firebase/], ['unsupported browser', { supported: false }, /지원/],
+  ['configuration missing', { ready: false }, /지금은 푸시 알림을 사용할 수 없어요/], ['unsupported browser', { supported: false }, /이 브라우저에서는 푸시 알림을 사용할 수 없어요/],
   ['permission denied', { requestPermission: async () => 'denied' }, /권한/], ['permission dismissed', { requestPermission: async () => 'default' }, /권한/],
   ['worker registration failed', { token: async () => { throw Error('worker fixture') } }, /worker fixture/],
   ['FCM token failed', { token: async () => { throw Error('token fixture') } }, /token fixture/],
@@ -84,7 +84,7 @@ test('rapid duplicate enable shares one permission/token/register flow and compe
   const waiting = deferred(), f = fixture({ requestPermission: () => waiting.promise })
   const a = f.controller.enable(), b = f.controller.enable()
   assert.equal(a, b)
-  await assert.rejects(f.controller.disable(), /진행/)
+  await assert.rejects(f.controller.disable(), /다른 푸시 알림 작업을 처리하고 있어요/)
   waiting.resolve('granted'); await a
   assert.equal(f.calls.filter(call => call === 'register').length, 1)
 })
@@ -121,7 +121,7 @@ test('global off preserves in-app setting and does not invent an endpoint ID whe
 
 test('failed endpoint deletion still revokes local reception and retains exact cleanup IDs', async () => {
   const f = fixture({ deactivate: async () => { throw Error('server fixture') } }, { binding: 11, users: { 11: { endpointIds: [7], phase: 'active' } } })
-  await assert.rejects(f.controller.disable(), /일부 서버/)
+  await assert.rejects(f.controller.disable(), /해제가 모두 끝났는지 확인하지 못했어요/)
   assert.ok(f.calls.includes('remove-token'))
   assert.deepEqual(f.store(), { binding: null, users: { 11: { endpointIds: [7], phase: 'cleanup' } } })
 })

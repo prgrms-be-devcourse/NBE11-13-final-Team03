@@ -18,33 +18,34 @@ function render(status) {
   client.setQueryData(['notifications', 11, 'push-browser'], { ready: true, supported: true, permission: 'granted', connected: false, phase: null, knownEndpoints: 0, controller: {}, ...status })
   try { return renderToStaticMarkup(e(QueryClientProvider, { client }, e(Controls, { owner, settings, disabled: false }))) } finally { client.clear() }
 }
-test('missing public configuration renders required env guidance and a disabled enable action', () => {
+test('missing configuration shows a plain unavailable message without developer settings and disables connecting', () => {
   const html = render({ ready: false })
-  assert.match(html, /VITE_FIREBASE_\*/)
-  assert.match(html, /<button[^>]*disabled=""[^>]*>이 브라우저 푸시 연결·재확인/)
-  assert.match(html, /연결 완료 미확인/)
+  assert.match(html, /지금은 푸시 알림을 사용할 수 없어요/)
+  assert.doesNotMatch(html, /VITE_FIREBASE|Firebase|VAPID|\.env/)
+  assert.match(html, /<button[^>]*disabled=""[^>]*>이 브라우저 연결/)
+  assert.match(html, /연결 확인 안 됨/)
 })
-test('unsupported environment and denied permissions disable permission-requesting action without claiming subscription', () => {
+test('unsupported environment and blocked permissions disable connecting without claiming a subscription', () => {
   for (const status of [{ supported: false }, { permission: 'denied' }]) {
     const html = render(status)
-    assert.match(html, /<button[^>]*disabled=""[^>]*>이 브라우저 푸시 연결·재확인/)
-    assert.match(html, /연결 완료 미확인/)
+    assert.match(html, /<button[^>]*disabled=""[^>]*>이 브라우저 연결/)
+    assert.match(html, /연결 확인 안 됨/)
   }
-  assert.match(render({ supported: false }), /iOS/)
-  assert.match(render({ permission: 'denied' }), /권한이 거부/)
+  assert.match(render({ supported: false }), /이 브라우저에서는 푸시 알림을 사용할 수 없어요[\s\S]*홈 화면에 추가한 Y:ON/)
+  assert.match(render({ permission: 'denied' }), /알림 권한이 차단되어 있어요/)
 })
-test('server-global preference and browser binding are shown separately, including partial registration and cleanup recovery', () => {
-  assert.match(render({ phase: 'pending' }), /일부 등록이 진행됐지만/)
-  assert.match(render({ phase: 'cleanup' }), /서버 엔드포인트 정리/)
+test('overall push state and this browser are shown separately, including unfinished connection and cleanup recovery', () => {
+  assert.match(render({ phase: 'pending' }), /연결이 끝나지 않았어요/)
+  assert.match(render({ phase: 'cleanup' }), /이전 연결 정리가 끝나지 않았어요/)
   const html = render({ connected: true, phase: 'active' })
-  assert.match(html, /사용자 전체 푸시 설정: 켜짐/)
+  assert.match(html, /푸시 알림: 켜짐/)
   assert.match(html, /이 브라우저: 연결됨/)
-  assert.match(html, /이 브라우저 해제/); assert.match(html, /모든 기기 푸시 끄기/)
-  assert.match(html, /등록 ID가 없는 서버 엔드포인트/)
+  assert.match(html, /<div class="actions"><button[^>]*>이 브라우저 연결<\/button><button[^>]*>이 브라우저 해제<\/button><button[^>]*>모든 기기 푸시 끄기<\/button><button[^>]*>상태 다시 확인<\/button><\/div>/)
 })
-test('push controls use button actions instead of claiming permission or server preference alone is a completed subscription', () => {
+test('push controls explain the two off actions once in plain language and hide internal implementation details', () => {
   const html = render({ ready: true, connected: false, permission: 'granted' })
-  assert.match(html, /연결 완료 미확인/)
-  assert.match(html, /다른 기기를 끄지 않아요/)
-  assert.match(html, /브라우저 권한 자체는 브라우저 설정/)
+  assert.match(html, /연결 확인 안 됨/)
+  assert.equal((html.match(/이 기기만/g) ?? []).length, 1)
+  assert.match(html, /‘모든 기기 푸시 끄기’는 모든 기기의 푸시 알림을 꺼요/)
+  assert.doesNotMatch(html, /서버 엔드포인트|등록 ID|FCM|서비스 워커|Web Locks|Push API|HTTPS/)
 })

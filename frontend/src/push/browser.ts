@@ -15,7 +15,7 @@ const config = readPushConfig(import.meta.env)
 let registration: ServiceWorkerRegistration | undefined
 let tokenClient: Messaging | undefined
 function messaging() {
-  if (!config) throw new PushError('Firebase 설정이 필요해요.')
+  if (!config) throw new PushError('지금은 푸시 알림을 사용할 수 없어요.')
   const app = getApps().find(app => app.name === 'yon-push') ?? initializeApp(config, 'yon-push')
   return getMessaging(app)
 }
@@ -37,22 +37,22 @@ async function token(): Promise<string> {
   const url = new URL(workerUrl, location.href)
   const scope = new URL(`.${pushScopeSuffix}`, url).pathname
   const existing = await navigator.serviceWorker.getRegistration(new URL(scope, location.origin))
-  if (existing && !new URL(existing.scope).pathname.endsWith(pushScopeSuffix)) throw new PushError('기존 서비스 워커와 범위가 충돌해요.')
-  registration = await navigator.serviceWorker.register(url, { scope }).catch(() => { throw new PushError('서비스 워커 등록에 실패했어요. HTTPS·브라우저 설정을 확인해 주세요.') })
+  if (existing && !new URL(existing.scope).pathname.endsWith(pushScopeSuffix)) throw new PushError('이 브라우저에 푸시 알림을 연결하지 못했어요. 새로고침한 뒤 다시 시도해 주세요.')
+  registration = await navigator.serviceWorker.register(url, { scope }).catch(() => { throw new PushError('이 브라우저에 푸시 알림을 연결하지 못했어요. 잠시 후 다시 시도해 주세요.') })
   if (!registration.active) await new Promise<void>((resolve, reject) => {
     const worker = registration?.installing ?? registration?.waiting
-    if (!worker) { reject(new PushError('서비스 워커를 활성화하지 못했어요.')); return }
+    if (!worker) { reject(new PushError('이 브라우저에 푸시 알림을 연결하지 못했어요. 잠시 후 다시 시도해 주세요.')); return }
     if (worker.state === 'activated') { resolve(); return }
     const changed = () => {
       if (worker.state === 'activated') { worker.removeEventListener('statechange', changed); resolve() }
-      if (worker.state === 'redundant') { worker.removeEventListener('statechange', changed); reject(new PushError('서비스 워커 등록에 실패했어요.')) }
+      if (worker.state === 'redundant') { worker.removeEventListener('statechange', changed); reject(new PushError('이 브라우저에 푸시 알림을 연결하지 못했어요. 잠시 후 다시 시도해 주세요.')) }
     }
     worker.addEventListener('statechange', changed)
   })
   try {
     tokenClient = messaging()
     return await getToken(tokenClient, { vapidKey: config.vapidKey, serviceWorkerRegistration: registration })
-  } catch { throw new PushError('FCM 등록 토큰 발급에 실패했어요. Firebase 설정과 연결 상태를 확인해 주세요.') }
+  } catch { throw new PushError('푸시 알림 연결에 실패했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.') }
 }
 async function removeToken() {
   // 새로고침·설정 누락 시에도 전용 registration의 실제 브라우저 구독부터 해제한다.

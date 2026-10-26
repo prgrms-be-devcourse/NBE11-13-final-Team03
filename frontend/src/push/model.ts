@@ -17,14 +17,14 @@ export type PushDependencies = {
 export function createPushController(userId: number, deps: PushDependencies) {
   let pending: { kind: string; promise: Promise<void> } | undefined
   function run(kind: string, work: () => Promise<void>): Promise<void> {
-    if (pending) return pending.kind === kind ? pending.promise : Promise.reject(new PushError('다른 푸시 작업이 진행 중이에요.'))
+    if (pending) return pending.kind === kind ? pending.promise : Promise.reject(new PushError('다른 푸시 알림 작업을 처리하고 있어요.'))
     const promise = work().finally(() => { if (pending?.promise === promise) pending = undefined })
     pending = { kind, promise }; return promise
   }
   function enable(request = true): Promise<void> {
     return run('enable', async () => {
-      if (!deps.ready) throw new PushError('Firebase 웹 앱 설정과 VAPID 공개 키가 필요해요.')
-      if (!deps.supported) throw new PushError('HTTPS 또는 localhost의 푸시 지원 브라우저에서 이용해 주세요.')
+      if (!deps.ready) throw new PushError('지금은 푸시 알림을 사용할 수 없어요.')
+      if (!deps.supported) throw new PushError('이 브라우저에서는 푸시 알림을 사용할 수 없어요.')
       deps.assertOwner()
       // 권한 요청은 사용자 클릭의 동기 실행 구간에서 시작한다. 자동 재연결은 요청하지 않는다.
       const permission = deps.permission() === 'granted' ? Promise.resolve('granted') : request ? deps.requestPermission() : Promise.resolve(deps.permission())
@@ -63,7 +63,7 @@ export function createPushController(userId: number, deps: PushDependencies) {
           record.endpointIds = record.endpointIds.filter(id => id !== old); deps.save(store)
         }
         const updated = await deps.update({ inAppEnabled: settings.inAppEnabled, pushEnabled: true }); deps.assertOwner()
-        if (!updated.pushEnabled) throw new PushError('서버의 푸시 설정 저장을 확인하지 못했어요.')
+        if (!updated.pushEnabled) throw new PushError('푸시 알림 켜기를 확인하지 못했어요.')
         record.phase = 'active'; deps.save(store)
       })
     })
@@ -85,7 +85,7 @@ export function createPushController(userId: number, deps: PushDependencies) {
       }
       deps.assertOwner()
       if (store.binding === userId || store.binding === null) { await deps.removeToken(); store.binding = null; deps.save(store) }
-      if (failed) throw new PushError('이 브라우저 수신은 해제했지만 일부 서버 등록 해제를 확인하지 못했어요. 다시 해제해 주세요.')
+      if (failed) throw new PushError('이 브라우저 알림은 껐지만 해제가 모두 끝났는지 확인하지 못했어요. 다시 해제해 주세요.')
       if (record) { delete store.users[userId]; deps.save(store) }
     }))
   }

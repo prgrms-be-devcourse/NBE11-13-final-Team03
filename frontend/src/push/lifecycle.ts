@@ -4,9 +4,9 @@ import { deactivatePushEndpoint } from '../api/push.ts'
 
 export const pushScopeSuffix = '/yon-fcm-push/'
 export async function pushLock<T>(work: () => Promise<T>): Promise<T> {
-  if (typeof navigator === 'undefined' || !navigator.locks) throw new PushError('다른 탭과 안전하게 구독을 관리할 수 없는 브라우저예요.')
+  if (typeof navigator === 'undefined' || !navigator.locks) throw new PushError('이 브라우저에서는 푸시 알림을 사용할 수 없어요.')
   return navigator.locks.request('yon.push.browser.v1', { ifAvailable: true }, async lock => {
-    if (!lock) throw new PushError('다른 탭에서 푸시 연결을 처리 중이에요. 잠시 후 다시 시도해 주세요.')
+    if (!lock) throw new PushError('다른 탭에서 푸시 알림을 처리하고 있어요. 잠시 후 다시 시도해 주세요.')
     return work()
   })
 }
@@ -15,7 +15,7 @@ export async function revokeBrowserPush(): Promise<void> {
   const registrations = await navigator.serviceWorker.getRegistrations()
   for (const registration of registrations.filter(value => new URL(value.scope).pathname.endsWith(pushScopeSuffix))) {
     const subscription = await registration.pushManager.getSubscription()
-    if (subscription && !await subscription.unsubscribe()) throw new PushError('브라우저 구독 해제를 확인하지 못했어요. 다시 시도해 주세요.')
+    if (subscription && !await subscription.unsubscribe()) throw new PushError('이 브라우저의 푸시 알림 해제를 확인하지 못했어요. 다시 시도해 주세요.')
     for (const notification of await registration.getNotifications()) notification.close()
   }
 }
