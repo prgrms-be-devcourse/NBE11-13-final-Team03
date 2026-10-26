@@ -134,7 +134,19 @@ class RawIngestBenchmarkTest {
 
     private record Measured(int txSize, String scenario, int size, int run, int processed, long millis, long jdbcMillis,
                             long[] counts, long[] kindMillis, long peakHeapMb, long gcCount, long gcMillis,
-                            java.util.Map<String, long[]> byTable) {
+                            java.util.Map<String, long[]> byTable, long[] db) {
+    }
+
+    /** DB 쪽 누적 지표: WAL 바이트, 전체 페이지 이미지(FPI) 수, 시간 체크포인트, 요청 체크포인트 (PostgreSQL 14+) */
+    private long[] dbCounters() {
+        try {
+            return jdbc.queryForObject("""
+                    SELECT w.wal_bytes::bigint, w.wal_fpi, b.checkpoints_timed, b.checkpoints_req
+                    FROM pg_stat_wal w, pg_stat_bgwriter b
+                    """, (rs, i) -> new long[]{rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getLong(4)});
+        } catch (Exception e) {
+            return new long[4];
+        }
     }
 
     @Test
@@ -214,10 +226,16 @@ class RawIngestBenchmarkTest {
         ManagementFactory.getMemoryPoolMXBeans().forEach(MemoryPoolMXBean::resetPeakUsage);
         long gcCount0 = gcCount();
         long gcMillis0 = gcMillis();
+        long[] db0 = dbCounters();
         JdbcTimer.reset();
         long start = System.nanoTime();
         int processed = action.getAsInt();
         long millis = (System.nanoTime() - start) / 1_000_000;
+        long[] db1 = dbCounters();
+        long[] db = new long[4];
+        for (int i = 0; i < 4; i++) {
+            db[i] = db1[i] - db0[i];
+        }
         JdbcTimer.Kind[] kinds = JdbcTimer.Kind.values();
         long[] counts = new long[kinds.length];
         long[] kindMillis = new long[kinds.length];
@@ -229,7 +247,7 @@ class RawIngestBenchmarkTest {
                 .filter(p -> p.getType() == MemoryType.HEAP)
                 .mapToLong(p -> p.getPeakUsage().getUsed()).sum() / 1024 / 1024;
         Measured m = new Measured(txSize, scenario, size, run, processed, millis, JdbcTimer.totalMillis(), counts, kindMillis,
-                peakHeap, gcCount() - gcCount0, gcMillis() - gcMillis0, JdbcTimer.byTable());
+                peakHeap, gcCount() - gcCount0, gcMillis() - gcMillis0, JdbcTimer.byTable(), db);
         System.out.printf("[ingest-benchmark] tx=%d %s N=%d run=%d processed=%d %dms (jdbc %dms)%n",
                 txSize, scenario, size, run, processed, millis, m.jdbcMillis());
         return m;
@@ -370,6 +388,7 @@ class RawIngestBenchmarkTest {
         row(sb, "PostgreSQL", show("server_version") + " (shared_buffers=" + show("shared_buffers")
                 + ", work_mem=" + show("work_mem") + ", synchronous_commit=" + show("synchronous_commit") + ")");
         row(sb, "PostgreSQL WAL", "wal_buffers=" + show("wal_buffers") + ", max_wal_size=" + show("max_wal_size")
+                + ", checkpoint_completion_target=" + show("checkpoint_completion_target")
                 + ", checkpoint_timeout=" + show("checkpoint_timeout") + ", wal_compression=" + show("wal_compression")
                 + ", full_page_writes=" + show("full_page_writes"));
         row(sb, "JDBC URL 옵션", jdbcOptions());
@@ -432,6 +451,13 @@ class RawIngestBenchmarkTest {
             }
             String perItem = m.processed() == 0 ? "-" : String.format("%.1f", (double) sqlTotal / m.processed());
             sb.append(String.format("| %d | %s | %d |%s %s |%n", m.txSize(), m.scenario(), m.size(), cells, perItem));
+        }
+
+        sb.append("\n## DB 쓰기 (WAL·체크포인트, 측정 구간 동안 늘어난 양)\n\n| 트랜잭션 크기 | 시나리오 | 원본 N | 회차 | WAL(MB) | 전체 페이지 이미지 | 체크포인트(시간) | 체크포인트(요청) |\n")
+                .append("|---:|---|---:|---:|---:|---:|---:|---:|\n");
+        for (Measured m : results) {
+            sb.append(String.format("| %d | %s | %d | %d | %d | %d | %d | %d |%n", m.txSize(), m.scenario(), m.size(), m.run(),
+                    m.db()[0] / 1024 / 1024, m.db()[1], m.db()[2], m.db()[3]));
         }
 
         sb.append("\n## JVM\n\n| 트랜잭션 크기 | 시나리오 | 원본 N | 힙 최대(MB) | GC 횟수 | GC 시간(ms) |\n|---:|---|---:|---:|---:|---:|\n");
