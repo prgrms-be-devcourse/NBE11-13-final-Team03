@@ -63,4 +63,5 @@ Notification 서버의 NOTIFICATION_PUSH_ENABLED 활성화 없이 테스트한�
 
 2026-10-26 KST: JavaScript 문법, Hosting smoke target, 로컬 정적 파일 HTTP 응답과 브라우저 화면 표시를 확인했다.
 합성 데이터로 서비스 워커의 notification payload 중복 표시 방지·data-only 표시·페이지 전달을 확인했다.
-실제 프로젝트의 토큰 발급·FCM 수신·Hosting 배포는 아직 수행하지 않았다. SDK는 공식 CDN 13.0.0을 사용한다.
+2026-10-27 KST: localhost에서 실제 Firebase 프로젝트의 FCM 토큰을 발급하고 Firebase 콘솔 테스트 메시지 전송을 완료했다.
+실제 푸시 수신 성공 여부와 공유용 HTTPS Hosting 배포·수신은 아직 별도 확인이 필요하다. SDK는 공식 CDN 13.0.0을 사용한다.
