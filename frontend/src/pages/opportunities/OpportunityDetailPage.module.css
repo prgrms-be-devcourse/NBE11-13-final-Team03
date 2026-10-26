@@ -36,9 +36,7 @@
   letter-spacing: -0.04em;
 }
 
-.meta,
-.statuses,
-.eligibilityBadge {
+.meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -47,20 +45,39 @@
 }
 
 .meta {
-  justify-content: space-between;
+  justify-content: flex-start;
 }
+
+.meta > span {
+  padding: var(--space-1) var(--space-2);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.headlineInfo, .headlineRegions { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); list-style: none; padding: 0; margin-block: var(--space-2); font-size: var(--font-size-small); overflow-wrap: anywhere; }
+.headlineInfo { color: var(--color-text-secondary); }
+.headlineInfo > li + li { padding-inline-start: var(--space-3); border-inline-start: 1px solid var(--color-border); }
+.headlineRegions { color: var(--color-text-primary); font-weight: 600; padding-block-start: var(--space-3); margin-block-start: var(--space-3); border-block-start: 1px solid var(--color-border); }
+.eligibilityDetails { padding-block-start: var(--space-3); margin-block-start: var(--space-3); border-block-start: 1px solid var(--color-border); }
+.conditionHeader { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+.conditionHeader h3, .conditionHeader p { margin: 0; }
+.conditionResult { color: var(--color-text-primary); font-size: var(--font-size-small); font-weight: 600; }
 
 .type,
 .applicationStatus {
   padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: var(--color-primary-soft);
   color: var(--color-primary);
   font-weight: 600;
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
-.statuses {
-  margin-block-start: var(--space-3);
+.type[data-opportunity-type='VOCATIONAL_TRAINING'] {
+  background: var(--color-accent-blue);
+  color: var(--color-status-info-text);
 }
 
 .columns,
@@ -109,6 +126,21 @@
   margin: 0;
 }
 
+.info > div + div {
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--color-border);
+}
+
+.facts {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.sourceText {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+}
+
 .info dd,
 .sourceText {
   white-space: pre-wrap;
@@ -147,12 +179,6 @@
   color: var(--color-primary);
 }
 
-.links {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
 .externalLink {
   display: block;
   max-inline-size: 100%;
@@ -166,25 +192,27 @@
 }
 
 @media (min-width: 1024px) {
+  .trainingInfo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .columns {
     grid-template-columns: minmax(0, 1fr) minmax(19rem, 0.45fr);
   }
 }
 
-.summaryActions { display: grid; gap: var(--space-3); margin-block: var(--space-4); }
+.summaryActions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-block: var(--space-3); }
+.trainingInfo > div, .trainingInfo > div + div { min-inline-size: 0; padding-block: 0 var(--space-3); border-block-start: 0; border-block-end: 1px solid var(--color-border); }
+.summaryActions > a { flex: 1 1 100%; }
 .summary { min-inline-size: 0; }
 .summaryActions > a { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-3); background: var(--color-primary); border-radius: var(--radius-sm); color: var(--color-surface); text-decoration: none; text-align: center; }
 .summaryActions > a span { color: inherit; }
 .summaryActions > a:hover { text-decoration: underline; }
 @media (min-width: 1024px) {
-  .mainContent { grid-column: 1; grid-row: 1 / span 2; }
+  .mainContent { grid-column: 1; grid-row: 1; }
   .summary { grid-column: 2; grid-row: 1; }
-  .columns > aside { grid-column: 2; grid-row: 2; align-self: start; }
 }
 
-.applicationStatus[data-application-status='OPEN'],
-.applicationStatus[data-application-status='ALWAYS_OPEN'] { background: var(--color-primary-soft); color: var(--color-primary-dark); }
-.applicationStatus[data-application-status='UPCOMING'] { background: var(--color-accent-blue); color: var(--color-status-info-text); }
+.applicationStatus[data-application-status='OPEN'] { background: var(--color-primary-soft); color: var(--color-primary-dark); }
+.applicationStatus[data-application-status='UPCOMING'],
+.applicationStatus[data-application-status='ALWAYS_OPEN'] { background: var(--color-accent-blue); color: var(--color-status-info-text); }
 .applicationStatus[data-application-status='CLOSED'] { background: var(--color-status-muted-soft); color: var(--color-status-muted-text); }
 .applicationStatus[data-application-status='UNKNOWN'] { background: var(--color-surface-muted); color: var(--color-text-secondary); }
 .summaryActions > a:hover { background: var(--color-primary-dark); }

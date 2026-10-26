@@ -37,13 +37,16 @@ export function dateRange(start?: string | null, end?: string | null): string {
   if ((!start && !end) || (start && !isValidDate(start)) || (end && !isValidDate(end)) || (start && end && start > end)) return '일정 확인 필요'
   return start && end ? `${start} ~ ${end}` : start ? `${start}부터 (종료일 미제공)` : `${end}까지 (시작일 미제공)`
 }
-export function applicationWindowText(window: ApplicationWindow): string {
-  if (window.validationStatus !== 'VALID') return `신청기간 확인 필요 · ${validationLabel(window.validationStatus)}`
+// 청년정책은 신청기간, 직업훈련은 모집기간이다. 직업훈련의 교육기간은 이 값이 아니다.
+export function applicationWindowText(window: ApplicationWindow, training = false): string {
+  const unknown = `${training ? '모집기간' : '신청기간'} 확인 필요`
+  if (window.validationStatus === 'UNKNOWN') return unknown
+  if (window.validationStatus !== 'VALID') return `${unknown} · ${validationLabel(window.validationStatus)}`
   switch (window.periodType) {
-    case 'ALWAYS': return '상시 신청'
-    case 'CLOSED': return '신청 마감'
+    case 'ALWAYS': return training ? '상시 모집' : '상시 신청'
+    case 'CLOSED': return training ? '모집 마감' : '신청 마감'
     case 'FIXED': return dateRange(window.startDate, window.endDate)
-    default: return '신청기간 확인 필요'
+    default: return unknown
   }
 }
 
@@ -106,7 +109,7 @@ export function conditionPresentation(c: ConditionItem): { confirmed: boolean; t
     const text = incomeText(c)
     return text ? { confirmed: true, text } : review
   }
-  if (c.type === 'REGION') return { confirmed: true, text: '아래 지역 정보에서 역할과 적용 범위를 확인해 주세요.' }
+  if (c.type === 'REGION') return { confirmed: true, text: '지역 정보에서 역할과 적용 범위를 확인해 주세요.' }
   if (['EMPLOYMENT', 'EDUCATION', 'MARITAL', 'SPECIALIZATION', 'SPECIAL_TARGET'].includes(c.type) && c.status === 'SPECIFIC' && c.values.length && c.values.every((value) => Object.hasOwn(codeLabels, value))) {
     return { confirmed: true, text: c.values.map((value) => codeLabels[value]).join(' · ') }
   }

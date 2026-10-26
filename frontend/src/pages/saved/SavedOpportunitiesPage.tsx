@@ -10,7 +10,7 @@ import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import AsyncState from '../../components/ui/AsyncState'
 import PreferenceActions from '../../components/opportunities/PreferenceActions'
-import { paginationPages, typeLabels } from '../opportunities/searchParams'
+import { classificationLabel, paginationPages, typeLabels } from '../opportunities/searchParams'
 import styles from './SavedOpportunitiesPage.module.css'
 
 function SavedList({ user }: { user: AuthUser }) {
@@ -28,10 +28,13 @@ function SavedList({ user }: { user: AuthUser }) {
     <p>저장한 기회 {data.totalElements.toLocaleString('ko-KR')}개 · 저장한 시각이 최신인 순서예요.</p>
     {result.isFetching && <p role="status">최신 저장 상태를 확인하고 있어요.</p>}
     <ul className={styles.list}>{data.content.map((item) => <li key={item.opportunityId}><Card className={styles.card}>
-      <span>{typeLabels[item.type]}</span><h2><Link to={`/opportunities/${item.opportunityId}`}>{item.title || '제목 미확인'}</Link></h2>
-      <p>{[item.category, item.subCategory].filter(Boolean).join(' · ') || '분류 미제공'}</p>
-      <p>저장 시각 <time dateTime={item.savedAt}>{item.savedAt.replace('T', ' ').replace(/\.\d+$/, '')}</time></p>
-      <PreferenceActions opportunityId={item.opportunityId} title={item.title} saved source="SAVED" disabled={result.isFetching} />
+      <div className={styles.cardMeta}>
+        <span className={styles.type} data-opportunity-type={item.type}>{typeLabels[item.type]}</span>
+        <PreferenceActions opportunityId={item.opportunityId} title={item.title} saved source="SAVED" disabled={result.isFetching} showSaveLabel />
+      </div>
+      <h2><Link to={`/opportunities/${item.opportunityId}`}>{item.title || '제목 미확인'}</Link></h2>
+      {classificationLabel({ ...item, detailCategory: null }) && <p className={styles.muted}>{classificationLabel({ ...item, detailCategory: null })}</p>}
+      <p className={styles.muted}>저장 시각 <time dateTime={item.savedAt}>{item.savedAt.replace('T', ' ').replace(/\.\d+$/, '').replace(/-/g, '.')}</time></p>
     </Card></li>)}</ul>
     <nav className={styles.pagination} aria-label="저장 목록 페이지">
       <Button variant="secondary" disabled={page === 0 || result.isFetching} onClick={() => setPage(page - 1)}>이전</Button>

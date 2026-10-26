@@ -86,6 +86,11 @@ test('application periods respect validation, all period types and one-sided bou
     assert.doesNotMatch(applicationWindowText({ ...policy.applicationWindows[0], validationStatus }), /2026-10-01/)
   }
   assert.match(applicationWindowText(training.applicationWindows[0]), /확인 필요/)
+  assert.equal(applicationWindowText(training.applicationWindows[0], true), '모집기간 확인 필요')
+  assert.equal(applicationWindowText({ ...policy.applicationWindows[0], validationStatus: 'UNKNOWN' }), '신청기간 확인 필요')
+  assert.equal(applicationWindowText({ ...policy.applicationWindows[0], validationStatus: 'UNVERIFIED' }, true), '모집기간 확인 필요 · 공식 근거 미확인')
+  assert.equal(applicationWindowText({ periodType: 'ALWAYS', validationStatus: 'VALID' }, true), '상시 모집')
+  assert.equal(applicationWindowText({ periodType: 'CLOSED', validationStatus: 'VALID' }, true), '모집 마감')
   assert.equal(dateRange('2026-10-25', null), '2026-10-25부터 (종료일 미제공)')
   assert.equal(dateRange(null, '2026-10-25'), '2026-10-25까지 (시작일 미제공)')
   assert.equal(dateRange('2026-02-30', '2026-03-01'), '일정 확인 필요')

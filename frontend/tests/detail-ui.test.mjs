@@ -22,41 +22,161 @@ const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
 const { MemoryRouter, Routes, Route } = require('react-router-dom')
 const { QueryClient, QueryClientProvider } = require('@tanstack/react-query')
+const { AuthContext } = require('../src/auth/AuthContext.ts')
 const Page = require('../src/pages/opportunities/OpportunityDetailPage.tsx').default
 const SearchPage = require('../src/pages/opportunities/OpportunitiesPage.tsx').default
 const { ApiError } = require('../src/api/ApiError.ts')
 const element = React.createElement
 
-function renderDetail(data, { path = '/opportunities/42', state, error } = {}) {
+function renderDetail(data, { path = '/opportunities/42', state, error, auth = { status: 'anonymous' } } = {}) {
   const id = path.split('/').at(-1)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, gcTime: Infinity, staleTime: Infinity } } })
   if (data) client.setQueryData(['opportunity-detail', id], data)
   if (error) client.getQueryCache().build(client, { queryKey: ['opportunity-detail', id] }).setState({ status: 'error', error, fetchStatus: 'idle' })
   try {
     return renderToStaticMarkup(element(QueryClientProvider, { client }, element(MemoryRouter, { initialEntries: [{ pathname: path, state }] },
-      element(Routes, null, element(Route, { path: '/opportunities/:id', element: element(Page) })))))
+      element(AuthContext.Provider, { value: auth }, element(Routes, null, element(Route, { path: '/opportunities/:id', element: element(Page) }))))))
   } finally { client.clear() }
 }
 
-test('policy detail shows all application windows separately from business dates and read-only saved state', () => {
+test('policy detail shows all application windows separately from business dates and accessible bookmark state', () => {
   const html = renderDetail(policy)
   assert.match(html, /<h1[^>]*>테스트 정책 상세<\/h1>/)
   for (const text of ['정책 소개 첫 문단', '취업 지원 내용', '온라인 신청', '서류 심사', '신분증', '테스트 주관 기관', '테스트 운영 기관',
-    '2026-10-01 ~ 2026-10-31', '2026-11-01 ~ 2026-11-30', '1차 접수', '2차 접수', '사업기간 (신청기간과 별개)', '2026-01-01 ~ 2026-12-31', '저장 안 함']) assert.ok(html.includes(text), text)
-  assert.match(html, /모집 상태: 모집 중/)
+    '2026.10.01 ~ 2026.10.31', '2026.11.01 ~ 2026.11.30', '사업기간 (신청기간과 별개)', '2026.01.01 ~ 2026.12.31', '저장하려면 로그인']) assert.ok(html.includes(text), text)
+  assert.doesNotMatch(html, /원문 기간 안내|1차 접수|2차 접수/)
+  assert.match(html, /data-application-status="OPEN">모집 중<\/span>/)
+  assert.doesNotMatch(html, /모집 상태:/)
   assert.doesNotMatch(html, /TEST-ONLY|policyNo|<button[^>]*>저장/)
-  assert.match(renderDetail({ ...policy, saved: true }), /저장됨/)
+  assert.match(renderDetail({ ...policy, saved: true }, { auth: { status: 'authenticated', user: { id: 11 } } }), /저장됨/)
+})
+
+test('policy consolidates agency roles and omits the internal application-condition section entirely', () => {
+  const html = renderDetail({ ...policy, detail: { ...policy.detail, supervisingInstitutionName: '동일 기관', operatingInstitutionName: ' 동일 기관 ' } })
+  const main = html.slice(html.indexOf('class="stack mainContent"'))
+  const headings = ['신청기간', '정책 소개와 지원 내용', '신청 방법']
+  for (let index = 1; index < headings.length; index++) assert.ok(main.indexOf(`<h2>${headings[index - 1]}</h2>`) < main.indexOf(`<h2>${headings[index]}</h2>`))
+  assert.match(html, /주관·운영 기관: 동일 기관/)
+  assert.equal((html.match(/동일 기관/g) ?? []).length, 1)
+  assert.doesNotMatch(html, /<h2>신청 자격|<h2>운영 기관과 사업기간/)
+  assert.doesNotMatch(main, /<h2>지원·참여 조건|신청 조건 확인|policyConditions|만 19세|원문 근거 보기/)
+  const different = renderDetail(policy)
+  assert.match(different, /주관 기관: 테스트 주관 기관/)
+  assert.match(different, /운영 기관: 테스트 운영 기관/)
+})
+
+test('policy residence and implementation roles remain distinct without training advice or stale below-region directions', () => {
+  const residenceOnly = renderDetail({ ...policy, regions: [policy.regions[0]], conditions: [condition({ type: 'REGION', field: 'residenceRegion', status: 'SPECIFIC', evidenceText: '실제 거주지 조건 원문' })] })
+  assert.match(residenceOnly, /거주지 조건: 전국/)
+  assert.doesNotMatch(residenceOnly, /시행·교육 지역|교육기관|아래 지역 정보/)
+  assert.match(residenceOnly, /거주지 조건은 신청 자격 기준이며, 정책 시행 지역과 다를 수 있어요/)
+  assert.doesNotMatch(residenceOnly, /실제 거주지 조건 원문|policyCondition|검증 완료/)
+  const both = renderDetail(policy)
+  assert.match(both, /정책 시행 지역: 서울/)
+  assert.match(both, /거주지 조건은 신청 자격 기준이며, 정책 시행 지역과 다를 수 있어요/)
+  assert.doesNotMatch(both, /시행·교육 지역/)
+})
+
+test('policy always-open, dated and unverified application periods stay distinct from business dates', () => {
+  const always = renderDetail({ ...policy, applicationWindows: [{ periodType: 'ALWAYS', validationStatus: 'VALID', periodText: '상시 접수 원문' }] })
+  assert.match(always, /class="facts">상시 신청<\/p>/)
+  assert.doesNotMatch(always, /원문 기간 안내|상시 접수 원문/)
+  const unknown = renderDetail({ ...policy, applicationWindows: [{ periodType: 'UNKNOWN', validationStatus: 'UNKNOWN', periodText: '접수 일정 미확인 원문' }] })
+  assert.match(unknown, /class="facts">신청기간 확인 필요<\/p>/)
+  assert.match(unknown, /원문 기간 안내: 접수 일정 미확인 원문/)
+  assert.doesNotMatch(unknown, /class="facts">2026\.01\.01/)
+  const absent = renderDetail({ ...policy, detail: {}, conditions: [], eligibility: null, detailUrl: null })
+  assert.doesNotMatch(absent, /<h2>정책 소개와 지원 내용|<h2>신청 방법|<h2>운영 기관과 사업기간|target="_blank"/)
+  assert.doesNotMatch(absent, /<h2>신청 자격<\/h2>/)
+  assert.doesNotMatch(absent, /신청 조건 확인/)
+})
+
+test('policy judgment groups condition name, result and exact server explanation without inventing matches', () => {
+  const html = renderDetail({ ...policy, eligibility: { status: 'POSSIBLY_ELIGIBLE', reason: '서버의 실제 종합 사유', conditions: [
+    { type: 'REGION', requirement: 'REQUIRED', result: 'CHECK_REQUIRED', reason: '서버의 실제 지역 확인 사유' },
+  ] } })
+  const reason = html.slice(html.indexOf('신청 가능성 판정 근거'), html.indexOf('class="stack mainContent"'))
+  assert.match(reason, /class="conditionHeader"[\s\S]*?지역 · 필수[\s\S]*?class="conditionResult">직접 확인 필요/)
+  assert.match(reason, /서버의 실제 종합 사유/)
+  assert.match(reason, /서버의 실제 지역 확인 사유/)
+  assert.doesNotMatch(reason, /신청 조건 충족/)
 })
 
 test('training future educational dates do not change UNKNOWN recruitment; costs remain neutral source values including zero', () => {
   const html = renderDetail(training, { path: '/opportunities/43' })
-  assert.match(html, /모집 상태: 상태 미확인/)
-  assert.doesNotMatch(html, /모집 상태: 모집 중|모집 상태: 개강 예정/)
-  for (const text of ['교육기간 (신청기간과 별개)', '2099-01-01 ~ 2099-03-31', '테스트 교육기관', '서울 교육 장소', '20명', '02-1234-5678',
+  assert.match(html, /모집 상태 미확인/)
+  assert.doesNotMatch(html, /data-application-status="UNKNOWN">모집 중|data-application-status="UNKNOWN">개강 예정/)
+  for (const text of ['교육기간 (신청기간과 별개)', '2099.01.01 ~ 2099.03.31', '테스트 교육기관', '서울 교육 장소', '20명', '02-1234-5678',
     '실제 훈련비 (원본 제공값)', '500,000', '수강비 (원본 제공값)']) assert.ok(html.includes(text), text)
-  assert.match(html, /수강비 \(원본 제공값\)<\/dt><dd>0<\/dd>/)
+  assert.match(html, /수강비 \(원본 제공값\)<\/dt><dd>확인 필요<\/dd>/)
   assert.doesNotMatch(html, /INTERNAL-ONLY|INTERNAL-CUSTOMER|TEST-TRAINING|weekendTypeCode/)
-  assert.match(html, /비용의 단위·지원 범위·최종 본인 부담액은 공식 공고/)
+  assert.match(html, /정확한 수강료와 본인 부담금은 교육기관에 확인해 주세요/)
+  assert.equal((html.match(/교육기간과 모집기간은 다를 수 있습니다\./g) ?? []).length, 1)
+  // 청년정책의 사업기간 안내와 같은 위치에서 모집기간과 교육기간의 차이를 안내한다.
+  assert.match(html, /<h2>모집기간<\/h2>[\s\S]*?<p class="muted">교육기간과 모집기간은 다를 수 있습니다\.<\/p><\/div><\/section>/)
+  assert.match(renderDetail(policy), /<h2>신청기간<\/h2>[\s\S]*?<p class="muted">사업기간과 신청기간은 다를 수 있습니다\.<\/p><\/div><\/section>/)
+  assert.doesNotMatch(html, /모집 상태: 상태 미확인|0으로 표시되어도|교육 일정은 실제 모집기간/)
+  const paid = renderDetail({ ...training, detail: { ...training.detail, courseFee: 120000 } }, { path: '/opportunities/43' })
+  assert.match(paid, /수강비 \(원본 제공값\)<\/dt><dd>120,000<\/dd>/)
+})
+
+test('unknown eligibility joins the header badges and unknown application periods use concise copy with source evidence below', () => {
+  const html = renderDetail({ ...training,
+    eligibility: { status: 'UNKNOWN', reason: '', conditions: [] },
+    applicationWindows: [{ ...training.applicationWindows[0], periodText: '모집 일정 원문' }],
+  }, { path: '/opportunities/43' })
+  const headerBadges = html.slice(html.indexOf('class="meta"'), html.indexOf('id="detail-title"'))
+  assert.match(headerBadges, /직업훈련/)
+  assert.match(headerBadges, /모집 상태 미확인/)
+  assert.match(headerBadges, /판정 불가/)
+  assert.match(html, /모집기간 확인 필요<\/p><p class="sourceText">원문 기간 안내: 모집 일정 원문/)
+  assert.doesNotMatch(html, /신청기간 확인 필요 · 미확인|class="statuses"/)
+})
+
+test('detail keeps type colors and uses a labeled bookmark without changing save semantics', () => {
+  const html = renderDetail({ ...training, category: '교육･직업훈련', subCategory: '직업훈련' }, { path: '/opportunities/43', auth: { status: 'authenticated', user: { id: 11 } } })
+  assert.match(html, /class="type" data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
+  assert.doesNotMatch(html, /교육･직업훈련 · 직업훈련/)
+  assert.match(html, /교육･직업훈련/)
+  assert.match(html, /aria-pressed="(?:true|false)"/)
+  assert.match(html, /lucide-bookmark/)
+  assert.match(html, /저장하기|저장됨/)
+  assert.doesNotMatch(html, />저장 안 함</)
+  const anonymous = renderDetail(policy)
+  assert.match(anonymous, /href="\/login\?returnTo=%2Fopportunities%2F42"/)
+  const duplicate = renderDetail({ ...policy, category: ' 일자리 ', subCategory: '일자리' })
+  assert.doesNotMatch(duplicate, /일자리 · 일자리/)
+  assert.match(anonymous, /class="facts">2026\.10\.01 ~ 2026\.10\.31/)
+  assert.match(anonymous, /사업기간과 신청기간은 다를 수 있습니다/)
+  const css = fs.readFileSync(new URL('../src/pages/opportunities/OpportunityDetailPage.module.css', import.meta.url), 'utf8')
+  assert.match(css, /data-opportunity-type='VOCATIONAL_TRAINING'[\s\S]*?var\(--color-accent-blue\)/)
+})
+
+test('detail groups metadata, hides absent fields and presents an unconfirmed zero course fee as needing confirmation', () => {
+  const html = renderDetail({ ...training, regions: [], detail: { institutionName: '테스트 기관', trainingStartDate: '2099-01-01', courseFee: 0 } }, { path: '/opportunities/43' })
+  assert.ok(html.indexOf('data-application-status="UNKNOWN"') < html.indexOf('id="detail-title"'))
+  assert.match(html, /class="headlineInfo"[\s\S]*?테스트 기관/)
+  assert.match(html, /class="info trainingInfo"/)
+  assert.match(html, /수강비 \(원본 제공값\)<\/dt><dd>확인 필요<\/dd>/)
+  assert.match(html, /2099\.01\.01부터 \(종료일 미제공\)/)
+  assert.doesNotMatch(html, /<dt>교육 장소<|<dt>기관 연락처<|<dt>교육 대상<|<dd>정보 미제공/)
+  assert.match(html, /정확한 수강료와 본인 부담금은 교육기관에 확인해 주세요/)
+  const empty = renderDetail({ ...training, detail: {}, eligibility: { status: 'UNKNOWN', reason: ' ', conditions: [] }, detailUrl: null }, { path: '/opportunities/43' })
+  assert.match(empty, /교육 상세 정보가 제공되지 않았어요/)
+  assert.match(empty, /판정 불가/)
+  assert.doesNotMatch(empty, /신청 가능성 판정 근거|판정 사유 미제공|<h2>지역 정보|공식 출처와 신청 경로|target="_blank"/)
+  const css = fs.readFileSync(new URL('../src/pages/opportunities/OpportunityDetailPage.module.css', import.meta.url), 'utf8')
+  assert.match(css, /@media \(min-width: 1024px\)\s*\{\s*\.trainingInfo \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
+})
+
+test('sidebar shows real unique safe links and provided eligibility evidence only, with one status badge', () => {
+  const html = renderDetail({ ...policy, detailUrl: 'https://example.org/apply', detail: { ...policy.detail, applicationUrl: 'https://example.org/apply' }, eligibility: { status: 'ELIGIBLE', reason: '확인된 판정 근거', conditions: [] } }, { auth: { status: 'authenticated', user: { id: 11 } } })
+  assert.equal((html.match(/href="https:\/\/example.org\/apply"/g) ?? []).length, 1)
+  assert.equal((html.match(/>신청 가능<\/span>/g) ?? []).length, 1)
+  assert.match(html, /신청 가능성 판정 근거/)
+  assert.match(html, /확인된 판정 근거/)
+  assert.match(html, /aria-label="테스트 정책 상세 저장하기" aria-pressed="false"/)
+  assert.match(html, /저장하기/)
 })
 
 test('missing detail, regions, conditions and eligibility do not become fabricated unrestricted eligibility', () => {
@@ -64,8 +184,8 @@ test('missing detail, regions, conditions and eligibility do not become fabricat
   assert.match(html, /유형별 상세 정보가 일부 제공되지 않았어요/)
   assert.match(html, /신청기간 정보가 제공되지 않았어요/)
   assert.match(html, /전국 대상 여부는 확인이 필요해요/)
-  assert.match(html, /신청 제한이 없다는 뜻은 아니므로/)
-  assert.match(html, /현재 제공된 신청 가능성 판정이 없어요/)
+  assert.doesNotMatch(html, /<h2>지원·참여 조건|신청 조건 확인/)
+  assert.match(html, /판정 결과가 없어요\. 신청 불가를 뜻하지 않아요/)
   assert.doesNotMatch(html, /거주지 조건: 전국|신청 대상 아님|판정 불가/)
 })
 
@@ -81,16 +201,20 @@ test('null eligibility and actual UNKNOWN stay distinct; supplied reasons use us
   assert.doesNotMatch(html, /internalField|MATCHED|CHECK_REQUIRED|REQUIRED/)
 })
 
-test('unverified application dates and unsupported conditions expose evidence, not unverified numeric claims', () => {
+test('unverified policy dates need confirmation and policy conditions stay hidden; training conditions expose evidence, not unverified numeric claims', () => {
+  const conditions = [condition({ validationStatus: 'NEEDS_REVIEW', min: 999, max: 1000, evidenceText: '소득 기준은 원문 확인' }),
+    condition({ type: 'INCOME', status: 'MAX_ONLY', min: null, max: 99999999, unitConfirmed: false, evidenceText: '금액 단위 미확인' })]
   const html = renderDetail({ ...policy,
-    applicationWindows: [{ periodType: 'FIXED', startDate: '2098-10-01', endDate: '2098-10-31', periodText: '공식 공고 일정 확인 필요', validationStatus: 'UNVERIFIED' }],
-    conditions: [condition({ validationStatus: 'NEEDS_REVIEW', min: 999, max: 1000, evidenceText: '소득 기준은 원문 확인' }),
-      condition({ type: 'INCOME', status: 'MAX_ONLY', min: null, max: 99999999, unitConfirmed: false, evidenceText: '금액 단위 미확인' })] })
+    applicationWindows: [{ periodType: 'FIXED', startDate: '2098-10-01', endDate: '2098-10-31', periodText: '공식 공고 일정 확인 필요', validationStatus: 'UNVERIFIED' }], conditions })
   assert.match(html, /신청기간 확인 필요 · 공식 근거 미확인/)
   assert.doesNotMatch(html, /2098-10-01|999세|99,999,999/)
-  assert.match(html, /원문 확인 필요/)
-  assert.match(html, /소득 기준은 원문 확인/)
-  assert.match(html, /금액 단위 미확인/)
+  assert.doesNotMatch(html, /<h2>지원·참여 조건|원문 확인 필요|소득 기준은 원문 확인|금액 단위 미확인/)
+  const trainingHtml = renderDetail({ ...training, conditions }, { path: '/opportunities/43' })
+  assert.match(trainingHtml, /<h2>지원·참여 조건<\/h2>/)
+  assert.equal((trainingHtml.match(/<summary>원문 확인 필요<\/summary>/g) ?? []).length, 2)
+  assert.equal((trainingHtml.match(/확정된 신청 조건으로 해석하지 마세요/g) ?? []).length, 2)
+  for (const text of ['소득 기준은 원문 확인', '금액 단위 미확인']) assert.ok(trainingHtml.includes(text), text)
+  assert.doesNotMatch(trainingHtml, /999세|99,999,999/)
 })
 
 test('regions distinguish verified national residence from implementation and unverified locations', () => {
@@ -111,7 +235,7 @@ test('only safe actual external URLs become links, with separate application/sou
     description: '<script>alert(1)</script>', applicationUrl: 'data:text/html,bad', referenceUrl1: null, referenceUrl2: null } })
   assert.doesNotMatch(unsafe, /href="javascript:|href="data:|<script>/)
   assert.match(unsafe, /&lt;script&gt;/)
-  assert.match(unsafe, /연결할 수 있는 공식 링크가 제공되지 않았어요/)
+  assert.match(unsafe, /공식 링크가 제공되지 않았어요/)
 })
 
 test('invalid ID, loading, not-found, network, timeout and server failures have distinct accessible states', () => {

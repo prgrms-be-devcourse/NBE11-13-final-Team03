@@ -27,8 +27,8 @@ function errorMessage(error: Error): string {
   }
   return '변경 또는 최신 상태 조회에 실패했어요. 상태를 다시 조회해 주세요.'
 }
-type PreferenceActionsProps = { opportunityId: number; title: string; saved: boolean; source: PreferenceSource; allowHide?: boolean; disabled?: boolean; iconOnly?: boolean }
-function PreferenceActions({ opportunityId, title, saved, source, allowHide = false, disabled = false, iconOnly = false }: PreferenceActionsProps) {
+type PreferenceActionsProps = { opportunityId: number; title: string; saved: boolean; source: PreferenceSource; allowHide?: boolean; disabled?: boolean; iconOnly?: boolean; showSaveLabel?: boolean }
+function PreferenceActions({ opportunityId, title, saved, source, allowHide = false, disabled = false, iconOnly = false, showSaveLabel = false }: PreferenceActionsProps) {
   const auth = useContext(AuthContext)
   const owner = auth?.status === 'authenticated' ? auth.user : undefined
   const client = useQueryClient()
@@ -55,11 +55,13 @@ function PreferenceActions({ opportunityId, title, saved, source, allowHide = fa
       .then(() => mutation.reset()).catch(() => {}).finally(() => { running.current = false })
   }
   const icon = <Bookmark size={20} aria-hidden="true" fill={saved ? 'currentColor' : 'none'} />
+  // 접근 가능한 이름에 화면에 보이는 문구를 포함한다.
+  const saveName = showSaveLabel && !iconOnly ? (saved ? '저장됨, 저장 해제' : '저장하기') : (saved ? '저장 해제' : '저장')
   return <div className={styles.actions}>
-    {!iconOnly && <span>{saved ? '저장됨' : '저장 안 함'}</span>}
-    {auth?.status === 'anonymous' ? <Link className={iconOnly ? styles.iconButton : undefined} to={returnTo} aria-label={iconOnly ? `${title} ${saved ? '저장됨' : '저장 안 함'}, 저장하려면 로그인` : `${title} 저장하려면 로그인`}>{iconOnly ? icon : '저장하려면 로그인'}</Link>
+    {!iconOnly && !showSaveLabel && <span>{saved ? '저장됨' : '저장 안 함'}</span>}
+    {auth?.status === 'anonymous' ? <Link className={iconOnly ? styles.iconButton : showSaveLabel ? styles.saveButton : undefined} to={returnTo} aria-label={iconOnly ? `${title} ${saved ? '저장됨' : '저장 안 함'}, 저장하려면 로그인` : `${title} 저장하려면 로그인`}>{iconOnly ? icon : showSaveLabel ? <>{icon}저장하려면 로그인</> : '저장하려면 로그인'}</Link>
       : owner ? <>
-        <Button className={iconOnly ? styles.iconButton : undefined} variant={iconOnly ? 'ghost' : 'secondary'} disabled={disabled || pending} loading={pending} aria-label={`${title} ${saved ? '저장 해제' : '저장'}`} aria-pressed={saved} onClick={() => run(saved ? 'unsave' : 'save')}>{iconOnly ? icon : saved ? '저장 해제' : '저장'}</Button>
+        <Button className={iconOnly ? styles.iconButton : undefined} variant={iconOnly ? 'ghost' : 'secondary'} disabled={disabled || pending} loading={pending} aria-label={`${title} ${saveName}`} aria-pressed={saved} onClick={() => run(saved ? 'unsave' : 'save')}>{iconOnly ? icon : showSaveLabel ? <>{icon}{saved ? '저장됨' : '저장하기'}</> : saved ? '저장 해제' : '저장'}</Button>
         {allowHide && <Button variant="ghost" disabled={disabled || pending} aria-label={`${title} 추천에서 숨기기`} onClick={() => run('hide')}>{iconOnly ? '숨기기' : '추천에서 숨기기'}</Button>}
       </> : auth?.status === 'error' ? <><span>인증 확인 실패</span>{auth.retry && <Button variant="ghost" onClick={auth.retry}>로그인 상태 다시 확인</Button>}</>
         : <Button className={iconOnly ? styles.iconButton : undefined} variant="secondary" disabled aria-label={iconOnly ? `${title} 로그인 확인 중` : undefined} aria-pressed={iconOnly ? saved : undefined}>{iconOnly ? icon : '로그인 확인 중'}</Button>}

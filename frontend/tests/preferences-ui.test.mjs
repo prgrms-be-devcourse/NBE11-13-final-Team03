@@ -40,10 +40,22 @@ test('saved page gates on verified authentication and never renders old-account 
 test('saved cards use only DTO fields, real detail links, saved time and accessible unsave controls', () => {
   const html = render()
   assert.match(html, /href="\/opportunities\/42"/)
-  assert.match(html, /<time dateTime="2026-10-26T09:12:34">2026-10-26 09:12:34/)
-  assert.match(html, /aria-label="테스트 저장 공고 저장 해제" aria-pressed="true"/)
+  assert.match(html, /<time dateTime="2026-10-26T09:12:34">2026\.10\.26 09:12:34/)
+  assert.match(html, /aria-label="테스트 저장 공고 저장됨, 저장 해제" aria-pressed="true"/)
   assert.match(html, /aria-label="1페이지"/)
   assert.doesNotMatch(html, /마감일|신청 가능성|숨김 여부|추천에서 숨기기/)
+})
+
+test('saved cards share type colors, deduplicated categories and a labeled saved bookmark with other pages', () => {
+  const html = render({ saved: { ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '직업훈련' }] } })
+  assert.match(html, /data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
+  assert.match(html, /<p class="muted">교육･직업훈련<\/p>/)
+  assert.doesNotMatch(html, /교육･직업훈련 · 직업훈련|>저장 해제<|>저장 안 함</)
+  assert.match(html, /lucide-bookmark/)
+  assert.match(html, /fill="currentColor"/)
+  assert.match(html, /저장됨/)
+  assert.match(html, /aria-label="테스트 저장 공고 저장됨, 저장 해제" aria-pressed="true"/)
+  assert.doesNotMatch(render({ saved: { ...data, content: [{ ...item, category: null, subCategory: ' ' }] } }), /분류 미제공| · <\/p>/)
 })
 test('saved empty and error responses remain distinct; expired auth offers login and network failure offers retry', () => {
   assert.match(render({ saved: { ...data, content: [], totalElements: 0, totalPages: 0 } }), /아직 저장한 기회가 없어요/)
