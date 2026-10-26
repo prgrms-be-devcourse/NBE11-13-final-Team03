@@ -102,17 +102,19 @@ test('public home cards render only actual search fields and connect to detail w
   assert.match(withEligibility, /신청 가능성 있음/)
 })
 
-function renderCard(item, auth = { status: 'anonymous' }) {
+function renderCard(item, auth = { status: 'anonymous' }, props = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
   try {
     return renderToStaticMarkup(element(QueryClientProvider, { client }, element(MemoryRouter, null,
-      element(AuthContext.Provider, { value: auth }, element(HomeOpportunityCard, { item })))))
+      element(AuthContext.Provider, { value: auth }, element(HomeOpportunityCard, { item, ...props })))))
   } finally { client.clear() }
 }
 
 test('training cards show NCS sub/detail categories without repeating the type badge while policy cards retain their hierarchy', () => {
   const training = renderCard({ ...latestItem, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술' })
   assert.match(training, /data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
+  assert.match(training, /<div data-accent="VOCATIONAL_TRAINING" class="card default opportunityCard /)
+  assert.match(renderCard(latestItem), /<div data-accent="YOUTH_POLICY" class="card default opportunityCard /)
   assert.match(training, /class="classification">정보통신 · 정보기술<\/p>/)
   assert.doesNotMatch(training, /교육･직업훈련/)
   // 미분류 대체값 '직업훈련'은 배지와 반복하지 않고, 실제 세부 분류만 남긴다.
@@ -190,7 +192,9 @@ test('recommendation cards preserve server order, reasons and server status; pol
   assert.doesNotMatch(html, /저장된 최신 판정과 실제 추천 근거를 바탕으로 제공해요|최초 등록일/)
   for (const text of ['신청 조건 확인 필요', '교육 시작 D-14', '마감 D-7', '테스트 서버가 제공한 교육 시작 안내입니다.',
     '테스트 서버가 제공한 실제 판정·관심 분야 추천 근거입니다.', '교육 시행 지역: 서울', '거주지 조건: 전국']) assert.ok(html.includes(text), text)
-  assert.match(html, /모집 상태: 상태 미확인/)
+  // 상세와 같이 '모집 상태:' 접두어 없이 상태만 보여 준다.
+  assert.match(html, /data-application-status="UNKNOWN">모집 상태 미확인<\/p>/)
+  assert.doesNotMatch(html, /모집 상태:/)
   assert.match(html, /교육 시작일 <time dateTime="2026-11-08"/)
   assert.match(html, /신청기간 2026\.10\.01 ~ 2026\.11\.01/)
   assert.match(html, /여러 신청기간이 있을 수 있어요/)
@@ -205,6 +209,13 @@ test('recommendation cards preserve server order, reasons and server status; pol
   assert.doesNotMatch(suppliedReasons, /마감 D-|관심 분야 일치/)
   const policyOnly = render({ recommendationsOnly: true, userId: 11, data: [policyRecommendation], details: [detail] })
   assert.doesNotMatch(policyOnly, /모집 상태: 모집 중/)
+  // 상시 신청 기간이 보이면 '상시 모집'을 반복하지 않고, 마감일이 없으므로 여러 신청기간 안내도 띄우지 않는다.
+  const alwaysDetail = { ...detail, applicationWindows: [{ periodType: 'ALWAYS', startDate: null, endDate: null, periodText: null, validationStatus: 'VALID' }] }
+  const alwaysOpen = render({ recommendationsOnly: true, userId: 11, data: [{ ...policyRecommendation, applicationStatus: 'ALWAYS_OPEN', applicationEndDate: null }], details: [alwaysDetail] })
+  assert.match(alwaysOpen, /신청기간 상시 신청/)
+  assert.doesNotMatch(alwaysOpen, /상시 모집|모집 상태|여러 신청기간이 있을 수 있어요/)
+  const upcoming = render({ recommendationsOnly: true, userId: 11, data: [{ ...policyRecommendation, applicationStatus: 'UPCOMING' }], details: [detail] })
+  assert.match(upcoming, /data-application-status="UPCOMING">모집 예정<\/p>/)
   assert.ok(policyOnly.indexOf('신청 가능</span>') < policyOnly.indexOf('신청기간 2026.'))
   assert.ok(policyOnly.indexOf('신청기간 2026.') < policyOnly.indexOf('aria-label="추천 이유"'))
   assert.ok(policyOnly.indexOf('aria-label="추천 이유"') < policyOnly.indexOf('class="reasonDescription"'))
@@ -238,6 +249,36 @@ test('future authenticated states separate loading, empty recommendations, missi
   assert.match(generic404, /role="alert"/)
   assert.match(render({ ...base, error: new ApiError('network', 'test only') }), /네트워크 연결을 확인해 주세요/)
   assert.match(render({ ...base, error: new ApiError('http', 'test only', 500) }), /서버에 문제가 생겼어요/)
+})
+
+test('home shortcuts keep their colors on the border and icon tile while the tile itself stays white', () => {
+  const css = fs.readFileSync(new URL('../src/pages/home/HomePage.module.css', import.meta.url), 'utf8')
+  assert.match(css, /\.shortcuts > a \{[^}]*border: 1px solid color-mix\(in srgb, var\(--tile-strong\) 25%, var\(--tile-soft\)\);[^}]*background: var\(--color-surface\);/)
+  assert.match(css, /\.shortcuts \.shortcutIcon \{ background: var\(--tile-soft\); color: var\(--tile-strong\); \}/)
+  assert.match(css, /\.shortcuts > a:nth-child\(3\) \{ --tile-soft: var\(--color-accent-rose\); --tile-strong: var\(--color-error\); \}/)
+  assert.doesNotMatch(css, /\.shortcuts > a:nth-child\(\d\) \{ background/)
+})
+
+test('recommendation card keeps save and hide close together at the right edge with 44px touch targets', () => {
+  const html = renderCard(latestItem, { status: 'authenticated', user: { id: 11, role: 'USER' } }, { allowHide: true, recommendation: true, source: 'RECOMMENDATION' })
+  assert.match(html, /<div class="actions compact"><button[^>]*class="button ghost iconButton"[\s\S]*?<\/button><button[^>]*class="button ghost textButton"[^>]*>숨기기<\/button>/)
+  const css = fs.readFileSync(new URL('../src/components/opportunities/PreferenceActions.module.css', import.meta.url), 'utf8')
+  assert.match(css, /\.compact \{ gap: var\(--space-1\); margin-inline-end: calc\(var\(--space-2\) \* -1\); \}/)
+  // 최근 등록 카드(저장 버튼만 있음)도 같은 묶음 스타일로 오른쪽 끝선에 맞춘다.
+  assert.match(renderCard(latestItem, { status: 'authenticated', user: { id: 11, role: 'USER' } }), /<div class="actions compact"><button[^>]*class="button ghost iconButton"/)
+  assert.match(css, /\.actions \.textButton \{ min-inline-size: 44px; min-height: 44px; padding: var\(--space-2\); \}/)
+})
+
+test('interest chips use orange tokens (related is lighter like the mypage card) and D-8~D-14 deadlines use pink', () => {
+  const css = fs.readFileSync(new URL('../src/pages/home/HomePage.module.css', import.meta.url), 'utf8')
+  assert.match(css, /\.badges li\[data-badge='관심 분야 일치'\] \{ background: var\(--color-accent-orange\);/)
+  assert.match(css, /\.badges li\[data-badge='관심 분야 관련'\] \{ background: var\(--color-accent-orange-soft\);/)
+  assert.doesNotMatch(css, /#fce7f3|#9d2763|#ffedd5|#fff7ed/)
+  // 마감 칩 기본은 분홍이고, 이후에 오는 D-0~D-7 규칙이 빨강으로 덮어쓴다. 신청 조건 확인 필요는 노랑을 유지한다.
+  const pink = css.indexOf(".badges li[data-badge^='마감 D-'] { background: var(--color-accent-pink);")
+  const red = css.indexOf(".badges li:is([data-badge='마감 D-0']")
+  assert.ok(pink > -1 && red > pink)
+  assert.match(css, /\.badges li\[data-badge='신청 조건 확인 필요'\] \{ background: var\(--color-status-warning-soft\);/)
 })
 
 test('home CSS defines single-column mobile, two-column tablet and three-column desktop cards with touch-sized links', () => {

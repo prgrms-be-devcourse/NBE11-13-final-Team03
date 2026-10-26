@@ -50,6 +50,7 @@ test('saved cards share type colors, deduplicated categories and a labeled saved
   const html = render({ saved: { ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '직업훈련' }] } })
   assert.match(html, /data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
   assert.match(html, /<p class="muted">직업훈련<\/p>/)
+  assert.match(html, /<div data-accent="VOCATIONAL_TRAINING" class="card default card">/)
   assert.doesNotMatch(html, /교육･직업훈련|>저장 해제<|>저장 안 함</)
   assert.match(html, /lucide-bookmark/)
   assert.match(html, /fill="currentColor"/)

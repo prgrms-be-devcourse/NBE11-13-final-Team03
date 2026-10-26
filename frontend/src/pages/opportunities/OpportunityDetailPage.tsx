@@ -100,7 +100,7 @@ function OpportunityDetailPage() {
   return (
     <article className={styles.page} aria-labelledby="detail-title" aria-busy={query.isFetching}>
       {backLink}
-      <Card className={styles.hero}>
+      <Card className={styles.hero} data-accent={data.type}>
         <div className={styles.meta}>
           <OpportunityTypeBadge type={data.type} />
           <span className={styles.applicationStatus} data-application-status={data.applicationStatus}>{data.applicationStatus === 'UNKNOWN' ? '모집 상태 미확인' : statusLabels[data.applicationStatus]}</span>

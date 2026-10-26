@@ -30,7 +30,7 @@ function SavedList({ user }: { user: AuthUser }) {
   return <>
     <p>저장한 기회 {data.totalElements.toLocaleString('ko-KR')}개 · 저장한 시각이 최신인 순서예요.</p>
     {result.isFetching && <p role="status">최신 저장 상태를 확인하고 있어요.</p>}
-    <ul className={styles.list}>{data.content.map((item) => <li key={item.opportunityId}><Card className={styles.card}>
+    <ul className={styles.list}>{data.content.map((item) => <li key={item.opportunityId}><Card className={styles.card} data-accent={item.type}>
       <div className={styles.cardMeta}>
         <OpportunityTypeBadge type={item.type} />
         <PreferenceActions opportunityId={item.opportunityId} title={item.title} saved source="SAVED" disabled={result.isFetching} showSaveLabel />

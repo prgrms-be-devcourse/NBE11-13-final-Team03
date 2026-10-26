@@ -36,7 +36,7 @@ function MyPageContent({ user }: { user: AuthUser }) {
       {user.role === 'ADMIN' && <span className={styles.status} data-state="done">관리자</span>}
     </section>
     <div className={styles.manageGrid}>
-      <section className={styles.manageCard} aria-labelledby="profile-title">
+      <section className={styles.manageCard} data-tone="profile" aria-labelledby="profile-title">
         <div className={styles.cardHead}><span className={styles.cardIcon} aria-hidden="true"><SlidersHorizontal size={18} /></span><h2 id="profile-title">맞춤 조건</h2>
           {profile.isSuccess && status(!!profile.data, profile.data ? '등록됨' : '미등록')}</div>
         {profile.isPending ? <AsyncState status="loading" /> : profile.isError ? <ProfileError error={profile.error} onRetry={() => { void profile.refetch() }} /> : <>
@@ -44,7 +44,7 @@ function MyPageContent({ user }: { user: AuthUser }) {
           <ArrowLink className={styles.cta} to={profile.data ? '/mypage/profile' : '/onboarding'}>{profile.data ? '맞춤 조건 수정' : '맞춤 조건 설정 시작'}</ArrowLink>
         </>}
       </section>
-      <section className={styles.manageCard} aria-labelledby="interests-title">
+      <section className={styles.manageCard} data-tone="interests" aria-labelledby="interests-title">
         <div className={styles.cardHead}><span className={styles.cardIcon} aria-hidden="true"><Tags size={18} /></span><h2 id="interests-title">관심 분야</h2>
           {interests.isSuccess && status(interests.data.length > 0, interests.data.length ? `${interests.data.length}개` : '선택 사항')}</div>
         {interests.isPending ? <AsyncState status="loading" /> : interests.isError ? <ProfileError error={interests.error} onRetry={() => { void interests.refetch() }} /> : <>

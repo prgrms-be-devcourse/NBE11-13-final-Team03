@@ -16,3 +16,13 @@
 .sage {
   background: var(--color-primary-soft);
 }
+
+/* 공고 카드 위쪽 유형 선(청년정책 그린, 직업훈련 블루). 둥근 모서리를 따라가도록 안쪽 그림자로 그린다.
+   공고 카드는 바깥 그림자를 쓰지 않으므로 선만 둔다. 각 화면의 .card 규칙보다 우선하도록 속성 선택자를 함께 쓴다. */
+.card[data-accent='YOUTH_POLICY'] {
+  box-shadow: inset 0 3px 0 var(--color-primary);
+}
+
+.card[data-accent='VOCATIONAL_TRAINING'] {
+  box-shadow: inset 0 3px 0 var(--color-status-info-text);
+}

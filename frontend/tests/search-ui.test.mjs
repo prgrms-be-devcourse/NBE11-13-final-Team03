@@ -65,6 +65,7 @@ test('result markup renders only supplied fields, accessible bookmark state and 
 test('search cards follow home type colors and classification rules without visible save labels', () => {
   const training = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: ' 교육･직업훈련 ', subCategory: '직업훈련', detailCategory: '정보기술' }] })
   assert.match(training, /class="typeBadge" data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
+  assert.match(training, /<div data-accent="VOCATIONAL_TRAINING" class="card default resultCard">/)
   assert.match(training, /class="category">정보기술<\/p>/)
   assert.doesNotMatch(training, /교육･직업훈련|직업훈련 · |class="category">직업훈련/)
   const ncs = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: ' 정보통신 ', detailCategory: '정보기술' }] })

@@ -24,21 +24,19 @@
 .artPath { stroke: var(--color-surface); }
 .artPlant { fill: var(--color-primary-dark); stroke: var(--color-primary-dark); }
 .shortcuts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin-block-start: var(--space-4); }
-.shortcuts > a { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text-primary); text-decoration: none; box-shadow: var(--shadow-card); }
-.shortcuts > a:hover { border-color: var(--color-input-border); }
+/* 바로가기: 칸은 흰색, 각 색은 테두리(연한 색과 진한 색을 섞은 중간 톤)와 아이콘 칸에만 쓴다. */
+.shortcuts > a { --tile-soft: var(--color-primary-soft); --tile-strong: var(--color-primary-dark); display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--tile-strong) 25%, var(--tile-soft)); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text-primary); text-decoration: none; box-shadow: var(--shadow-card); }
+.shortcuts > a:hover { border-color: color-mix(in srgb, var(--tile-strong) 50%, var(--tile-soft)); }
 .shortcuts > a > svg { margin-inline-start: auto; flex-shrink: 0; color: var(--color-text-secondary); }
 .shortcuts strong, .shortcuts small { display: block; }
 .shortcuts strong { margin-block-end: var(--space-1); font-size: 0.95rem; }
 .shortcuts small { color: var(--color-text-secondary); font-size: 0.8rem; }
 .shortcutIcon { display: grid; place-items: center; flex-shrink: 0; inline-size: 2.75rem; block-size: 2.75rem; border-radius: var(--radius-md); background: var(--color-primary-soft); color: var(--color-primary); }
-.shortcuts > a:nth-child(1) { background: var(--color-primary-soft); }
-.shortcuts > a:nth-child(2) { background: var(--color-accent-blue); }
-.shortcuts > a:nth-child(3) { background: var(--color-accent-rose); }
-.shortcuts > a:nth-child(4) { background: color-mix(in srgb, var(--color-accent-yellow) 35%, var(--color-surface)); }
-.shortcuts .shortcutIcon { background: var(--color-surface); color: var(--color-primary-dark); }
-.shortcuts > a:nth-child(2) .shortcutIcon { color: var(--color-status-info-text); }
-.shortcuts > a:nth-child(3) .shortcutIcon { color: var(--color-error); }
-.shortcuts > a:nth-child(4) .shortcutIcon { color: var(--color-status-warning-text); }
+/* 칸별 색은 기존 조합을 유지한다: 청년정책 초록, 직업훈련 파랑, 관심 분야 다홍, 저장한 기회 노랑. */
+.shortcuts > a:nth-child(2) { --tile-soft: var(--color-accent-blue); --tile-strong: var(--color-status-info-text); }
+.shortcuts > a:nth-child(3) { --tile-soft: var(--color-accent-rose); --tile-strong: var(--color-error); }
+.shortcuts > a:nth-child(4) { --tile-soft: color-mix(in srgb, var(--color-accent-yellow) 35%, var(--color-surface)); --tile-strong: var(--color-status-warning-text); }
+.shortcuts .shortcutIcon { background: var(--tile-soft); color: var(--tile-strong); }
 .section { margin-block-start: var(--section-gap); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); scroll-margin-block-start: var(--space-4); }
 .sectionHeader { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-block-end: var(--space-4); }
 .sectionHeader h2 { margin: 0 0 var(--space-2); font-size: var(--font-size-heading); }
@@ -93,9 +91,12 @@
 .recommendationInfo > p[data-application-status='UPCOMING'] { color: var(--color-status-info-text); }
 .recommendationInfo > p[data-application-status='CLOSED'] { color: var(--color-status-muted-text); }
 .badges li[data-badge='신청 조건 충족'] { background: var(--color-primary-soft); color: var(--color-primary-dark); }
-.badges li[data-badge='관심 분야 일치'] { background: #fce7f3; color: #9d2763; }
-.badges li[data-badge='신청 조건 확인 필요'],
-.badges li[data-badge^='마감 D-'] { background: var(--color-status-warning-soft); color: var(--color-status-warning-text); }
+/* 관심 분야 칩: 일치는 주황, 관련은 마이페이지 관심 분야 카드와 같은 연한 주황 */
+.badges li[data-badge='관심 분야 일치'] { background: var(--color-accent-orange); color: var(--color-accent-orange-text); }
+.badges li[data-badge='관심 분야 관련'] { background: var(--color-accent-orange-soft); color: var(--color-accent-orange-text); }
+.badges li[data-badge='신청 조건 확인 필요'] { background: var(--color-status-warning-soft); color: var(--color-status-warning-text); }
+/* 마감 D-8~D-14는 분홍, 아래 D-0~D-7은 빨강으로 덮어쓴다. */
+.badges li[data-badge^='마감 D-'] { background: var(--color-accent-pink); color: var(--color-accent-pink-text); }
 .badges li[data-badge^='교육 시작 D-'] { background: var(--color-accent-blue); color: var(--color-status-info-text); }
 .badges li:is([data-badge='마감 D-0'], [data-badge='마감 D-1'], [data-badge='마감 D-2'], [data-badge='마감 D-3'], [data-badge='마감 D-4'], [data-badge='마감 D-5'], [data-badge='마감 D-6'], [data-badge='마감 D-7']) { background: var(--color-accent-rose); color: var(--color-error); }
 @media (min-width: 1024px) {

@@ -87,6 +87,14 @@ test('mypage summarizes the account at the top, manages settings in cards and ke
   assert.match(missing, /<h2 id="account-summary-title">닉네임 미제공<\/h2><p class="help">이메일 미제공<\/p>/)
   const css = fs.readFileSync(new URL('../src/pages/profile/Profile.module.css', import.meta.url), 'utf8')
   assert.match(css, /\.manageGrid \{[^}]*repeat\(2, minmax\(0, 1fr\)\)/)
+  // 맞춤 조건은 보라, 관심 분야는 연한 주황 카드로 구분한다.
+  assert.match(html, /<section class="manageCard" data-tone="profile" aria-labelledby="profile-title">[\s\S]*?<section class="manageCard" data-tone="interests" aria-labelledby="interests-title">/)
+  // 카드는 흰색을 유지하고, 색은 위쪽 선·아이콘·수정 링크에만 쓴다.
+  assert.doesNotMatch(css, /\.manageCard\[data-tone='[a-z]+'\] \{[^}]*background/)
+  assert.match(css, /\.manageCard\[data-tone='profile'\] \{ box-shadow: inset 0 3px 0 var\(--color-accent-purple-text\); \}/)
+  assert.match(css, /\.manageCard\[data-tone='interests'\] \{ box-shadow: inset 0 3px 0 var\(--color-accent-orange-text\); \}/)
+  assert.match(css, /\.manageCard\[data-tone='profile'\] \.cardIcon \{ background: var\(--color-accent-purple\); color: var\(--color-accent-purple-text\); \}/)
+  assert.match(css, /\.manageCard\[data-tone='interests'\] \.cta \{ color: var\(--color-accent-orange-text\); \}/)
   assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*?\.manageGrid, \.interestList \{ grid-template-columns: minmax\(0, 1fr\); \}/)
   assert.doesNotMatch(css, /gradient|backdrop-filter/)
   assert.match(css, /\.page \.note \{[^}]*color: var\(--color-text-secondary\);[^}]*font-size: 0\.8125rem/)

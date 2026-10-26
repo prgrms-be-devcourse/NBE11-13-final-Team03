@@ -19,6 +19,7 @@ function RecommendationCard({ item, disabled }: { item: RecommendationItem; disa
   const detailOptions = opportunityDetailQuery(String(item.opportunityId))
   const detail = useQuery({ ...detailOptions, enabled: !training })
   const periods = detail.data?.applicationWindows ?? []
+  const alwaysOpenShown = periods.some(period => period.periodType === 'ALWAYS' && period.validationStatus === 'VALID')
   const badges = item.recommendationReasons.badges.filter(badge => !(item.eligibilityStatus === 'ELIGIBLE' && badge === '신청 조건 충족'))
   const sentences = item.recommendationReasons.description.trim().split(/(?<=[.!?;。！？])\s+|\r?\n+/u).filter(Boolean).map(sentence => sentence.replace(/;$/, '.'))
   return <HomeOpportunityCard item={item} source="RECOMMENDATION" allowHide disabled={disabled} recommendation>
@@ -26,11 +27,12 @@ function RecommendationCard({ item, disabled }: { item: RecommendationItem; disa
       {training ? date && isValidDate(date) && <p className={styles.facts}>교육 시작일 <time dateTime={date}>{formatDate(date)}</time></p>
         : periods.length > 0 ? periods.map((period, index) => <p className={styles.facts} key={index}>신청기간 {formatDatesInText(applicationWindowText(period))}</p>)
           : <p className={styles.facts}>신청기간 {detail.isPending ? '확인 중' : '시작일 미확인'}{date && isValidDate(date) && <> ~ <time dateTime={date}>{formatDate(date)}</time></>}</p>}
+      {/* 상세와 같이 '모집 상태:' 접두어 없이 상태만 보여 주고, 신청기간이 이미 '상시 신청'이면 중복 표시하지 않는다. */}
+      {item.applicationStatus !== 'OPEN' && !(item.applicationStatus === 'ALWAYS_OPEN' && alwaysOpenShown) && <p className={styles.help} data-application-status={item.applicationStatus}>{item.applicationStatus === 'UNKNOWN' ? '모집 상태 미확인' : statusLabels[item.applicationStatus]}</p>}
       <div className={styles.reasons}>
         {badges.length > 0 && <ul className={styles.badges} aria-label="추천 이유">{badges.map((badge, index) => <li key={index} data-badge={badge}>{badge}</li>)}</ul>}
         <p className={styles.reasonDescription}>{sentences.map((sentence, index) => <span key={index}>{sentence}</span>)}</p>
       </div>
-      {item.applicationStatus !== 'OPEN' && <p data-application-status={item.applicationStatus}>모집 상태: {statusLabels[item.applicationStatus]}</p>}
       {item.regions.length > 0 && <ul className={styles.regions}>{item.regions.map((region, index) => <li key={index}>{regionText(region, training)}</li>)}</ul>}
       {!training && date && isValidDate(date) && <p className={styles.help}>여러 신청기간이 있을 수 있어요.<br />전체 일정은 상세에서 확인해 주세요.</p>}
       {training && <p className={styles.help}>교육 시작일은 신청 마감일과 다른 정보예요.</p>}

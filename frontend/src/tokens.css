@@ -36,6 +36,17 @@
   --section-gap: clamp(1.5rem, 3vw, 2.5rem);
   --color-accent-blue: #e7f1fc;
   --color-accent-rose: #fcece6;
+  /* 구분색. 배경은 연하게, 글자는 명도 대비 4.5:1 이상. */
+  /* 분홍: 마감 D-8~D-14 칩 */
+  --color-accent-pink: #fce7f3;
+  --color-accent-pink-text: #9d2763;
+  /* 주황: 관심 분야 일치 칩, 마이페이지 관심 분야 포인트 / 연한 주황: 관심 분야 관련 칩, 관심 분야 아이콘 배경 */
+  --color-accent-orange: #ffedd5;
+  --color-accent-orange-text: #9a3412;
+  --color-accent-orange-soft: #f7f0e8;
+  /* 보라: 마이페이지 맞춤 조건 포인트(위쪽 선·아이콘·링크) */
+  --color-accent-purple: #eeecf6;
+  --color-accent-purple-text: #5b3f99;
   --color-status-warning-soft: #fff2ce;
   --color-status-warning-text: #795312;
   --color-status-info-text: #245f92;

@@ -150,6 +150,12 @@ test('detail keeps type colors and uses a labeled bookmark without changing save
   assert.doesNotMatch(duplicate, /일자리 · 일자리/)
   assert.match(anonymous, /class="facts">2026\.10\.01 ~ 2026\.10\.31/)
   assert.match(anonymous, /사업기간과 신청기간은 다를 수 있습니다/)
+  // 공고 카드 위쪽 유형 선: 청년정책 그린, 직업훈련 블루. 상세 상단 카드에도 적용한다.
+  assert.match(html, /<div data-accent="VOCATIONAL_TRAINING" class="card default hero">/)
+  assert.match(renderDetail(policy), /<div data-accent="YOUTH_POLICY" class="card default hero">/)
+  const cardCss = fs.readFileSync(new URL('../src/components/ui/Card.module.css', import.meta.url), 'utf8')
+  assert.match(cardCss, /\.card\[data-accent='YOUTH_POLICY'\] \{\s*box-shadow: inset 0 3px 0 var\(--color-primary\);/)
+  assert.match(cardCss, /\.card\[data-accent='VOCATIONAL_TRAINING'\] \{\s*box-shadow: inset 0 3px 0 var\(--color-status-info-text\);/)
   // 유형 배지는 홈·검색·상세·저장 목록이 같은 공용 배지를 쓴다.
   const css = fs.readFileSync(new URL('../src/components/opportunities/OpportunityTypeBadge.module.css', import.meta.url), 'utf8')
   assert.match(css, /\.typeBadge \{[^}]*background: var\(--color-primary-soft\);[^}]*font-size: 0\.75rem;/)

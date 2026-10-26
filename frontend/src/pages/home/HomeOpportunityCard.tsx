@@ -21,7 +21,7 @@ function HomeOpportunityCard({ item, children, source = 'OTHER', allowHide = fal
   const registeredDate = item.createdAt?.slice(0, 10)
   const validRegisteredDate = !recommendation && registeredDate && isValidDate(registeredDate)
   const classification = classificationLabel(item)
-  return <Card className={`${styles.opportunityCard} ${recommendation ? styles.recommendationCard : ''}`}>
+  return <Card className={`${styles.opportunityCard} ${recommendation ? styles.recommendationCard : ''}`} data-accent={item.type}>
     <div className={styles.cardMeta}><OpportunityTypeBadge type={item.type} /><PreferenceActions opportunityId={item.opportunityId} title={item.title} saved={item.saved} source={source} allowHide={allowHide} disabled={disabled} iconOnly /></div>
     <h3><Link to={`/opportunities/${item.opportunityId}`}>{item.title || '제목 미확인'}</Link></h3>
     {classification && <p className={styles.classification}>{classification}</p>}
