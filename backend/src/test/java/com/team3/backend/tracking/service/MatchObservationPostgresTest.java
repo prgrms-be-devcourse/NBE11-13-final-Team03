@@ -619,6 +619,33 @@ class MatchObservationPostgresTest {
         assertThat(candidates.findById(expired).orElseThrow().getCloseReason()).isEqualTo("EXPIRED");
         assertThat(outboxes.count()).isEqualTo(1);
     }
+    @Test void unsentFirstMatchAndLaterProfileTransitionOfOnePolicySummarizeAsTheTransitionOnly() {
+        long p=policy(ELIGIBLE), other=policy(ELIGIBLE);
+        long first=observations.observe(userId,p).candidateId();
+        status(p,NOT_ELIGIBLE); assertThat(observations.observe(userId,p).candidateId()).isNull();
+        long transition=profileTransition(p);
+        assertThat(observations.observe(userId,other).candidateId()).isGreaterThan(transition); // Next page under the test budget of 2.
+        assertThat(candidates.findById(first).orElseThrow().getStatus()).isEqualTo("PENDING");
+        var result=matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plusSeconds(3600));
+        assertThat(result.status()).isEqualTo(MatchOutboxTransaction.Status.ENQUEUED); assertThat(result.members()).isEqualTo(1);
+        var closed=candidates.findById(first).orElseThrow();
+        assertThat(closed.getStatus()).isEqualTo("SKIPPED"); assertThat(closed.getCloseReason()).isEqualTo("SUPERSEDED_BY_PROFILE_TRANSITION");
+        assertThat(candidates.findById(transition).orElseThrow().getOutboxId()).isEqualTo(result.outboxId());
+        var payload=(Map<?,?>)outboxes.findById(result.outboxId()).orElseThrow().getPayload().get("payload");
+        assertThat(payload.get("matchCount")).isEqualTo(1); assertThat(payload.get("transitionCount")).isEqualTo(1);
+        // The test budget is 2 candidates per run; the other policy's first match is the next page and still goes out.
+        assertThat(matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plusSeconds(3600)).members()).isEqualTo(1);
+        assertThat(outboxes.count()).isEqualTo(2);
+    }
+    @Test void expiredProfileTransitionDoesNotCloseThePolicyFirstMatch() {
+        long p=policy(ELIGIBLE); long first=observations.observe(userId,p).candidateId();
+        status(p,NOT_ELIGIBLE); observations.observe(userId,p); long transition=profileTransition(p);
+        clock.set(NOW.plus(Duration.ofDays(7)));
+        var result=matchOutbox.summarize(userId,UUID.randomUUID(),NOW.plus(Duration.ofDays(8)));
+        assertThat(result.status()).isEqualTo(MatchOutboxTransaction.Status.ENQUEUED); assertThat(result.members()).isEqualTo(1);
+        assertThat(candidates.findById(transition).orElseThrow().getCloseReason()).isEqualTo("EXPIRED");
+        assertThat(candidates.findById(first).orElseThrow().getOutboxId()).isEqualTo(result.outboxId());
+    }
     @Test void normalizationChangeFirstQualificationIsAFirstMatchNotATransition() {
         long p=policy(NOT_ELIGIBLE); observations.observe(userId,p);
         jdbc.update("UPDATE opportunity_versions SET normalization_version='v2'"); status(p,ELIGIBLE);

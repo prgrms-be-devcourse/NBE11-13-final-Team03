@@ -90,6 +90,16 @@ public class MatchOutboxTransaction {
                 excluded.put(candidate,"NO_LONGER_QUALIFIED_OR_RULE_CHANGED");
             else members.add(new MatchNotificationMessageFactory.Member(candidate,input));
         }
+        // Team decision: when a policy's unsent FIRST_MATCH and a later profile-change TRANSITION are both still valid,
+        // the newer transition represents the policy; the older first match closes instead of failing the whole summary.
+        var transitioned=new HashSet<Long>();
+        for (var member:members) if (member.candidate().getReason()==MatchPairState.Reason.TRANSITION) transitioned.add(member.candidate().getPair().getId());
+        for (var it=members.iterator();it.hasNext();) {
+            var member=it.next();
+            if (member.candidate().getReason()==MatchPairState.Reason.FIRST_MATCH && transitioned.contains(member.candidate().getPair().getId())) {
+                excluded.put(member.candidate(),"SUPERSEDED_BY_PROFILE_TRANSITION"); it.remove();
+            }
+        }
         checkDate(date);
         for (var candidate:unavailable) candidate.skip("POLICY_UNAVAILABLE",now);
         excluded.forEach((candidate,reason)->candidate.skip(reason,now));

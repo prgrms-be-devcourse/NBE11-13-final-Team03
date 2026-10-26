@@ -20,6 +20,7 @@ Notification의 NEW_MATCH 수신·슬롯 편입을 연결한다. backend가 대�
 | FIRST_MATCH | 사용자·정책별 최초 적합 후보를 전건 기록. 사용자별 하루 요약 1건에 후보 ID 순으로 예산만큼 포함하고 나머지는 다음 회차에서 재검증 | 확정 |
 | TRANSITION | 실제 NOT_ELIGIBLE → ELIGIBLE 발생마다 1회. 같은 발생의 재처리만 중복 차단. 발생 원인이 사용자의 프로필 변경(`trigger=PROFILE_CHANGED`)이면 개별 BECAME_ELIGIBLE 대신 그날 NEW_MATCH 요약에 포함 | 확정 |
 | 규칙·정규화 버전 변경 | 변경 관측은 TRANSITION을 만들지 않음(상태 변화가 규칙 때문일 수 있음). 그 관측에서 처음 적합해진 쌍은 FIRST_MATCH로 요약에 1회 포함 | 확정 |
+| 같은 정책 중복 후보 | 미발행 FIRST_MATCH와 프로필 변경 TRANSITION이 겹치면 최신 전환이 대표. FIRST_MATCH는 SUPERSEDED_BY_PROFILE_TRANSITION으로 종료 | 확정 |
 | 실패 후보 | 발행 예외마다 `attempt_count`·`last_failed_at`을 기록하고 계속 재시도. 60회부터 error 로그. 자동 폐기 없음, 수동 복구 | 확정 |
 | 대상 | 청년정책의 ELIGIBLE 또는 기준 통과 POSSIBLY_ELIGIBLE. UNKNOWN·훈련과정 제외 | 확정 |
 | POSSIBLY 기준 | 미해결 조건은 정보 없음 + 확인 필요의 합계. 초기 한도 1, 관심 분야 일치 필수 | 확정 정책의 초기 설정값 |
@@ -73,6 +74,9 @@ TRANSITION의 sourceEventId는 발생별 후보 event_id다. 발생 시각부터
   발생 번호가 최신이 아니거나 현재 ELIGIBLE이 아니면 `SUPERSEDED_OR_NO_LONGER_ELIGIBLE`, 발생 후 7일이 지났으면 `EXPIRED`로 닫는다.
 - NEW_MATCH payload에 `transitionCount`를 추가했다. `eligibleCount`에 포함되므로 `eligibleCount + possiblyCount = matchCount`는 유지된다.
   전환이 포함되면 제목은 `새로 신청 가능해진 정책 T건 포함 N건`, 없으면 기존 `가능성 있는 정책 N건`이다. Notification 검증기는 바꾸지 않았다.
+- 같은 정책의 미발행 FIRST_MATCH와 프로필 변경 TRANSITION이 둘 다 유효하면 최신 전환만 요약에 넣고 FIRST_MATCH는
+  `SUPERSEDED_BY_PROFILE_TRANSITION`으로 닫는다(팀 결정: 최신 사건 우선). 전환이 superseded/EXPIRED로 닫히면 FIRST_MATCH가 그대로 요약된다.
+  두 후보가 예산 경계로 다른 회차에 나뉘면 각 회차에서 따로 발행된다.
 - 명시 호출 `transition(userId, candidateId)`에 이 후보를 넘기면 IllegalArgumentException이다.
 - 프로필을 저녁에 바꾸면 다음 날 08:30 창까지 기다린다. 즉시 인앱 알림이 필요한지는 운영에서 다시 본다.
 
@@ -225,6 +229,7 @@ fixedDelay에 실행 시간이 더해지고, 전환 처리·잠금 대기·DEFER
 | notification-service: `test --rerun-tasks` | 189개 통과, 건너뜀·실패·오류 0 |
 | 요약 예산 초과 수정 후: MatchObservationPostgresTest 39, MatchAutomaticWorkerTest 3, MatchAutomaticSchedulingTest 3, MatchSummaryWindowTest 2, IngestBoundaryTest 3 | 50개 통과, 건너뜀·실패·오류 0. 회차별 분할·당일 중복 차단·다음 날 잔여 처리 및 자격 재검증 확인 |
 | 무변경 입력 사전 필터 추가 후: Match 10개 클래스 101(MatchObservationPostgresTest 47), EligibilityNotificationRevalidationPostgresTest 48, EventFanoutIntegrationTest 19, EligibilityBatchMatchEventTest 3, IngestBoundaryTest·ApplicationPersistenceCompletenessTest | 171개 통과, 건너뜀·실패·오류 0. 재스캔 시 무변경 정책 잠금 관측 0건, 관심·찜·날짜 경계 변화 감지, 사전 필터 불일치 시 잠금 재검증·중복 후보 없음, 행 오류 정책별 격리 확인 |
+| 같은 정책 중복 후보 정리 후: Match 10개 클래스 110(MatchObservationPostgresTest 53) | 110개 통과, 건너뜀·실패·오류 0. 미발행 FIRST_MATCH + 프로필 전환 겹침 시 전환 1건만 요약·FIRST_MATCH 종료·다른 정책은 다음 회차 발행, 전환 EXPIRED 시 FIRST_MATCH 유지 확인 |
 | 팀 결정 5건 반영 후: Match 10개 클래스 105(MatchObservationPostgresTest 51), EligibilityNotificationRevalidationPostgresTest·EventFanoutIntegrationTest·DeadlineExtensionPostgresTest·EligibilityBatchMatchEventTest·IngestBoundaryTest·ApplicationPersistenceCompletenessTest | backend 16개 클래스 224개 통과, 건너뜀·실패·오류 0. notification-service NotificationMessageContractTest·NotificationReceptionPostgresTest·NotificationSlotPostgresTest 79개 통과. 프로필 변경 전환의 요약 편입·개별 발행 제외·명시 호출 거부, superseded/EXPIRED 종료, 정규화 버전 변경 시 FIRST_MATCH 생성, 실패 2회 후 attempt_count=2·PENDING 유지·제약 해제 후 발행 확인 |
 | POLICY_UNAVAILABLE 후보 종료 수정 후: Match 10개 클래스 97(MatchObservationPostgresTest 43), DeadlineExtensionPostgresTest 40, EligibilityNotificationRevalidationPostgresTest 48, EventFanoutIntegrationTest 19, EligibilityBatchMatchEventTest 3 | 207개 통과, 건너뜀·실패·오류 0. 비가용 정책 후보만 닫고 나머지 요약 발행, 전부 비가용 시 Outbox 없이 종료, 조건 묶음 미생성은 DEFERRED 유지, 전환 후보 종료 확인 |
 
