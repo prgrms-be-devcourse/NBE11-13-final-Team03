@@ -1,4 +1,5 @@
 import { parseSearchParams, serializeSearchParams } from '../pages/opportunities/searchParams.ts'
+import { parsePushClick, pushClickPath } from '../push/protocol.ts'
 
 const returnKey = 'yon.oauth.return'
 export function safeReturnPath(value?: string | null): string {
@@ -7,6 +8,10 @@ export function safeReturnPath(value?: string | null): string {
   try {
     const url = new URL(value, 'https://yon.invalid')
     if (url.origin !== 'https://yon.invalid') return '/'
+    if (url.pathname === '/notifications') {
+      const click = parsePushClick(url.search)
+      return click ? pushClickPath(click) : '/notifications'
+    }
     if (url.pathname === '/opportunities') {
       const query = serializeSearchParams(parseSearchParams(url.searchParams).params).toString()
       return `/opportunities${query ? `?${query}` : ''}`

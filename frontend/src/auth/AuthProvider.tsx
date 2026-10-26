@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AuthContext } from './AuthContext'
 import { authObservationOptions, authStatus, authTransitionKey, createAuthActions } from './session'
+import PushBridge from '../push/PushBridge'
 
 // 사용자 정보는 Query가 소유한다. Provider는 앱 전체 인증 전환·중복 로그아웃을 한 곳에서 조율한다.
 function AuthProvider({ children }: { children: ReactNode }) {
@@ -23,7 +24,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
     logoutError: transition.variables === 'logout' ? transition.error : null,
     // 완료 페이지는 전용 재시도로 사용자 확인→복구 초기화→복귀까지 수행한다.
     retry: oauthPage ? undefined : () => { void query.refetch() }, completeOAuth, logout,
-  }}>{children}</AuthContext.Provider>
+  }}><PushBridge />{children}</AuthContext.Provider>
 }
 
 export default AuthProvider

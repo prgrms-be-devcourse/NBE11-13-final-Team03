@@ -4,6 +4,7 @@ import type { AuthUser } from '../api/auth.ts'
 import { endAuthSession, resetAuthRecovery } from '../api/client.ts'
 import { ApiError } from '../api/ApiError.ts'
 import type { AuthStatus } from './AuthContext.ts'
+import { changePushIdentity, releasePushSession } from '../push/lifecycle.ts'
 
 export const authQueryKey = ['auth', 'user'] as const
 export const authTransitionKey = ['auth', 'transition'] as const
@@ -27,6 +28,8 @@ export function authQueryOptions(client: QueryClient) {
     queryFn: async ({ signal }: { signal: AbortSignal }) => {
       const previous = client.getQueryData<AuthUser | null>(authQueryKey)
       const user = await getCurrentUser(signal)
+      if (signal.aborted) throw new ApiError('cancelled', '인증 확인이 취소되었습니다.')
+      await changePushIdentity(user?.id ?? null)
       if (signal.aborted) throw new ApiError('cancelled', '인증 확인이 취소되었습니다.')
       if (previous?.id !== user?.id) await resetPersonalizedQueries(client)
       return user
@@ -64,6 +67,7 @@ export function createAuthActions(client: QueryClient) {
       await client.cancelQueries({ queryKey: authQueryKey })
       if (kind === 'oauth') {
         const user = await verifyOAuthUser()
+        await changePushIdentity(user.id)
         resetAuthRecovery()
         await resetPersonalizedQueries(client)
         client.setQueryData(authQueryKey, user)
@@ -71,6 +75,8 @@ export function createAuthActions(client: QueryClient) {
       }
       await client.cancelQueries({ predicate: isPersonalizedQuery })
       try {
+        const user = client.getQueryData<AuthUser | null>(authQueryKey)
+        if (user) await releasePushSession(user.id)
         await postLogout()
       } catch (error) {
         if (isUncertainLogout(error)) {
