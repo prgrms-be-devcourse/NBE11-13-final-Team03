@@ -7,9 +7,14 @@ export type AuthContextValue = {
   user?: AuthUser
   logoutPending: boolean
   logoutError: Error | null
+  withdrawPending?: boolean
+  withdrawError?: Error | null
+  /** 이 화면에서 서버 204로 탈퇴가 확인되었다. 다음 로그인 전환 전까지 유지된다. */
+  withdrawn?: boolean
   retry?: () => void
   completeOAuth: () => Promise<void>
   logout: () => Promise<void>
+  withdraw?: () => Promise<void>
 }
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 export function useAuth(): AuthContextValue {

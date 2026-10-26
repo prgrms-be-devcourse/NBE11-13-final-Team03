@@ -146,6 +146,49 @@ test('logout 401/403/network/incorrect success status do not claim logout or tri
   }
 })
 
+test('withdraw sends DELETE /users/me with CSRF, requires exact 204 and clears user/cache only after confirmed success', async () => {
+  cookie()
+  const requests = []
+  adapter = async (config) => {
+    requests.push(`${config.method?.toUpperCase()} ${config.url}`)
+    assert.equal(config.requiresAuth, true)
+    assert.equal(config.headers.get('X-XSRF-TOKEN'), 'synthetic-csrf')
+    return response(config, '', 204)
+  }
+  const store = client(), actions = createAuthActions(store)
+  store.setQueryData(authQueryKey, user); store.setQueryData(['profile', 11], { private: true }); store.setQueryData(['saved-opportunities', 11], ['private'])
+  try {
+    const first = actions.withdraw(), second = actions.withdraw()
+    assert.equal(first, second)
+    await assert.rejects(actions.logout(), (error) => error.kind === 'configuration')
+    await first
+    assert.deepEqual(requests, ['DELETE /users/me'])
+    assert.equal(store.getQueryData(authQueryKey), null)
+    assert.equal(store.getQueryData(['profile', 11]), undefined)
+    assert.equal(store.getQueryData(['saved-opportunities', 11]), undefined)
+  } finally { store.clear() }
+})
+
+test('withdraw 403/404/network/incorrect success status never claim withdrawal; uncertain outcomes re-check the server session', async () => {
+  cookie()
+  for (const status of [403, 404, 'network', 200]) {
+    const paths = [], store = client()
+    store.setQueryData(authQueryKey, user)
+    adapter = async (config) => {
+      paths.push(config.url)
+      if (config.url === '/users/me' && config.method === 'get') return response(config, user)
+      if (status === 'network') throw new AxiosError('private', 'ERR_NETWORK', config, {})
+      if (status === 200) return response(config, {}, 200)
+      return http(config, status, status === 404 ? 'USER_001' : 'AUTH_007')
+    }
+    try {
+      await assert.rejects(createAuthActions(store).withdraw())
+      assert.deepEqual(store.getQueryData(authQueryKey), user)
+      assert.deepEqual(paths, status === 'network' || status === 200 ? ['/users/me', '/users/me'] : ['/users/me'])
+    } finally { store.clear() }
+  }
+})
+
 test('confirmed logout rejects late previous-session 401 instead of rotating tokens into the next session', async () => {
   cookie()
   const started = deferred(), finish = deferred()

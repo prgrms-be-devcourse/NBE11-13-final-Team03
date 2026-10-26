@@ -9,20 +9,25 @@ export function isSearchRegionCode(value: string): boolean {
 }
 
 // InterestOptionController의 직업훈련 대분류. 표시 이름과 달리 요청 값은 원문을 유지한다.
+export const trainingCategory = '교육･직업훈련'
 export function categoryMatchesType(category: string, type: SearchParams['type']): boolean {
   if (!type || !category) return true
-  const training = category === '교육･직업훈련'
+  const training = category === trainingCategory
   return type === 'VOCATIONAL_TRAINING' ? training : !training
 }
 
+// 정책 '교육'과 겹치지 않도록 직업훈련 대분류는 '직업훈련'으로 보여 준다.
 export function categoryDisplayLabel(category: string): string {
-  return category === '교육' ? '교육 (정책)' : category
+  return category === trainingCategory ? '직업훈련' : category
 }
 
 export function classificationLabel(item: Pick<OpportunitySearchItem, 'type' | 'category' | 'subCategory' | 'detailCategory'>): string {
-  const labels = [item.category, item.subCategory, item.detailCategory]
-    .map(value => value?.trim()).filter((value): value is string => !!value)
-  if (item.type === 'VOCATIONAL_TRAINING') return labels[0] ?? ''
+  // 직업훈련은 중분류(NCS 1차)·세부 분류(NCS 2차)를 보여 준다. 미분류 대체값 '직업훈련'은 실제 NCS 분류가 있으면 생략하고,
+  // 하나도 없으면 '직업훈련'으로 남긴다.
+  const training = item.type === 'VOCATIONAL_TRAINING'
+  const labels = (training ? [item.subCategory, item.detailCategory] : [item.category?.trim() && categoryDisplayLabel(item.category.trim()), item.subCategory, item.detailCategory])
+    .map(value => value?.trim()).filter((value): value is string => !!value && !(training && value === typeLabels.VOCATIONAL_TRAINING))
+  if (training && !labels.length) return typeLabels.VOCATIONAL_TRAINING
   return [...new Set(labels)].join(' · ')
 }
 

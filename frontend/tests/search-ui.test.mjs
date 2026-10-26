@@ -65,8 +65,10 @@ test('result markup renders only supplied fields, accessible bookmark state and 
 test('search cards follow home type colors and classification rules without visible save labels', () => {
   const training = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: ' 교육･직업훈련 ', subCategory: '직업훈련', detailCategory: '정보기술' }] })
   assert.match(training, /class="type" data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
-  assert.match(training, /class="category">교육･직업훈련<\/p>/)
-  assert.doesNotMatch(training, /교육･직업훈련 · 직업훈련|정보기술/)
+  assert.match(training, /class="category">정보기술<\/p>/)
+  assert.doesNotMatch(training, /교육･직업훈련|직업훈련 · |class="category">직업훈련/)
+  const ncs = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: ' 정보통신 ', detailCategory: '정보기술' }] })
+  assert.match(ncs, /class="category">정보통신 · 정보기술<\/p>/)
   const policy = renderPage({ ...data, content: [{ ...item, category: ' 일자리 ', subCategory: '일자리', detailCategory: ' 취업지원 ' }] })
   assert.match(policy, /class="category">일자리 · 취업지원<\/p>/)
   const missing = renderPage({ ...data, content: [{ ...item, category: ' ', subCategory: null, detailCategory: '' }] })
@@ -184,13 +186,14 @@ function classificationSelects(html) {
 
 test('education label stays distinct from training and category choices follow the selected opportunity type', () => {
   const all = classificationSelects(renderFilters())[0]
-  assert.match(all, /value="교육">교육 \(정책\)<\/option>/)
-  assert.match(all, /value="교육･직업훈련"/)
+  // 요청 값은 원문을 유지하고, 표시 이름만 '교육'·'직업훈련'으로 구분한다.
+  assert.match(all, /value="교육">교육<\/option>/)
+  assert.match(all, /value="교육･직업훈련">직업훈련<\/option>/)
   const policy = classificationSelects(renderFilters({ ...defaultSearchParams(), type: 'YOUTH_POLICY' }))[0]
-  assert.match(policy, /교육 \(정책\)/)
-  assert.doesNotMatch(policy, /교육･직업훈련/)
+  assert.match(policy, /value="교육">교육<\/option>/)
+  assert.doesNotMatch(policy, /교육･직업훈련|>직업훈련</)
   const training = classificationSelects(renderFilters({ ...defaultSearchParams(), type: 'VOCATIONAL_TRAINING' }))[0]
-  assert.match(training, /value="교육･직업훈련"/)
+  assert.match(training, /value="교육･직업훈련">직업훈련<\/option>/)
   assert.doesNotMatch(training, /value="교육"|value="일자리"/)
 })
 

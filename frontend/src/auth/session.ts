@@ -1,5 +1,5 @@
 import type { QueryClient, Query } from '@tanstack/react-query'
-import { getCurrentUser, postLogout, verifyOAuthUser } from '../api/auth.ts'
+import { deleteCurrentUser, getCurrentUser, postLogout, verifyOAuthUser } from '../api/auth.ts'
 import type { AuthUser } from '../api/auth.ts'
 import { endAuthSession, resetAuthRecovery } from '../api/client.ts'
 import { ApiError } from '../api/ApiError.ts'
@@ -38,7 +38,8 @@ export function authQueryOptions(client: QueryClient) {
   }
 }
 
-type AuthTransition = { isPending: boolean; isError: boolean; variables?: 'oauth' | 'logout'; error: Error | null }
+export type AuthTransitionKind = 'oauth' | 'logout' | 'withdraw'
+type AuthTransition = { isPending: boolean; isError: boolean; variables?: AuthTransitionKind; error: Error | null }
 type AuthQueryState = { isPending: boolean; isFetching: boolean; isError: boolean; data: AuthUser | null | undefined }
 export function isUncertainLogout(error: unknown): boolean {
   return error instanceof ApiError && ['network', 'timeout', 'unknown'].includes(error.kind)
@@ -48,7 +49,7 @@ export function authObservationOptions(client: QueryClient, transition: AuthTran
   return {
     ...authQueryOptions(client),
     enabled: (query: { state: { status: string } }) => !oauthPage && !transition.isPending &&
-      !(transition.variables === 'logout' && isUncertainLogout(transition.error) && query.state.status === 'error'),
+      !(transition.variables !== 'oauth' && isUncertainLogout(transition.error) && query.state.status === 'error'),
   }
 }
 export function authStatus(query: AuthQueryState, transition: AuthTransition, oauthPage: boolean): AuthStatus {
@@ -60,8 +61,8 @@ export function authStatus(query: AuthQueryState, transition: AuthTransition, oa
 }
 
 export function createAuthActions(client: QueryClient) {
-  let inFlight: { kind: 'oauth' | 'logout'; promise: Promise<AuthUser | null> } | undefined
-  function run(kind: 'oauth' | 'logout'): Promise<AuthUser | null> {
+  let inFlight: { kind: AuthTransitionKind; promise: Promise<AuthUser | null> } | undefined
+  function run(kind: AuthTransitionKind): Promise<AuthUser | null> {
     if (inFlight) return inFlight.kind === kind ? inFlight.promise : Promise.reject(new ApiError('configuration', '다른 인증 처리가 진행 중입니다.'))
     const promise = (async () => {
       await client.cancelQueries({ queryKey: authQueryKey })
@@ -76,8 +77,9 @@ export function createAuthActions(client: QueryClient) {
       await client.cancelQueries({ predicate: isPersonalizedQuery })
       try {
         const user = client.getQueryData<AuthUser | null>(authQueryKey)
+        // 탈퇴도 세션 종료다. 인증이 남아 있는 동안 푸시 엔드포인트를 먼저 해제한다.
         if (user) await releasePushSession(user.id)
-        await postLogout()
+        await (kind === 'withdraw' ? deleteCurrentUser() : postLogout())
       } catch (error) {
         if (isUncertainLogout(error)) {
           // 응답 유실은 서버 성공/실패를 확정하지 않는다. mutation이 pending인 동안
@@ -95,5 +97,5 @@ export function createAuthActions(client: QueryClient) {
     inFlight = { kind, promise }
     return promise
   }
-  return { completeOAuth: () => run('oauth'), logout: () => run('logout') }
+  return { completeOAuth: () => run('oauth'), logout: () => run('logout'), withdraw: () => run('withdraw') }
 }

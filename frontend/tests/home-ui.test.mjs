@@ -111,12 +111,20 @@ function renderCard(item, auth = { status: 'anonymous' }) {
   } finally { client.clear() }
 }
 
-test('training cards show only the top category while policy cards retain their category hierarchy', () => {
-  const training = renderCard({ ...latestItem, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '직업훈련', detailCategory: '정보기술' })
+test('training cards show NCS sub/detail categories without repeating the type badge while policy cards retain their hierarchy', () => {
+  const training = renderCard({ ...latestItem, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술' })
   assert.match(training, /data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
-  assert.match(training, /class="classification">교육･직업훈련<\/p>/)
+  assert.match(training, /class="classification">정보통신 · 정보기술<\/p>/)
+  assert.doesNotMatch(training, /교육･직업훈련/)
+  // 미분류 대체값 '직업훈련'은 배지와 반복하지 않고, 실제 세부 분류만 남긴다.
+  const unclassified = renderCard({ ...latestItem, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '직업훈련', detailCategory: '정보기술' })
+  assert.match(unclassified, /class="classification">정보기술<\/p>/)
   const localTest = renderCard({ ...latestItem, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '직업훈련', detailCategory: null })
-  assert.match(localTest, /class="classification">교육･직업훈련<\/p>/)
+  // NCS 분류가 하나도 없으면 '직업훈련'으로 표시한다.
+  assert.match(localTest, /class="classification">직업훈련<\/p>/)
+  assert.doesNotMatch(localTest, /교육･직업훈련/)
+  const missing = renderCard({ ...latestItem, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: null, detailCategory: null })
+  assert.match(missing, /class="classification">직업훈련<\/p>/)
   const repeated = renderCard({ ...latestItem, category: '일자리', subCategory: ' 일자리 ', detailCategory: '취업지원' })
   assert.match(repeated, /class="classification">일자리 · 취업지원<\/p>/)
   const fallback = renderCard({ ...latestItem, category: '일자리', subCategory: ' ', detailCategory: null })

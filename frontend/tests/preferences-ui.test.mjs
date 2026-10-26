@@ -49,8 +49,8 @@ test('saved cards use only DTO fields, real detail links, saved time and accessi
 test('saved cards share type colors, deduplicated categories and a labeled saved bookmark with other pages', () => {
   const html = render({ saved: { ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '직업훈련' }] } })
   assert.match(html, /data-opportunity-type="VOCATIONAL_TRAINING">직업훈련/)
-  assert.match(html, /<p class="muted">교육･직업훈련<\/p>/)
-  assert.doesNotMatch(html, /교육･직업훈련 · 직업훈련|>저장 해제<|>저장 안 함</)
+  assert.match(html, /<p class="muted">직업훈련<\/p>/)
+  assert.doesNotMatch(html, /교육･직업훈련|>저장 해제<|>저장 안 함</)
   assert.match(html, /lucide-bookmark/)
   assert.match(html, /fill="currentColor"/)
   assert.match(html, /저장됨/)
