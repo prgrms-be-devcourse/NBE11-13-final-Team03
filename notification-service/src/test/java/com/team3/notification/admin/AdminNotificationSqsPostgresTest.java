@@ -212,6 +212,40 @@ class AdminNotificationSqsPostgresTest {
     }
 
     @Test
+    void sameDayV2FailureAndSuccessfulRetryBothReachSlackAndEachDeduplicate() throws Exception {
+        var first = mapper.readTree(resource("contracts/collection-completed-v2.json"));
+        var failed = (tools.jackson.databind.node.ObjectNode) first.path("payload");
+        failed.put("syncType", "SCHEDULED"); failed.put("status", "FAILED");
+        var failedBody = mapper.writeValueAsString(first);
+        var retry = first.deepCopy();
+        ((tools.jackson.databind.node.ObjectNode) retry).put("messageId", java.util.UUID.randomUUID().toString());
+        var successful = (tools.jackson.databind.node.ObjectNode) retry.path("payload");
+        successful.put("jobId", 8L); successful.put("syncType", "MANUAL_RETRY"); successful.put("status", "SUCCESS");
+        successful.put("failedCount", 0); successful.put("failedPageCount", 0);
+        var retryBody = mapper.writeValueAsString(retry);
+        for (var body : List.of(failedBody, retryBody, failedBody, retryBody)) {
+            send(body); consumer.runOnce();
+        }
+        assertThat(receipts()).isEqualTo(2);
+        assertThat(SLACK_BODIES).hasSize(2);
+        assertThat(SLACK_BODIES.getFirst()).contains("정기 수집 · 실패", "2026-10-27", "소요 7분 00.000초");
+        assertThat(SLACK_BODIES.getLast()).contains("수동 재시도 · 성공", "2026-10-27", "실행 #8");
+        verify(sqs, times(4)).deleteMessage(any(DeleteMessageRequest.class));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications", Long.class)).isZero();
+    }
+
+    @Test
+    void receiptWrittenByTheV1ConsumerStillDeduplicatesAfterUpgrade() throws Exception {
+        var id = java.util.UUID.fromString(mapper.readTree(fixture()).path("messageId").asString());
+        jdbc.update("INSERT INTO admin_consumed_messages(message_id, event_type, request_fingerprint, consumed_at) VALUES (?, 'COLLECTION_COMPLETED', ?, current_timestamp)",
+                id, "779e02075e264933da8d52f41988cf90ac694e9d678f1c2cd49d5280cbefca11");
+        send(fixture()); consumer.runOnce();
+        assertThat(receipts()).isEqualTo(1);
+        assertThat(SLACK_BODIES).isEmpty();
+        verify(sqs).deleteMessage(any(DeleteMessageRequest.class));
+    }
+
+    @Test
     void slackFailureRollsBackReceiptAndRedeliveryCanSucceed() throws Exception {
         SLACK_STATUS.set(503); send(fixture()); consumer.runOnce();
         assertThat(receipts()).isZero();

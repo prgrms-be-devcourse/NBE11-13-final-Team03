@@ -33,6 +33,33 @@ class SlackWebhookSenderTest {
     }
 
     @Test
+    void displaysV2ExecutionKindFinalOutcomeAndElapsedTime() throws Exception {
+        var received = new AtomicReference<String>();
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/webhook-secret", exchange -> {
+            received.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            exchange.sendResponseHeaders(200, 2); exchange.getResponseBody().write("ok".getBytes(StandardCharsets.UTF_8)); exchange.close();
+        });
+        server.start();
+        try (var sender = new SlackWebhookSender(URI.create(url(server, "/webhook-secret")), mapper)) {
+            var fixture = CollectionCompletedMessageTest.v2Fixture();
+            sender.send(CollectionCompletedMessage.decode(mapper, fixture));
+            assertThat(mapper.readTree(received.get()).path("text").asString()).isEqualTo(
+                    "[수동 재시도 · 부분 실패] EMPLOYMENT24 2026-10-27 · 실행 #7 · 새 1,203 · 교체 88 · 유지 139,201 · 레코드 실패 4 · 페이지 실패 1 · 소요 7분 00.000초");
+            var successful = fixture.replace("PARTIAL_SUCCESS", "SUCCESS").replace("\"failedCount\": 4", "\"failedCount\": 0")
+                    .replace("\"failedPageCount\": 1", "\"failedPageCount\": 0");
+            sender.send(CollectionCompletedMessage.decode(mapper, successful));
+            assertThat(received.get()).contains("수동 재시도 · 성공");
+            sender.send(CollectionCompletedMessage.decode(mapper, fixture.replace("MANUAL_RETRY", "SCHEDULED")
+                    .replace("PARTIAL_SUCCESS", "FAILED")));
+            assertThat(received.get()).contains("정기 수집 · 실패");
+            sender.send(CollectionCompletedMessage.decode(mapper, fixture.replace("MANUAL_RETRY", "MANUAL")
+                    .replace("PARTIAL_SUCCESS", "INTERRUPTED")));
+            assertThat(received.get()).contains("수동 수집 · 중단");
+        } finally { server.stop(0); }
+    }
+
+    @Test
     void failuresAndRedirectsNeverExposeOrForwardTheWebhookSecret() throws Exception {
         var forwarded = new AtomicInteger();
         var status = new AtomicInteger(500);

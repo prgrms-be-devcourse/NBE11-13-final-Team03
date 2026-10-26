@@ -3,14 +3,21 @@
 ## 범위
 
 notification-service가 별도 관리자 Standard SQS 큐의 `COLLECTION_COMPLETED`만 처리한다.
-수집 서버의 Outbox·Publisher와 같은 `contracts/collection-completed-v1.json`을 계약 표본으로 사용한다.
+수집 서버의 Outbox·Publisher와 같은 `contracts/collection-completed-v2.json`을 계약 표본으로 사용한다.
+기존 `collection-completed-v1.json` 메시지도 수신하며 저장된 v1 소비 fingerprint를 유지한다.
 관리자 Consumer·연결·전용 스케줄러는 기본 비활성이며 사용자 큐·HTTP 수신·FCM·사용자 API 플래그와 독립적이다.
 수집 서버 구현(#75·#76)을 가져오거나 Java 프로젝트 간 의존을 추가하지 않는다.
 
 ## 계약과 중복 처리
 
-- envelope는 schemaVersion=1, UUID messageId, COLLECTION_COMPLETED, UUID correlationId, UTC occurredAt, payload다.
-- payload는 collectedDate, dataSource, newCount, updatedCount, unchangedCount, failedCount **6개만** 받는다.
+- envelope는 schemaVersion=1 또는 2, UUID messageId, COLLECTION_COMPLETED, UUID correlationId, UTC occurredAt, payload다.
+- v1 payload는 collectedDate, dataSource, newCount, updatedCount, unchangedCount, failedCount 6개만 받는다.
+- v2는 기존 집계에 jobId, syncType(SCHEDULED/MANUAL/MANUAL_RETRY), status(SUCCESS/PARTIAL_SUCCESS/FAILED/INTERRUPTED),
+  failedPageCount, durationMillis를 추가한 정확한 11필드다. 실행 ID는 양수 long, 페이지 실패는 음수가 아닌 int,
+  소요시간은 음수가 아닌 long 밀리초다. SUCCESS에 최종 레코드·페이지 실패가 있으면 거부한다.
+- v2 생산자는 자동 재시도까지 끝난 실행당 한 건을 기록한다. 정기·수동 등록·수동 전체 재시도가 포함되며 같은 날 재시도 결과도 별도로 전달한다.
+- 소요시간은 생산자 started_at(접수)부터 최종 종료까지로 대기·자동 재시도를 포함하고 큐·Slack 전달 대기는 제외한다.
+  v1에는 상태·소요시간을 추정해 넣지 않는다. 두 버전의 필수/추가 필드는 각각 엄격하게 검사한다.
 - 출처는 YOUTH_POLICY·EMPLOYMENT24, 날짜는 유효한 yyyy-MM-dd, 카운트는 음수가 아닌 int 정수다.
   필수값 누락·추가 필드·다른 eventType·다른 버전·문자열/소수 카운트는 거부한다. 사용자 메시지 디코더를 타지 않는다.
 - `notification.admin_consumed_messages`의 messageId PK로 중복을 제거한다.
@@ -37,10 +44,10 @@ Slack 실패는 소비 기록과 함께 롤백하고 SQS에서 삭제하지 않�
 DB 트랜잭션은 이 한 건의 짧은 Slack 호출 동안만 유지한다. HTTP 전체 5초·연결 2초이며 리디렉션·자동 재시도를 하지 않는다.
 본문·원격 오류·Webhook URL을 로그나 예외 원인에 보존하지 않고 고정 오류 코드만 남긴다.
 
-Slack 본문은 다음 6개 결과 값만으로 만든다. 페이지/NCS 실패는 레코드 수로 환산하지 않는다.
+Slack v2 본문에는 실행 종류·최종 결과·집계·소요시간을 표시한다. 페이지/NCS 실패는 레코드 수로 환산하지 않는다.
 
 ```text
-[수집 완료] EMPLOYMENT24 2026-10-27 · 새 1,203 · 교체 88 · 유지 139,201 · 실패 4
+[수동 재시도 · 부분 실패] EMPLOYMENT24 2026-10-27 · 실행 #7 · 새 1,203 · 교체 88 · 유지 139,201 · 레코드 실패 4 · 페이지 실패 1 · 소요 7분 00.000초
 ```
 
 Webhook 계약 근거: [Slack Incoming Webhooks 공식 문서](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks).
@@ -75,7 +82,8 @@ Webhook 계약 근거: [Slack Incoming Webhooks 공식 문서](https://docs.slac
 4. 알림 서버 Role에는 관리자 source의 ReceiveMessage·DeleteMessage·GetQueueAttributes와 관리자 DLQ의 GetQueueAttributes만 부여한다.
    데이터 서버 Role에는 관리자 source의 SendMessage만 부여한다. 사용자 큐 권한과 분리한다.
 5. 알림 담당의 Slack Webhook을 안전하게 주입하고 관리자 Consumer만 먼저 검증한다.
-6. 수집 서버 Publisher를 켜기 전에 과거 PENDING 처리 방침을 정한다. 이후 실제 정기 수집 결과와 관리자 DLQ를 확인한다.
+6. v1/v2 호환 Consumer를 먼저 배포하고 v2 생산자(#75·#76)를 배포한다. 새 관리자 수신 SQL은 이전과 같다.
+7. 수집 서버 Publisher를 켜기 전에 과거 PENDING 처리 방침을 정한다. 이후 실제 수집 결과와 관리자 DLQ를 확인한다.
 
 ```sh
 psql -v ON_ERROR_STOP=1 -f database/scripts/notification-admin.sql
@@ -88,10 +96,11 @@ SQL 롤백 시에도 기존 사용자 테이블을 변경하지 않는다. 기�
 
 ## 검증
 
-- 계약 표본·정확한 6필드·숫자 타입·잘못된 메시지·fingerprint와 민감 본문 비노출 단위 테스트.
+- v1/v2 계약·정확한 필드·숫자 타입·최종 상태·소요시간·기존 fingerprint 호환과 민감 본문 비노출 단위 테스트.
 - 기본 비활성·단독 활성화·두 Consumer 동시 활성화·큐 중복·설정 검증.
-- 실제 로컬 HTTP stub에 6필드 Slack 텍스트 전송, HTTP 오류·잘못된 응답·리디렉션 거부.
+- 실제 로컬 HTTP stub에 기존 메시지와 v2 결과·소요시간 전송, HTTP 오류·잘못된 응답·리디렉션 거부.
 - PostgreSQL 제한 계정·production DDL + LocalStack + HTTP stub 통합: 커밋 후 삭제,
   중복·동시 중복·본문 충돌, Slack 실패·삭제 실패·DB 커밋 실패 복구, 관리자 DLQ·사용자 큐 분리, 잘못된 토폴로지.
+  같은 날 실패·성공 재시도의 각각 1회 전달 및 이전 버전 소비 기록의 중복 제거도 검증한다.
 - Notification CI는 관리자 통합 테스트가 스킵 없이 실행됐는지 필수로 확인한다.
 - 실제 data-service 프로세스부터 실제 Slack까지의 운영 E2E는 큐·IAM·Webhook·배포 준비 후 수행한다.
