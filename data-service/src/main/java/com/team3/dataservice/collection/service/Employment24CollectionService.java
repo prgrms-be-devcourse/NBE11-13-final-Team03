@@ -13,14 +13,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.concurrent.CancellationException;
 import java.util.function.BiConsumer;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 
 @Service
 public class Employment24CollectionService {
-    private static final int MAX_ATTEMPTS = 3;
     private final Employment24Client client;
 
     public Employment24CollectionService(Employment24Client client) {
@@ -95,13 +93,11 @@ public class Employment24CollectionService {
 
     private Employment24Page fetchWithRetry(Employment24SearchRequest request) {
         for (int attempt = 1; ; attempt++) {
-            if (Thread.currentThread().isInterrupted()) {
-                throw new CancellationException("수집 실행이 중단되었습니다.");
-            }
+            CollectionRetry.beforeAttempt(attempt);
             try {
                 return client.fetchPage(request);
             } catch (Employment24ClientException exception) {
-                if (!exception.isRetryable() || attempt >= MAX_ATTEMPTS
+                if (!exception.isRetryable() || attempt >= CollectionRetry.MAX_ATTEMPTS
                         || exception.getErrorCode().equals("HTTP_401") || exception.getErrorCode().equals("HTTP_403")) {
                     throw exception;
                 }

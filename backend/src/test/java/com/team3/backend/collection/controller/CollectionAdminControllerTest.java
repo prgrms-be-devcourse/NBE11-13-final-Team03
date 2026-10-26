@@ -47,6 +47,17 @@ class CollectionAdminControllerTest {
 
     @Test
     @WithMockUser(authorities = "ADMIN")
+    void retryReturnsANewAcceptedJobAndUsesTheOriginalIdOnlyAsRetryTarget() throws Exception {
+        when(stub.retrySync(any())).thenReturn(SyncStartResponse.newBuilder().setJobId(8)
+                .setSource(CollectionSource.YOUTH_POLICY).setStatus(SyncJobStatus.PENDING).setMessage("accepted").build());
+        mvc.perform(post("/api/admin/collection/syncs/7/retry").with(csrf()))
+                .andExpect(status().isAccepted()).andExpect(header().string("Location", "/api/admin/collection/syncs/8"))
+                .andExpect(jsonPath("$.jobId").value(8));
+        verify(stub).retrySync(RetrySyncRequest.newBuilder().setJobId(7).build());
+    }
+
+    @Test
+    @WithMockUser(authorities = "ADMIN")
     void readsListAndDetailWithLegacyFieldsIncludingNullTotalCount() throws Exception {
         var job = SyncJob.newBuilder().setJobId(7).setSource(CollectionSource.YOUTH_POLICY).setStatus(SyncJobStatus.RUNNING)
                 .setStartedAt(Timestamp.newBuilder().setSeconds(1792713600)).setFetchedCount(10).setSuccessCount(5)
@@ -111,6 +122,7 @@ class CollectionAdminControllerTest {
     @WithMockUser(authorities = "ADMIN")
     void invalidInputsHaveCollectionErrorCodeAndNeverReachGrpc() throws Exception {
         for (String id : List.of("text", "0", "-1", "999999999999999999999")) {
+            mvc.perform(post("/api/admin/collection/syncs/" + id + "/retry").with(csrf())).andExpect(status().isBadRequest());
             mvc.perform(get("/api/admin/collection/syncs/" + id)).andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("COLLECTION_003"));
             mvc.perform(get("/api/admin/collection/raw-records/" + id)).andExpect(status().isBadRequest());
@@ -135,19 +147,23 @@ class CollectionAdminControllerTest {
         verify(stub, never()).startSync(any()); verify(stub, never()).getSyncJob(any());
         verify(stub, never()).getRawRecord(any()); verify(stub, never()).listSyncJobsByDate(any());
         verify(stub, never()).saveRawRecord(any());
+        verify(stub, never()).retrySync(any());
     }
 
     @Test
     @WithMockUser(authorities = "USER")
     void memberIsForbidden() throws Exception {
+        mvc.perform(post("/api/admin/collection/syncs/1/retry").with(csrf())).andExpect(status().isForbidden());
         mvc.perform(get("/api/admin/collection/syncs/1")).andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("COLLECTION_007"));
         mvc.perform(post("/api/admin/collection/syncs/YOUTH_POLICY").with(csrf())).andExpect(status().isForbidden());
         verify(stub, never()).getSyncJob(any()); verify(stub, never()).startSync(any());
+        verify(stub, never()).retrySync(any());
     }
 
     @Test
     void anonymousIsRejected() throws Exception {
+        mvc.perform(post("/api/admin/collection/syncs/1/retry").with(csrf())).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/admin/collection/syncs/1")).andExpect(status().isUnauthorized());
         verify(stub, never()).getSyncJob(any());
     }

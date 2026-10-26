@@ -17,7 +17,7 @@ public interface CollectionOutboxEventRepository extends JpaRepository<Collectio
                  retry_count, next_retry_at, created_at)
             values (:messageId, :dedupKey, 'COLLECTION_COMPLETED', :jobId, cast(:payload as jsonb),
                     'PENDING', 0, :createdAt, :createdAt)
-            on conflict (dedup_key) do nothing
+            on conflict do nothing
             """, nativeQuery = true)
     int insertIfAbsent(@Param("messageId") UUID messageId, @Param("dedupKey") String dedupKey,
                        @Param("jobId") Long jobId, @Param("payload") String payload,

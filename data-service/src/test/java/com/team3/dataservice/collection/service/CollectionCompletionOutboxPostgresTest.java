@@ -16,6 +16,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ClassPathResource;
@@ -82,7 +84,7 @@ class CollectionCompletionOutboxPostgresTest {
         assertThat(histories.findById(history.getId()).orElseThrow().getStatus()).isEqualTo(SyncJobStatus.SUCCESS);
         var event = outboxes.findAll().getFirst();
         assertThat(event.getSyncJobId()).isEqualTo(history.getId());
-        assertThat(event.getDedupKey()).isEqualTo("COLLECTION_COMPLETED:EMPLOYMENT24:2026-10-26");
+        assertThat(event.getDedupKey()).isEqualTo("COLLECTION_COMPLETED:" + history.getId());
         assertThat(event.getStatus()).isEqualTo(CollectionOutboxStatus.PENDING);
         assertThat(event.getRetryCount()).isZero();
         assertThat(event.getLeaseToken()).isNull();
@@ -93,27 +95,31 @@ class CollectionCompletionOutboxPostgresTest {
     }
 
     @Test
-    void ignoresSecondDailyJobWithoutRollingBackItsFailureOrReplacingTheMessage() {
+    void sameDayFailedCollectionAndSuccessfulRetryHaveSeparateImmutableMessages() {
         var first = history("YOUTH_POLICY", "SCHEDULED", START);
-        jobs.complete(first.getId(), true);
+        jobs.fail(first.getId(), "upstream failed", false);
         var original = outboxes.findAll().getFirst();
-        var second = history("YOUTH_POLICY", "SCHEDULED", START.plusMinutes(1));
-        jobs.fail(second.getId(), "upstream failed", false);
-        var kept = outboxes.findAll().getFirst();
-        assertThat(outboxes.count()).isEqualTo(1);
+        var second = jobs.createRetry(first.getId());
+        jobs.start(second.jobId());
+        jobs.complete(second.jobId(), true);
+        var kept = outboxes.findById(original.getId()).orElseThrow();
+        assertThat(outboxes.count()).isEqualTo(2);
         assertThat(kept.getMessageId()).isEqualTo(original.getMessageId());
         assertThat(kept.getPayload()).isEqualTo(original.getPayload());
         assertThat(kept.getSyncJobId()).isEqualTo(first.getId());
-        assertThat(histories.findById(second.getId()).orElseThrow().getStatus()).isEqualTo(SyncJobStatus.FAILED);
+        assertThat(histories.findById(first.getId()).orElseThrow().getStatus()).isEqualTo(SyncJobStatus.FAILED);
+        var retry = histories.findById(second.jobId()).orElseThrow();
+        assertThat(retry.getStatus()).isEqualTo(SyncJobStatus.SUCCESS);
+        assertThat(retry.getSyncType()).isEqualTo("MANUAL_RETRY");
+        assertThat(outboxes.findAll()).extracting(event -> event.getMessageId()).doesNotHaveDuplicates();
     }
 
     @Test
-    void concurrentDuplicateInsertCommitsBothJobTransitionsAndOneMessage() throws Exception {
+    void concurrentCallbacksForOneJobCommitOneMessage() throws Exception {
         var first = history("YOUTH_POLICY", "SCHEDULED", START);
-        var second = history("YOUTH_POLICY", "SCHEDULED", START.plusMinutes(1));
         var barrier = new CyclicBarrier(2);
         try (var executor = Executors.newFixedThreadPool(2)) {
-            var results = List.of(first, second).stream().map(job -> executor.submit(() -> {
+            var results = List.of(first, first).stream().map(job -> executor.submit(() -> {
                 barrier.await(10, TimeUnit.SECONDS);
                 jobs.fail(job.getId(), "upstream failed", false);
                 return job.getId();
@@ -133,14 +139,12 @@ class CollectionCompletionOutboxPostgresTest {
                 history("EMPLOYMENT24", "SCHEDULED", START.withHour(15).withMinute(0)))) {
             jobs.complete(job.getId(), true);
         }
-        assertThat(outboxes.findAll()).extracting(event -> event.getDedupKey()).containsExactlyInAnyOrder(
-                "COLLECTION_COMPLETED:YOUTH_POLICY:2026-10-26",
-                "COLLECTION_COMPLETED:EMPLOYMENT24:2026-10-26",
-                "COLLECTION_COMPLETED:EMPLOYMENT24:2026-10-27");
+        assertThat(outboxes.count()).isEqualTo(3);
+        assertThat(outboxes.findAll()).extracting(event -> event.getDedupKey()).doesNotHaveDuplicates();
     }
 
     @Test
-    void manualInterruptedAndStartupRecoveryDoNotCreateMessages() {
+    void manualInterruptedAndStartupRecoveryEachRecordTheirFinalResult() {
         var manual = history("YOUTH_POLICY", "MANUAL", START);
         jobs.complete(manual.getId(), true);
         var interrupted = history("YOUTH_POLICY", "SCHEDULED", START);
@@ -148,7 +152,9 @@ class CollectionCompletionOutboxPostgresTest {
         var recoverable = history("EMPLOYMENT24", "SCHEDULED", START.minusYears(1));
         jobs.recoverInterrupted();
         assertThat(histories.findById(recoverable.getId()).orElseThrow().getStatus()).isEqualTo(SyncJobStatus.INTERRUPTED);
-        assertThat(outboxes.count()).isZero();
+        assertThat(outboxes.count()).isEqualTo(3);
+        jobs.recoverInterrupted();
+        assertThat(outboxes.count()).isEqualTo(3);
     }
 
     @Test
@@ -157,6 +163,7 @@ class CollectionCompletionOutboxPostgresTest {
         old.finish(true, START.plusMinutes(1));
         histories.saveAndFlush(old);
         jobs.fail(old.getId(), "late callback", false);
+        jobs.complete(old.getId(), true);
         assertThat(outboxes.count()).isZero();
         assertThat(histories.findById(old.getId()).orElseThrow().getStatus()).isEqualTo(SyncJobStatus.SUCCESS);
     }
@@ -190,9 +197,58 @@ class CollectionCompletionOutboxPostgresTest {
     void recorderRequiresTheCallersTransaction() {
         var history = history("YOUTH_POLICY", "SCHEDULED", START);
         history.finish(true, START.plusMinutes(1));
-        assertThatThrownBy(() -> completion.recordIfDailyCompletion(history))
+        assertThatThrownBy(() -> completion.recordIfCompletion(history))
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertThat(outboxes.count()).isZero();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = SyncJobStatus.class, names = {"FAILED", "PARTIAL_SUCCESS", "INTERRUPTED"})
+    void createsFreshRetryWithoutChangingPriorOutcomeAndRejectsOverlappingRuns(SyncJobStatus status) {
+        var previous = history("YOUTH_POLICY", "MANUAL", START);
+        if (status == SyncJobStatus.PARTIAL_SUCCESS) {
+            previous.recordSuccess(com.team3.dataservice.collection.domain.RecordResultType.CREATED);
+            previous.finish(false, START.plusMinutes(1));
+        } else previous.fail("test", status == SyncJobStatus.INTERRUPTED, START.plusMinutes(1));
+        histories.saveAndFlush(previous);
+        var retry = jobs.createRetry(previous.getId());
+        assertThat(retry.jobId()).isNotEqualTo(previous.getId());
+        assertThat(histories.findById(retry.jobId()).orElseThrow().getSyncType()).isEqualTo("MANUAL_RETRY");
+        assertThat(histories.findById(previous.getId()).orElseThrow().getStatus()).isEqualTo(status);
+        assertThatThrownBy(() -> jobs.createRetry(previous.getId())).isInstanceOf(IllegalStateException.class);
+        jobs.fail(retry.jobId(), "retry exhausted", false);
+        assertThat(outboxes.count()).isEqualTo(1);
+    }
+
+    @Test
+    void rejectsSuccessfulActiveMissingAndInvalidRetryTargets() {
+        var running = history("YOUTH_POLICY", "MANUAL", START);
+        assertThatThrownBy(() -> jobs.createRetry(running.getId())).isInstanceOf(IllegalStateException.class);
+        jobs.complete(running.getId(), true);
+        assertThatThrownBy(() -> jobs.createRetry(running.getId())).isInstanceOf(IllegalStateException.class);
+        var pending = jobs.create(com.team3.dataservice.collection.domain.CollectionSource.YOUTH_POLICY);
+        assertThatThrownBy(() -> jobs.createRetry(pending.jobId())).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> jobs.createRetry(99999L)).isInstanceOf(jakarta.persistence.EntityNotFoundException.class);
+        assertThatThrownBy(() -> jobs.createRetry(0L)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void migrationPreservesLegacyDailyMessageAndDeduplicatesItsJob() throws Exception {
+        var history = history("YOUTH_POLICY", "SCHEDULED", START);
+        jobs.complete(history.getId(), true);
+        db.update("UPDATE collection_outbox_events SET dedup_key='COLLECTION_COMPLETED:YOUTH_POLICY:2026-10-26'");
+        var original = outboxes.findAll().getFirst();
+        db.execute("ALTER TABLE collection_outbox_events DROP CONSTRAINT uk_collection_outbox_job");
+        var sql = new ClassPathResource("db-boundary/collection-outbox-per-job.sql").getContentAsString(StandardCharsets.UTF_8);
+        db.execute(sql);
+        db.execute(sql);
+        new TransactionTemplate(transactions).executeWithoutResult(tx ->
+                completion.recordIfCompletion(histories.findById(history.getId()).orElseThrow()));
+        assertThat(outboxes.count()).isEqualTo(1);
+        var kept = outboxes.findAll().getFirst();
+        assertThat(kept.getPayload()).isEqualTo(original.getPayload());
+        assertThat(kept.getMessageId()).isEqualTo(original.getMessageId());
+        assertThat(kept.getDedupKey()).isEqualTo(original.getDedupKey());
     }
 
     private SyncHistory history(String sourceCode, String type, OffsetDateTime at) {

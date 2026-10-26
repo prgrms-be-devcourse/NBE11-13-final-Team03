@@ -30,6 +30,17 @@ class ManualSyncServiceTests {
     }
 
     @Test
+    void retryRecollectsTheWholeSourceWithASeparateJob() {
+        when(jobs.createRetry(1L)).thenReturn(new SyncStartResponse(2L, "YOUTH_POLICY", SyncJobStatus.PENDING, "accepted"));
+        doAnswer(invocation -> { invocation.getArgument(0, Runnable.class).run(); return null; })
+                .when(executor).execute(any(Runnable.class));
+        assertEquals(2L, service.retry(1L).jobId());
+        verify(worker).run(2L, CollectionSource.YOUTH_POLICY, 100, 1000);
+        verify(jobs, never()).create(any());
+        verify(jobs, never()).createScheduled(any());
+    }
+
+    @Test
     void invalidLimitsDoNotCreateJobs() {
         assertThrows(IllegalArgumentException.class, () -> service.start(CollectionSource.YOUTH_POLICY, 0, 1));
         assertThrows(IllegalArgumentException.class, () -> service.start(CollectionSource.YOUTH_POLICY, 101, 1));

@@ -16,6 +16,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -32,30 +33,30 @@ class CollectionCompletionOutboxTest {
     private final CollectionCompletionOutbox completion = new CollectionCompletionOutbox(events, json);
 
     @ParameterizedTest
-    @EnumSource(value = SyncJobStatus.class, names = {"SUCCESS", "PARTIAL_SUCCESS", "FAILED"})
+    @EnumSource(value = SyncJobStatus.class, names = {"SUCCESS", "PARTIAL_SUCCESS", "FAILED", "INTERRUPTED"})
     void recordsEachScheduledTerminalOutcome(SyncJobStatus status) {
         var history = history("SCHEDULED", status);
-        completion.recordIfDailyCompletion(history);
+        completion.recordIfCompletion(history);
         var body = capture();
         assertThat(body.get("eventType").asText()).isEqualTo("COLLECTION_COMPLETED");
     }
 
     @ParameterizedTest
-    @EnumSource(value = SyncJobStatus.class, names = {"PENDING", "RUNNING", "INTERRUPTED"})
+    @EnumSource(value = SyncJobStatus.class, names = {"PENDING", "RUNNING"})
     void ignoresNonCompletedScheduledJobs(SyncJobStatus status) {
-        completion.recordIfDailyCompletion(history("SCHEDULED", status));
+        completion.recordIfCompletion(history("SCHEDULED", status));
         verifyNoInteractions(events);
     }
 
     @ParameterizedTest
-    @EnumSource(value = SyncJobStatus.class, names = {"SUCCESS", "PARTIAL_SUCCESS", "FAILED"})
-    void ignoresManualJobsEvenWhenFinished(SyncJobStatus status) {
-        completion.recordIfDailyCompletion(history("MANUAL", status));
-        verifyNoInteractions(events);
+    @ValueSource(strings = {"MANUAL", "MANUAL_RETRY"})
+    void recordsManualCollectionAndRetry(String type) {
+        completion.recordIfCompletion(history(type, SyncJobStatus.SUCCESS));
+        assertThat(capture().get("payload").get("syncType").asText()).isEqualTo(type);
     }
 
     @Test
-    void usesStartDateInKoreaAndFinishedInstantInUtcWithExactlySixPayloadFields() throws Exception {
+    void recordsFinalStatusDurationAndCountsInV2WithoutPrivateFailureDetails() throws Exception {
         var history = history("SCHEDULED", SyncJobStatus.RUNNING);
         history.recordCollection(4, List.of(new SyncPageFailureResponse(2, "HTTP_500", "private", true)),
                 List.of(), List.of("01"));
@@ -65,18 +66,23 @@ class CollectionCompletionOutboxTest {
         history.recordFailure(new SyncRecordResultResponse(null, "p1", null, 3, null,
                 RecordProcessStatus.FAILED, null, "STORAGE_FAILED", "private", FINISH));
         history.finish(false, FINISH);
-        completion.recordIfDailyCompletion(history);
+        completion.recordIfCompletion(history);
 
         var body = capture();
-        var sample = json.readTree(new ClassPathResource("contracts/collection-completed-v1.json").getInputStream());
+        var sample = json.readTree(new ClassPathResource("contracts/collection-completed-v2.json").getInputStream());
         assertThat(json.convertValue(body, Map.class).keySet())
                 .isEqualTo(json.convertValue(sample, Map.class).keySet());
-        assertThat(json.convertValue(body.get("payload"), Map.class)).isEqualTo(Map.of(
+        assertThat(json.convertValue(body.get("payload"), Map.class)).containsAllEntriesOf(Map.of(
                 "collectedDate", "2026-10-26", "dataSource", "EMPLOYMENT24",
                 "newCount", 1, "updatedCount", 1, "unchangedCount", 1, "failedCount", 1));
+        assertThat(body.get("payload").get("jobId").asLong()).isEqualTo(7L);
+        assertThat(body.get("payload").get("status").asText()).isEqualTo("PARTIAL_SUCCESS");
+        assertThat(body.get("payload").get("failedPageCount").asInt()).isEqualTo(1);
+        assertThat(body.get("payload").get("durationMillis").asLong()).isEqualTo(1_200_000L);
+        assertThat(body.toString()).doesNotContain("private");
         assertThat(json.convertValue(body.get("payload"), Map.class).keySet())
                 .isEqualTo(json.convertValue(sample.get("payload"), Map.class).keySet());
-        assertThat(body.get("schemaVersion").asInt()).isEqualTo(1);
+        assertThat(body.get("schemaVersion").asInt()).isEqualTo(2);
         assertThat(body.get("occurredAt").asText()).isEqualTo(FINISH.toInstant().toString());
         assertThat(UUID.fromString(body.get("correlationId").asText())).isNotNull();
         assertThat(UUID.fromString(body.get("messageId").asText())).isNotNull();
@@ -87,15 +93,16 @@ class CollectionCompletionOutboxTest {
         var history = new SyncHistory(source(), "SCHEDULED", START.withHour(15).withMinute(0));
         ReflectionTestUtils.setField(history, "id", 7L);
         history.finish(true, FINISH);
-        completion.recordIfDailyCompletion(history);
-        verify(events).insertIfAbsent(any(UUID.class), eq("COLLECTION_COMPLETED:EMPLOYMENT24:2026-10-27"),
+        completion.recordIfCompletion(history);
+        assertThat(capture().get("payload").get("collectedDate").asText()).isEqualTo("2026-10-27");
+        verify(events).insertIfAbsent(any(UUID.class), eq("COLLECTION_COMPLETED:7"),
                 eq(7L), anyString(), eq(FINISH.toInstant()));
     }
 
     private tools.jackson.databind.JsonNode capture() {
         var body = ArgumentCaptor.forClass(String.class);
         var id = ArgumentCaptor.forClass(UUID.class);
-        verify(events).insertIfAbsent(id.capture(), eq("COLLECTION_COMPLETED:EMPLOYMENT24:2026-10-26"),
+        verify(events).insertIfAbsent(id.capture(), eq("COLLECTION_COMPLETED:7"),
                 eq(7L), body.capture(), any(Instant.class));
         var envelope = json.readTree(body.getValue());
         assertThat(envelope.get("messageId").asText()).isEqualTo(id.getValue().toString());

@@ -84,6 +84,8 @@ update가 먼저 실행되면 다음 문제가 생긴다.
 [notification-withdrawal.md](notification-withdrawal.md), [notification-delivery.md](notification-delivery.md))를 따른다.
 Application 테이블이 없는 새 로컬 DB는 첫 기동의 update가 테이블을 만들므로 SQL을 실행하지 않는다.
 단, `collection-outbox.sql`은 CHECK·기본값이 필요하므로 **새 DB도 계정·스키마 준비 후 첫 data-service 기동 전에 적용**한다.
+이전 완료 Outbox SQL 설치 DB는 실행별 알림 버전으로 올리기 전에 `collection-outbox-per-job.sql`을 application_user로 적용한다.
+기존 메시지·본문을 유지하며 sync_job_id 유일성을 추가한다.
 
 ### data-service (backend와 DB 공유 1단계)
 

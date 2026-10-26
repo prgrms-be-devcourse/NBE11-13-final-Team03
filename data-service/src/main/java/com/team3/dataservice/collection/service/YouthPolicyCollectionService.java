@@ -16,7 +16,6 @@ import tools.jackson.databind.JsonNode;
 
 @Service
 public class YouthPolicyCollectionService {
-    private static final int MAX_FIRST_PAGE_ATTEMPTS = 3;
     private static final int MAX_CONSECUTIVE_PAGE_FAILURES = 3;
     private final YouthPolicyClient client;
 
@@ -51,7 +50,7 @@ public class YouthPolicyCollectionService {
             }
             YouthPolicyPage page = null;
             try {
-                page = pageNumber == 1 ? fetchFirstPageWithRetry(pageSize) : client.fetchPage(pageNumber, pageSize);
+                page = fetchWithRetry(pageNumber, pageSize);
             } catch (YouthPolicyClientException exception) {
                 failures.add(new SyncPageFailureResponse(pageNumber,
                         exception.getErrorCode(), exception.getMessage(), exception.isRetryable()));
@@ -81,15 +80,13 @@ public class YouthPolicyCollectionService {
         }
     }
 
-    private YouthPolicyPage fetchFirstPageWithRetry(int pageSize) {
+    private YouthPolicyPage fetchWithRetry(int pageNumber, int pageSize) {
         for (int attempt = 1; ; attempt++) {
-            if (Thread.currentThread().isInterrupted()) {
-                throw new CancellationException("수집 실행이 중단되었습니다.");
-            }
+            CollectionRetry.beforeAttempt(attempt);
             try {
-                return client.fetchPage(1, pageSize);
+                return client.fetchPage(pageNumber, pageSize);
             } catch (YouthPolicyClientException exception) {
-                if (!exception.isRetryable() || attempt >= MAX_FIRST_PAGE_ATTEMPTS) {
+                if (!exception.isRetryable() || attempt >= CollectionRetry.MAX_ATTEMPTS) {
                     throw exception;
                 }
             }

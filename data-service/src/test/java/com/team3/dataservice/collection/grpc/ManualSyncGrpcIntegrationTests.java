@@ -16,6 +16,7 @@ import com.team3.dataservice.collection.domain.repository.RawNormalizationReques
 import com.team3.dataservice.collection.service.SyncJobService;
 import com.team3.dataservice.collection.service.RawRecordService;
 import com.team3.dataservice.collection.service.RawRecordFingerprint;
+import com.team3.dataservice.outbox.domain.repository.CollectionOutboxEventRepository;
 import com.team3.dataservice.collection.dto.request.RawRecordSaveRequest;
 import java.time.OffsetDateTime;
 import java.io.IOException;
@@ -83,6 +84,8 @@ class ManualSyncGrpcIntegrationTests {
     private static volatile int youthResultCode;
     private static volatile int employmentFailureCode;
     private static volatile int youthTotalOverride;
+    private static volatile int generatedYouthCount;
+    private static final AtomicInteger TRANSIENT_YOUTH_FAILURES = new AtomicInteger();
     private static volatile CountDownLatch youthRelease = new CountDownLatch(0);
     private static volatile CountDownLatch youthEntered = new CountDownLatch(0);
     private static final AtomicInteger EMPLOYMENT_CALLS = new AtomicInteger();
@@ -97,6 +100,7 @@ class ManualSyncGrpcIntegrationTests {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private RawRecordService rawRecords;
     @Autowired private RawRecordFingerprint fingerprint;
+    @Autowired private CollectionOutboxEventRepository outboxes;
 
     @DynamicPropertySource
     static void upstreamProperties(DynamicPropertyRegistry registry) {
@@ -119,6 +123,7 @@ class ManualSyncGrpcIntegrationTests {
         stub = com.team3.contracts.collection.v1.CollectionServiceGrpc.newBlockingStub(channel)
                 .withInterceptors(io.grpc.stub.MetadataUtils.newAttachHeadersInterceptor(headers));
         normalizationRequests.deleteAllInBatch();
+        outboxes.deleteAllInBatch();
         records.deleteAllInBatch();
         histories.deleteAllInBatch();
         sources.deleteAllInBatch();
@@ -128,6 +133,8 @@ class ManualSyncGrpcIntegrationTests {
         youthResultCode = 0;
         employmentFailureCode = 0;
         youthTotalOverride = -1;
+        generatedYouthCount = 0;
+        TRANSIENT_YOUTH_FAILURES.set(0);
         youthSecondRecords = "[]";
         blockedYouthPage = 0;
         youthRelease = new CountDownLatch(0);
@@ -139,9 +146,9 @@ class ManualSyncGrpcIntegrationTests {
     @AfterEach
     void finishWorkers() throws Exception {
         youthRelease.countDown();
-        for (var history : histories.findBySyncTypeAndStatusIn("MANUAL",
-                List.of(SyncJobStatus.PENDING, SyncJobStatus.RUNNING))) {
-            awaitDone(history.getId());
+        for (var type : List.of("MANUAL", "MANUAL_RETRY")) {
+            for (var history : histories.findBySyncTypeAndStatusIn(type,
+                    List.of(SyncJobStatus.PENDING, SyncJobStatus.RUNNING))) awaitDone(history.getId());
         }
         channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
     }
@@ -284,6 +291,58 @@ class ManualSyncGrpcIntegrationTests {
     }
 
 
+
+    @Test
+    void tenThousandRecordsCommitByHundredsAndNotifyOnlyAfterTheLastPageAndAutomaticRetries() throws Exception {
+        generatedYouthCount = 10_000;
+        blockedYouthPage = 100;
+        TRANSIENT_YOUTH_FAILURES.set(2);
+        youthEntered = new CountDownLatch(1);
+        youthRelease = new CountDownLatch(1);
+        var id = stub.withDeadlineAfter(5, TimeUnit.SECONDS).startSync(
+                com.team3.contracts.collection.v1.StartSyncRequest.newBuilder()
+                        .setSource(com.team3.contracts.collection.v1.CollectionSource.YOUTH_POLICY).build()).getJobId();
+        assertTrue(youthEntered.await(120, TimeUnit.SECONDS), "last page reached");
+        assertEquals(9_900, records.count());
+        assertEquals(0, outboxes.count());
+        assertEquals(SyncJobStatus.RUNNING, jobs.get(id).status());
+        youthRelease.countDown();
+        var result = awaitDone(id);
+        assertEquals(SyncJobStatus.SUCCESS, result.status());
+        assertEquals(10_000, result.newCount());
+        assertEquals(10_000, result.fetchedCount());
+        assertEquals(0, result.failedRecordCount());
+        assertEquals(0, result.failedPageCount());
+        assertEquals(102, YOUTH_CALLS.get());
+        assertEquals(1, outboxes.count());
+        var event = outboxes.findAll().getFirst();
+        assertEquals(id, event.getSyncJobId());
+        var payload = (Map<?, ?>) event.getPayload().get("payload");
+        assertEquals("SUCCESS", payload.get("status"));
+        assertTrue(((Number) payload.get("durationMillis")).longValue() >= 0);
+    }
+
+    @Test
+    void manualFullRetriesPreservePriorFailureAndEachNotifyIncludingUnchangedResults() throws Exception {
+        youthFailurePage = 1;
+        var previous = awaitDone(start("YOUTH_POLICY"));
+        assertEquals(SyncJobStatus.FAILED, previous.status());
+        youthFailurePage = 0;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            var retry = stub.retrySync(com.team3.contracts.collection.v1.RetrySyncRequest.newBuilder()
+                    .setJobId(previous.jobId()).build());
+            assertNotEquals(previous.jobId(), retry.getJobId());
+            var result = awaitDone(retry.getJobId());
+            assertEquals(SyncJobStatus.SUCCESS, result.status());
+            assertEquals(attempt == 0 ? 1 : 0, result.newCount());
+            assertEquals(attempt == 0 ? 0 : 1, result.unchangedCount());
+            assertEquals("MANUAL_RETRY", histories.findById(retry.getJobId()).orElseThrow().getSyncType());
+        }
+        assertEquals(SyncJobStatus.FAILED, jobs.get(previous.jobId()).status());
+        assertEquals(1, records.count());
+        assertEquals(1, normalizationRequests.count());
+        assertEquals(3, outboxes.count());
+    }
 
     @Test
     void firstPageOutageStopsAfterThreeCallsAndPersistsFailedHistory() throws Exception {
@@ -502,6 +561,21 @@ class ManualSyncGrpcIntegrationTests {
         if (page == youthFailurePage) {
             respond(exchange, youthResultCode == 0 ? 503 : 200,
                     "{\"resultCode\":" + youthResultCode + "}");
+            return;
+        }
+        if (generatedYouthCount > 0) {
+            if (page == 50 && TRANSIENT_YOUTH_FAILURES.getAndDecrement() > 0) {
+                respond(exchange, 503, "{}");
+                return;
+            }
+            int size = Integer.parseInt(query.get("pageSize"));
+            var rows = MAPPER.createArrayNode();
+            for (int index = (page - 1) * size; index < Math.min(page * size, generatedYouthCount); index++) {
+                rows.add(MAPPER.createObjectNode().put("plcyNo", "generated-" + index));
+            }
+            respond(exchange, 200, "{\"resultCode\":200,\"result\":{\"youthPolicyList\":" + rows
+                    + ",\"pagging\":{\"pageNum\":" + page + ",\"pageSize\":" + size
+                    + ",\"totCount\":" + generatedYouthCount + "}}}");
             return;
         }
         int count = youthTotalOverride >= 0 ? youthTotalOverride : MAPPER.readTree(youthRecords).size();

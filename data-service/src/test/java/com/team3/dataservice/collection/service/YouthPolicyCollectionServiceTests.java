@@ -35,6 +35,7 @@ class YouthPolicyCollectionServiceTests {
         assertEquals(2, failure.pageNumber());
         assertEquals("HTTP_503", failure.errorCode());
         assertTrue(failure.retryable());
+        verify(client, times(3)).fetchPage(2, 1);
         verify(client).fetchPage(3, 1);
         verify(client, never()).fetchPage(4, 1);
     }
@@ -108,8 +109,20 @@ class YouthPolicyCollectionServiceTests {
         assertEquals(1, result.records().size());
         assertEquals(List.of(2, 3, 4), result.pageFailures().stream()
                 .map(failure -> failure.pageNumber()).toList());
-        verify(client, times(4)).fetchPage(anyInt(), eq(1));
+        verify(client, times(10)).fetchPage(anyInt(), eq(1));
         verify(client, never()).fetchPage(5, 1);
+    }
+
+    @Test
+    void middlePageRecoveryLeavesOnlyTheFinalSuccessfulResult() {
+        when(client.fetchPage(1, 1)).thenReturn(page(2));
+        when(client.fetchPage(2, 1)).thenThrow(new YouthPolicyClientException("HTTP_503", true))
+                .thenThrow(new YouthPolicyClientException("HTTP_429", true)).thenReturn(page(2));
+        var result = service.collect(1, 2);
+        assertTrue(result.completed());
+        assertEquals(2, result.records().size());
+        assertTrue(result.pageFailures().isEmpty());
+        verify(client, times(3)).fetchPage(2, 1);
     }
 
     @Test

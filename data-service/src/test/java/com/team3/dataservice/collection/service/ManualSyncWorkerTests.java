@@ -13,6 +13,8 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.CannotAcquireLockException;
+import com.team3.dataservice.collection.dto.external.CollectionSummary;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import static org.junit.jupiter.api.Assertions.*;
@@ -87,6 +89,54 @@ class ManualSyncWorkerTests {
         verifyNoInteractions(records);
         verify(jobs).recordFetchedPage(10L, 1);
         verify(jobs).recordFailure(10L, 200, null, "INVALID_RECORD");
+    }
+
+    @Test
+    void transientBatchFailureRecoversWithoutIndividualSavesOrFailureCounts() {
+        doThrow(new CannotAcquireLockException("retryable")).doNothing().when(records).saveBatchForSync(anyList());
+        worker.processPage(10L, CollectionSource.YOUTH_POLICY, 0, page(100));
+        verify(records, times(2)).saveBatchForSync(anyList());
+        verify(records, never()).saveForSync(any());
+        verify(jobs, never()).recordFailure(anyLong(), anyInt(), any(), anyString());
+    }
+
+    @Test
+    void individualTransientFailureIsRecordedOnlyAfterAllThreeAttempts() {
+        doThrow(new DataIntegrityViolationException("bad batch")).when(records).saveBatchForSync(anyList());
+        doThrow(new CannotAcquireLockException("retryable")).when(records).saveForSync(any());
+        worker.processPage(10L, CollectionSource.YOUTH_POLICY, 0, page(1));
+        verify(records, times(3)).saveForSync(any());
+        verify(jobs).recordFailure(10L, 0, "p0", "STORAGE_FAILED");
+    }
+
+    @Test
+    void recoveredIndividualFailureDoesNotCountAsAFailure() {
+        doThrow(new DataIntegrityViolationException("bad batch")).when(records).saveBatchForSync(anyList());
+        doThrow(new CannotAcquireLockException("retryable")).doNothing().when(records).saveForSync(any());
+        worker.processPage(10L, CollectionSource.YOUTH_POLICY, 0, page(1));
+        verify(records, times(2)).saveForSync(any());
+        verify(jobs, never()).recordFailure(anyLong(), anyInt(), any(), anyString());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tenThousandRecordsCompleteOnceAfterAllHundredRecordBatchesAndRetries() {
+        doThrow(new CannotAcquireLockException("retryable")).doNothing().when(records).saveBatchForSync(anyList());
+        when(youthPolicy.collectPages(eq(100), eq(1000), any())).thenAnswer(invocation -> {
+            BiConsumer<Integer, List<JsonNode>> handler = invocation.getArgument(2);
+            for (int offset = 0; offset < 10_000; offset += 100) handler.accept(offset, page(100));
+            verify(jobs, never()).complete(anyLong(), anyBoolean());
+            return new CollectionSummary(10_000, true, List.of(), List.of(), List.of());
+        });
+        worker.run(10L, CollectionSource.YOUTH_POLICY, 100, 1000);
+        var order = inOrder(jobs, records);
+        order.verify(jobs).start(10L);
+        order.verify(records, times(101)).saveBatchForSync(argThat(batch -> batch.size() == 100));
+        order.verify(jobs).recordCollection(10L, 10_000, List.of(), List.of(), List.of());
+        order.verify(jobs).complete(10L, true);
+        verify(jobs, times(100)).recordFetchedPage(10L, 100);
+        verify(jobs, never()).recordFailure(anyLong(), anyInt(), any(), anyString());
+        verify(jobs, never()).fail(anyLong(), anyString(), anyBoolean());
     }
 
     @Test

@@ -14,7 +14,8 @@ import org.hibernate.type.SqlTypes;
 @Entity
 @Table(name = "collection_outbox_events", uniqueConstraints = {
         @UniqueConstraint(name = "uk_collection_outbox_message_id", columnNames = "message_id"),
-        @UniqueConstraint(name = "uk_collection_outbox_dedup_key", columnNames = "dedup_key")
+        @UniqueConstraint(name = "uk_collection_outbox_dedup_key", columnNames = "dedup_key"),
+        @UniqueConstraint(name = "uk_collection_outbox_job", columnNames = "sync_job_id")
 }, indexes = @Index(name = "idx_collection_outbox_status_retry", columnList = "status, next_retry_at"))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

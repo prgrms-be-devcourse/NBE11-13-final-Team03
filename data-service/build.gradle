@@ -65,5 +65,7 @@ tasks.named('bootJar') {
 
 tasks.named('processTestResources') {
     from('../contracts/collection-completed-v1.json') { into 'contracts' }
+    from('../contracts/collection-completed-v2.json') { into 'contracts' }
+    from('../database/scripts/collection-outbox-per-job.sql') { into 'db-boundary' }
     from('../database/scripts/collection-outbox.sql') { into 'db-boundary' }
 }
