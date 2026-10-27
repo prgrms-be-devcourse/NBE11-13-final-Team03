@@ -71,4 +71,8 @@ tasks.named('processTestResources') {
     from('../contracts/collection-completed-v2.json') { into 'contracts' }
     from('../database/scripts/collection-outbox-per-job.sql') { into 'db-boundary' }
     from('../database/scripts/collection-outbox.sql') { into 'db-boundary' }
+    from('../database/scripts/database-boundaries.sql') { into 'db-boundary' }
+    from('../database/scripts/raw-external-record-partition-check.sql') { into 'db-boundary' }
+    from('../database/scripts/raw-external-record-partition.sql') { into 'db-boundary' }
+    from('../database/scripts/rollback-raw-external-record-partition.sql') { into 'db-boundary' }
 }

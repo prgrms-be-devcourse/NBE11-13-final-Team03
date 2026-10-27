@@ -215,8 +215,8 @@ class RawIngestBenchmarkTest {
     /** 모든 원본에 PENDING 정제 요청(CREATED)을 넣는다. 운영 첫 수집과 같은 경로(NOTIFY → 요청 처리)로 첫 적재를 잰다 */
     private void addFirstLoadRequests() {
         jdbc.update("""
-                INSERT INTO raw_normalization_request (raw_record_id, previous_raw_record_id, event_type, status, created_at)
-                SELECT id, NULL, 'CREATED', 'PENDING', now() FROM raw_external_record ORDER BY id
+                INSERT INTO raw_normalization_request (raw_record_id, previous_raw_record_id, source_id, event_type, status, created_at)
+                SELECT id, NULL, source_id, 'CREATED', 'PENDING', now() FROM raw_external_record ORDER BY id
                 """);
         jdbc.execute("ANALYZE raw_normalization_request");
     }
@@ -353,8 +353,8 @@ class RawIngestBenchmarkTest {
                 FROM raw_external_record WHERE id IN (%s) ORDER BY id
                 """.formatted(targets));
         jdbc.update("""
-                INSERT INTO raw_normalization_request (raw_record_id, previous_raw_record_id, event_type, status, created_at)
-                SELECT n.id, o.id, 'UPDATED', 'PENDING', now()
+                INSERT INTO raw_normalization_request (raw_record_id, previous_raw_record_id, source_id, event_type, status, created_at)
+                SELECT n.id, o.id, n.source_id, 'UPDATED', 'PENDING', now()
                 FROM raw_external_record n
                 JOIN raw_external_record o ON o.source_id = n.source_id AND o.external_id = n.external_id AND o.id IN (%s)
                 WHERE n.id > ?

@@ -161,6 +161,14 @@ cd ~/yon-db
 ```
 IDENTITY 버전으로 되돌릴 때는 이전 버전을 띄우기 전에 같은 방식으로 `sql/opportunity-id-identity-rollback.sql`을 실행한다.
 
+### 원본 스냅샷 출처 파티셔닝
+
+수집·정제를 중지한 뒤 원본 전환 SQL → 점검 → 파티셔닝 PR 병합·배포 순서를 지킨다.
+backend·행동 로그 전환은 포함하지 않는다. 기존 DB는 SQL 적용 전 병합하지 않는다.
+전환 후 옛 이미지로 자동 롤백돼도 DB는 복구되지 않으므로 데이터 서비스를 멈추고 SQL도 되돌려야 한다.
+AWS 담당자에게는 [서버별 작업 순서](../docs/raw-partition-aws-runbook.md)를 전달한다.
+설계·검증 범위는 [원본 파티셔닝 절차](../docs/raw-external-record-partitioning.md)를 따른다.
+
 ### 사용자 행동 로그 월 파티셔닝
 
 backend의 PARTITIONED TABLE 인식 설정을 먼저 배포한 뒤 backend 중지 → 전환 SQL → 점검 → 재기동 순서로 수행한다.

@@ -30,7 +30,7 @@ public class RawRecordReader {
                            WHERE x.source_id = r.source_id AND x.external_id = r.external_id) AS latest,
                    (st.payload_hash IS NOT NULL AND st.payload_hash = r.payload_hash) AS already_processed
             FROM raw_normalization_request q
-            JOIN raw_external_record r ON r.id = q.raw_record_id
+            JOIN raw_external_record r ON r.id = q.raw_record_id AND r.source_id = q.source_id
             JOIN external_source s ON s.id = r.source_id
             LEFT JOIN raw_ingest_states st ON st.source_id = r.source_id AND st.raw_external_id = r.external_id
             WHERE q.status = :pending AND q.id > :afterId
