@@ -4,7 +4,8 @@
 
 | 서버 | 컨테이너 | 폴더 | 배포 |
 |---|---|---|---|
-| DB 서버 | PostgreSQL 16 | `deploy/db` | 수동 (처음 한 번) |
+| DB 서버 | PostgreSQL 16 (primary) | `deploy/db` | 수동 (처음 한 번) |
+| DB 읽기 복제본 | PostgreSQL 16 (물리 스트리밍 복제, 읽기 전용) | `deploy/db-replica` | 수동 (처음 한 번) |
 | 메인 서버 | `backend`, `notification-service` (컨테이너만 나눠 한 서버) | `deploy/main` | 자동 (`Publish backend image`·`Notification service` 성공 시 그 서비스만) |
 | 데이터 서버 | `data-service` (수집·원본 저장·정규화·조건 묶음, **1개만**) | `deploy/data` | 자동 (`Data service` 성공 시) |
 
@@ -177,18 +178,75 @@ backend의 PARTITIONED TABLE 인식 설정을 먼저 배포한 뒤 backend 중�
 
 ### 백업
 
-DB는 DB 서버의 도커 볼륨(`yon-db_postgres_data`)에 있다. 인스턴스를 지우면 함께 사라진다.
-정기 백업은 [백업 운영 절차](../docs/db-backup.md)를 따른다.
-`deploy/db/backup/`의 일일 논리 덤프 → S3를 먼저 검증하고, 주간 full·일일 diff·WAL로 전환한다.
-systemd 타이머·실패/적체 상태 점검·별도 DB 복원 시험을 포함하며 DB 서버에서 AWS 담당자가 직접 설치한다.
-DB가 앱 서버와 함께 있어도 현재 primary에서 실행한다. PR 병합만으로 활성화되지 않는다.
-AWS 담당자에게는 [담당자 작업 지침](../docs/db-backup-aws-instructions.md)을 전달한다.
-아래는 변경 직전 등을 위한 기존 수동 백업이다.
+정기 백업은 **DB 복제본 서버**의 로컬 디스크에 보관한다. [백업 운영 절차](../docs/db-backup.md)를 따른다.
+`deploy/db-replica/backup/`을 `~/yon-db-replica/backup/`에 설치한다. standby만 허용하고 primary는 거부한다.
+11:00 KST(서버 가동·수집 종료 확인 전 임시 시각)에 daily 전체 덤프, 일요일에는 같은 덤프의 weekly 사본을 추가한다.
+완성 세트 기준 daily 7개·weekly 4개, SHA256·flock·디스크 80% 차단·복제 최신성 점검을 포함한다.
+**PITR 미지원, RPO 약 24시간. primary·replica 동시 유실에 대비한 외부 사본은 없다.**
+기존 DB/복제 설정은 변경하지 않으며 PR 병합만으로 활성화되지 않는다.
+AWS 담당자에게는 [작업 지침](../docs/db-backup-aws-instructions.md)을 전달한다.
+
+## DB 읽기 복제본 (replica)
+
+DB 서버(primary)의 WAL을 물리 스트리밍으로 받아 재생하는 읽기 전용 서버다. 비동기 복제라 primary 커밋을 기다리게 하지 않고, 몇 초 이내 늦을 수 있다.
+backend의 읽기 전용 트랜잭션만 이쪽을 쓰고, 쓰기·data-service·notification-service는 primary만 쓴다 (라우팅은 backend 설정).
+물리 복제라 파티션 생성·분리 같은 DDL과 계정도 그대로 따라온다. 파티션 관리는 primary에서만 한다.
+
+- EC2: `yon-db-replica` (t3.small, DB 서버와 같은 서브넷), 공통 준비는 위 "EC2 3대 공통"과 같다
+- 보안 그룹 `yon-db-replica`: 5432 ← `yon-main` 보안 그룹, 22 ← `yon-main` 보안 그룹 (노트북에서는 ProxyJump로 접속)
+- `yon-db` 보안 그룹에 5432 ← `yon-db-replica` 보안 그룹 추가
+
+### 1. primary 준비 (DB 서버, 처음 한 번)
 
 ```bash
 cd ~/yon-db
-docker compose exec -T postgres-db pg_dump -U postgres -d yon -Fc > ~/yon-backup-$(date +%Y%m%d%H%M).dump
+docker compose exec postgres-db psql -U postgres -d postgres
 ```
+```text
+CREATE ROLE replicator WITH REPLICATION LOGIN;
+\password replicator
+SELECT pg_create_physical_replication_slot('yon_replica_1');
+ALTER SYSTEM SET max_slot_wal_keep_size = '2GB';
+SELECT pg_reload_conf();
+SELECT slot_name, active FROM pg_replication_slots;
+\q
+```
+**마지막 조회로 슬롯이 만들어졌는지 확인한다** (`yon_replica_1 | f`). 슬롯이 없으면 2번의 복사가 끝까지 진행된 뒤 마지막에
+`replication slot "yon_replica_1" does not exist`로 실패하고 복사한 데이터를 지운다. `\password`에서 빈 값을 넣으면 비밀번호가 지워지니 다시 입력한다.
+복제 슬롯은 복제본이 잠깐 끊겨도 필요한 WAL을 남긴다. 복제본이 오래 죽어 있으면 primary 디스크가 차지 않게 2GB에서 슬롯을 끊는다 (그때는 3번부터 다시 한다).
+
+복제 접속 허용 (복제본 사설 IP만) 후 설정 다시 읽기:
+```bash
+docker compose exec -T postgres-db sh -c 'echo "host replication replicator <복제본 사설 IP>/32 scram-sha-256" >> "$PGDATA/pg_hba.conf"'
+docker compose exec -T postgres-db psql -U postgres -c 'SELECT pg_reload_conf()'
+```
+
+### 2. 복제본 띄우기 (복제본 서버)
+
+```bash
+mkdir -p ~/yon-db-replica && cd ~/yon-db-replica
+```
+`deploy/db-replica/docker-compose.yml`과 `.env`(`DB_BIND_IP`=이 서버의 사설 IP, `chmod 600`)를 둔다. 빈 볼륨으로 띄우면 새 DB가 만들어지므로, 컨테이너만 만들고 볼륨을 primary 복사본으로 채운 뒤 띄운다.
+
+```bash
+docker compose create
+docker run --rm -it -v yon-db-replica_postgres_data:/var/lib/postgresql/data postgres:16-alpine sh -c \
+  'chown postgres:postgres "$PGDATA" && chmod 700 "$PGDATA" && su-exec postgres pg_basebackup -h <DB 서버 사설 IP> -U replicator -D "$PGDATA" -Fp -Xs -P -R -S yon_replica_1 -W'
+docker compose up -d
+```
+`-W`가 replicator 비밀번호를 묻는다. 실패하면 pg_basebackup이 볼륨을 비우므로 원인을 고친 뒤 같은 `docker run` 명령만 다시 실행한다 (`docker compose create`는 다시 하지 않아도 된다). `-R`이 `standby.signal`과 접속 정보(`postgresql.auto.conf`, 비밀번호 포함, 권한 700 데이터 폴더 안)를 남긴다.
+
+### 3. 확인
+
+primary(DB 서버):
+```bash
+docker compose exec -T postgres-db psql -U postgres -Atc "select client_addr, state, sync_state, replay_lag from pg_stat_replication; select slot_name, active from pg_replication_slots"
+```
+`streaming|async`, 슬롯 `active=t`. 복제본에서 `select pg_is_in_recovery()`가 `t`이고 쓰기는 `read-only transaction` 오류가 나야 정상이다.
+
+### 장애 때 (수동)
+- primary가 죽으면: 복제본에서 `docker compose exec -u postgres postgres-replica pg_ctl promote -D /var/lib/postgresql/data` → 메인·데이터 서버 `.env`의 `DB_URL`을 복제본 사설 IP로 바꾸고 재시작. 옛 primary는 버리고 새 복제본을 2번부터 다시 만든다.
+- 복제본이 죽으면: backend 읽기만 영향. 복제본 주소를 primary로 바꾸거나 복제본을 다시 띄운다. 슬롯이 끊겼으면(`active=f`가 오래 지속, 디스크 경고) `SELECT pg_drop_replication_slot('yon_replica_1')` 후 1·2번을 다시 한다.
 
 ## 데이터 서버
 

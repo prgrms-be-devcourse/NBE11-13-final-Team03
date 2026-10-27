@@ -1,107 +1,95 @@
-# AWS 담당자 전달용 — PostgreSQL 정기 백업
+# AWS 담당자 작업 순서 — 복제본 EC2 로컬 백업
 
-파티셔닝은 완료됐다. 이 지침에서는 파티셔닝 SQL을 다시 실행하지 않는다.
-새 EC2를 만들지 않고 **현재 PostgreSQL primary가 있는 인스턴스**에 백업을 설치한다.
-DB가 앱과 같은 인스턴스에 있어도 순서는 같다. 읽기 복제본(#91)은 백업 대상이 아니다.
-현재 인스턴스·경로·버킷·역할 준비 여부는 AWS 담당자 확인이 필요하다.
+이번 #92는 **yon-db-replica 디스크에 논리 덤프를 보관**한다. 새 AWS 자원을 만들지 않는다.
+실행 대상은 ~/yon-db-replica, 프로젝트 yon-db-replica, 서비스 postgres-replica다.
+기존 DB/복제 설정을 변경하지 않으며 정상 복제본 재시작도 필요하지 않다.
 
-## 1. 먼저 확인해서 코드 담당자에게 전달
+## 1. 적용 전 확인
 
-| 항목 | 확인할 값 |
+| 확인 | 기준 |
 | --- | --- |
-| primary | EC2 ID, 리전, pg_is_in_recovery()=false |
-| 실행 환경 | Compose 디렉터리·프로젝트명·서비스명·실제 데이터 볼륨 |
-| 현재 역할 | 기존 IAM 역할 이름/ARN, 백업 정책 추가 가능 여부 |
-| 네트워크 | 인스턴스에서 S3 HTTPS 접근 가능 여부 |
-| 디스크·메모리 | 백업 임시 파일·복구용 별도 볼륨 여유, 앱과 동시 실행 가능 여부 |
+| 대상 | 실제 replica EC2, pg_is_in_recovery()=true |
+| 복제 | receiver=streaming, 마지막 재생 시각·경과 시간 확인 |
+| 용량 | 제공값 DB 1.2GB / 디스크 29GB 중 22GB 여유, 적용 때 다시 측정 |
+| 서버 가동 | 기동·정지 시각, 09:30 수집의 실제 종료, 일요일 가동 여부 |
+| 백업 시각 | **11:00 KST 임시**. 실제 가동·수집 종료 확인 후 확정 |
+| 도구 | Docker Compose 플러그인, Python 3.9 이상, tzdata |
 
-기본 경로는 /home/ubuntu/yon-db, 프로젝트 yon-db, 서비스 postgres-db다.
-실제 값이 다르면 backup.ini와 systemd 파일 경로·사용자를 맞춘다.
-기존 .env·Compose·데이터 볼륨·물리 복제 설정을 덮어쓰거나 초기화하지 않는다.
+스크립트의 기본 DB명은 yon, 사용자 postgres다. 실제 값이 다르면 ini에서 바꾼다.
+기존 replica Compose에는 POSTGRES_USER/POSTGRES_DB가 없으므로 ini의 명시적 값을 사용한다.
+예전에 #92의 옛 타이머를 설치했다면 옛 서버에서 먼저 비활성화하고 monthly 타이머도 중지한다.
+옛 WAL 아카이브를 실제로 켰다면 타이머 중지만으로 해제되지 않으므로 기존 복제를 보존하는 별도 해제 절차를 확인한다.
 
-## 2. S3와 역할 준비 — AWS 담당자
+## 2. 코드 담당자에게 받을 파일
 
-| 설정 | 적용 값 |
-| --- | --- |
-| 버킷 | 실제 사용 가능한 전용 이름, ap-northeast-2 |
-| 접근·소유권 | 퍼블릭 액세스 전부 차단, ACL 비활성화 |
-| 암호화 | 기본 SSE-S3 |
-| 버전 관리 | 활성화 |
-| Object Lock | 비활성화 |
-| 정책 | TLS 아닌 접근 거부 |
-| 수명 주기 | 전달한 s3-lifecycle.json의 6개 규칙 |
+검증한 커밋의 **deploy/db-replica/backup/** 폴더와 docs/db-backup.md를 받는다.
+복제본 서버의 ~/yon-db-replica/backup/에 배치한다. 기존 .env·Compose·데이터 볼륨은 덮어쓰지 않는다.
+백업 파일은 DB 데이터 볼륨과 다른 호스트 디렉터리 /var/lib/yon-backup에 보관한다.
 
-수명 주기는 daily 현재 14일, logical/manual 현재 83일, 전체 이전 버전 7일이다.
-논리/수동은 삭제 유예까지 약 90일을 목표로 하며 S3 비동기 삭제의 정확한 종료 시각을 보장하지 않는다.
-pgbackrest/의 현재 객체에는 만료·Glacier 전환을 적용하지 않는다.
-기존 버킷을 사용하면 다른 수명 주기 규칙을 무심코 덮어쓰지 말고 전체 규칙을 검토한다.
+## 3. 설정과 수동 실행
 
-전달 파일 deploy/db/backup/iam-policy.json.example의 버킷 이름을 실제 이름으로 바꿔 정책을 만든다.
-**primary 인스턴스에 이미 연결된 역할에 추가**한다. 인스턴스 역할을 새 역할로 교체해 기존 앱 권한을 잃지 않게 한다.
-연결된 역할이 없다면 EC2 신뢰 정책의 역할·인스턴스 프로파일을 생성해 연결한다.
-일일/논리/수동 접두사는 읽기·쓰기, pgBackRest 접두사만 만료 처리를 위한 삭제 권한을 가진다.
-액세스 키를 서버 파일에 저장하지 않는다.
-이전 버전 복구는 별도 운영자에게 ListBucketVersions·GetObjectVersion 등의 권한을 준비한다.
+```bash
+set -euo pipefail
+cd ~/yon-db-replica
+cp -n backup/backup.ini.example backup/backup.ini
+chmod 600 backup/backup.ini
+nano backup/backup.ini
+```
 
-네트워크는 실제 라우팅·보안 그룹 아웃바운드·NACL을 확인한다.
-S3 연결이 되지 않는 사설망이면 기존 네트워크를 검토하고 S3 게이트웨이 엔드포인트를 사용할 수 있다.
-S3 엔드포인트만으로 이미지 다운로드·패키지 설치까지 가능해지는 것은 아니다.
-0단계의 호스트 AWS CLI에는 IMDS 홉 제한 변경이 필요하지 않다.
-1단계에서 컨테이너가 역할을 사용할 때 IMDSv2 required, HttpPutResponseHopLimit=2를 확인한다.
-공유 서버에서는 인스턴스 역할이 같은 서버의 다른 워크로드에서도 접근 가능하므로 필요한 권한만 추가한다.
+release_reference와 실제 경로·프로젝트·서비스·DB명을 맞춘다.
+실행 사용자가 ubuntu가 아니거나 경로가 다르면 systemd service의 User·Group·경로도 맞춘다.
 
-## 3. 초기 정기 백업 설치 — AWS 담당자
+```bash
+sudo install -m 644 backup/yon-db-backup@.service backup/yon-db-backup*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+systemd-analyze calendar '*-*-* 11:00:00 Asia/Seoul'
+sudo systemctl start yon-db-backup@daily.service
+sudo systemctl start yon-db-backup@weekly.service
+sudo systemctl start yon-db-backup@monitor.service
+sudo journalctl -u yon-db-backup@daily.service -u yon-db-backup@monitor.service -n 50 --no-pager
+```
 
-1. 검증된 커밋의 deploy/db/backup/ 폴더를 기존 ~/yon-db/backup/에 배치한다.
-2. Docker Compose 플러그인·Python 3.9 이상·AWS CLI v2·실행 사용자의 Docker 접근을 확인한다.
-3. backup.ini.example을 backup.ini로 복사하고 mode=logical, 실제 버킷/경로/서비스/배포 참조를 채운다.
-4. [운영 문서 2단계](db-backup.md#2-초기-일일-백업-설치--aws-담당자)에 따라 systemd 파일 설치 → daily 수동 실행.
-5. 서비스가 성공 종료했고 S3 database.dump·globals.sql·manifest.json이 같은 세트에 있는지 확인한다.
-6. [운영 문서 3단계](db-backup.md#3-논리-복원-시험--aws-담당자--코드-담당)의 다운로드·SHA256·별도 DB 복원을 수행한다.
-7. 파티션·주요 데이터·소유자·권한을 코드 담당자와 확인한 뒤 일일·monitor 타이머를 활성화한다.
-8. 다음 03:30 예약 백업의 서버 로그·종료 상태·S3 세트를 확인해 결과를 전달한다.
+초기 weekly는 기준 세트를 만드는 수동 실행이다. 이후 예약은 일요일에만 weekly를 추가한다.
+완료 세트 안의 database.dump·globals.sql·manifest.json과 재생 시각을 확인한다.
+복제가 끊겼거나 오래됐어도 백업은 만들어지지만 monitor는 실패한다. 접속·지연 원인을 확인한 뒤 최신 세트를 다시 만든다.
 
-여기까지 DB 재시작 없이 진행할 수 있다. 로그는 systemd journal에 기록한다.
-스크립트 실패 시 OK로 처리하지 않는다. manifest가 없는 일부 업로드는 복구 대상으로 사용하지 않는다.
+## 4. 복원 시험과 정기 실행
 
-## 4. full/diff/WAL로 전환 — AWS 담당자 + 코드 담당자
+1. docs/db-backup.md의 절차로 로컬 세트 SHA256을 검증한다.
+2. **다른 빈 볼륨·네트워크 없는 임시 DB**에 복원한다. 운영 DB에 직접 복원하지 않는다.
+3. 파티션·주요 데이터·소유자·권한과 소요 시간을 코드 담당자와 확인한다.
+4. 서버 가동/수집 종료에 맞는 시각을 확정하고 타이머를 활성화한다.
 
-1. 초기 백업·복원이 성공한 뒤 작업 시간을 합의한다. DB 재생성으로 연결이 잠시 끊긴다.
-2. manual 백업을 먼저 생성하고 현재 Compose·볼륨·DB 복제 설정을 기록한다.
-3. Dockerfile·docker-compose.backup.yml·실제 pgbackrest.conf를 배치한다. .conf 주석은 별도 줄에 둔다.
-4. IAM·컨테이너 IMDS·S3 네트워크를 확인한다.
-5. [운영 문서 4단계](db-backup.md#4-fulldiffwal-전환--aws-담당자)의 조합으로 이미지 빌드 → 기존 DB 볼륨을 그대로 사용해 재생성.
-6. stanza-create → check 성공 → backup.ini를 physical과 두 Compose 파일로 변경.
-7. 첫 full·월간 논리 덤프를 수동 실행하고 monthly 타이머를 활성화한다.
-8. 최신 상태·특정 시점 복원 시험을 별도 볼륨에서 수행한다. 시험 DB는 archive_mode=off, 외부 포트 없이 실행한다.
-9. 다음 정기 diff와 서버 로그·WAL 적체 점검이 정상인지 확인해 최종 완료를 전달한다.
+```bash
+sudo systemctl enable --now yon-db-backup.timer yon-db-backup-monitor.timer
+systemctl list-timers 'yon-db-backup*'
+```
 
-이후 수동 Compose 작업에도 docker-compose.yml과 docker-compose.backup.yml을 함께 지정한다.
-아카이브 오류가 나면 WAL이 디스크에 쌓일 수 있다. 정상 확인 없이 며칠 동안 방치하지 않는다.
-5분은 WAL 전환 주기에 따른 복구 목표이며 업로드 실패까지 포함한 보장 시간이 아니다.
+Persistent=false라 꺼진 시간의 예약을 부팅 즉시 보충하지 않는다. 11:00을 놓쳤다면 수집 종료 후 수동 실행한다.
+다음 실제 예약 daily와 일요일 weekly, 보관 개수 7/4개·남은 공간·monitor를 확인해 완료로 기록한다.
 
-## 5. 장애·복원 때
+## 5. 운영 정책
 
-- 백업 실패: journal과 타이머 상태를 확인하고 원인을 해결한 뒤 해당 인스턴스를 다시 실행한다.
-- WAL 적체/디스크 경고: 역할·S3 연결·stanza 설정부터 확인하고 DB 여유 공간을 확보한다. 저장소 파일을 직접 지우지 않는다.
-- 도입 중 설정 문제: DB/기존 복제를 확인한다. 백업 체인 미완성이라면 초기 daily 백업을 유지하면서 원인을 해결한다.
-- 실제 복원: 쓰는 앱을 중지하고 기존 볼륨을 보존한다. 검증한 별도 복원 볼륨과 호환 앱 이미지로 전환한다.
-- 복원 후: primary의 아카이브를 재개하고 check·새 full·앱 접근을 검증한다. 복제본은 새 primary에 맞춰 재구성한다.
-- 같은 서버가 꺼지면 monitor도 멈춘다. AWS 서버 상태 감지와 매일 백업 성공 확인을 별도로 유지한다.
+- 디스크가 80% 이상이면 덤프를 건너뛰고 실패한다. 기존 세트도 지우지 않으므로 공간 원인을 먼저 해결한다.
+- 복제 충돌 취소만 5초 뒤 1회 재시도한다. 두 번째 실패나 다른 오류는 로그·종료 코드로 확인한다.
+- 완료 manifest와 필수 파일이 정상인 오래된 세트만 개수에 따라 삭제한다. 강제 종료로 남은 불완전 폴더는 담당자가 실행 중 여부·경로를 확인한 뒤 정리한다.
+- 일요일은 daily를 한 번 덤프한 후 weekly 파일 복사본을 추가한다. 복사 실패 시 daily는 유지되지만 작업은 실패한다.
+- 복제 최신성 기본 한도는 600초다. 마지막 재생 시각은 실제 복제 지연과 같지 않아, DB가 조용한 시간에도 오래될 수 있다.
+- 외부 알림은 없다. 매 가동일 journal·monitor.json·남은 공간을 직접 확인한다. 서버가 꺼지면 monitor도 멈춘다.
+- primary로 승격된 서버에서는 백업이 거부된다. 새 standby가 준비되면 설치 대상을 옮긴다.
 
-## 6. 완료 인계 양식
+**PITR 미지원, RPO 약 24시간.** 정상적인 일일 실행과 복제 최신성이 전제이며 실패·미실행·복제 지연으로 늘어날 수 있다.
+primary와 replica가 동시에 유실되거나 백업을 보관한 디스크가 유실되면 복구할 외부 사본이 없다.
 
-| 확인 항목 | AWS 담당자 기입 |
+## 6. 완료 전달
+
+| 항목 | 담당자 기입 |
 | --- | --- |
 | 작업 일시/담당자/파일 커밋 | |
-| primary EC2/Compose 경로/기존 볼륨 | |
-| S3 버킷/리전/수명 주기 6개 | |
-| 실제 IAM 역할 ARN/접속 확인 | |
-| 일일 백업 세트/서버 로그·종료 상태/다음 예약 실행 | |
-| 논리 복원·파티션·권한·소요 시간 | |
-| PostgreSQL/pgBackRest 버전 | |
-| 첫 full·다음 diff·WAL 정상 | |
-| 최신/특정 시점 복원 결과 | |
-| 다음 분기 훈련/담당자 | |
-
-역할·버킷 준비만 완료된 상태와 실제 정기 백업/복원까지 완료된 상태를 구분해 전달한다.
+| replica EC2/경로/프로젝트/서비스/DB명 | |
+| 실제 기동·정지/일요일 가동/수집 종료/확정 백업 시각 | |
+| daily·weekly 경로/완료 manifest/재생 시각/streaming | |
+| 덤프 크기/보관 개수/디스크 여유 | |
+| SHA256·별도 DB 복원·데이터·권한·소요 시간 | |
+| 첫 예약 daily/일요일 weekly/monitor 결과 | |
+| 다음 분기 복원 훈련/담당자 | |

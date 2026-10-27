@@ -1,5 +1,5 @@
 [Unit]
-Description=YON backup age, WAL archive queue and disk monitoring
+Description=YON local backup age, replica freshness and disk monitoring
 
 [Timer]
 OnBootSec=10min
