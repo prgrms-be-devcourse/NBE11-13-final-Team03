@@ -85,6 +85,14 @@ backend의 `/api/admin/collection/**` 공개 HTTP API·ADMIN 권한은 유지된
 - 기본값은 모두 `true`입니다 (지역 동기화만 `false`). 메인 서비스 기본값은 수집·정규화를 걷어내는 PR에서 코드와 함께 없앱니다.
 - 값 예시는 `.env.example`.
 
+적재 성능 설정 (위 표와 달리 data-service에만 있음)
+
+| 환경변수 | 하는 일 | 기본 | 운영 |
+|---|---|---|---|
+| `YON_NORMALIZATION_INGEST_ASYNC_COMMIT` | 정규화·요청 선점 트랜잭션만 `synchronous_commit=off` (원본 저장은 동기). DB 장애 때 마지막 수백 ms 정규화만 사라지고 1시간 대조가 복구 | `false` | `true` |
+
+전제: 데이터 서버 1대, 비동기는 정규화 트랜잭션에만. 근거·배포 순서는 `docs/ingest-write-tuning.md`.
+
 ## DB 경계
 
 - `main()`으로 실행하면 `database-boundary` 프로필이 붙어 메인 서비스와 같은 **`application_user` 계정, `application` 스키마**로 접속합니다 (`application-database-boundary.yaml`). 비밀번호는 `APPLICATION_DB_PASSWORD`.

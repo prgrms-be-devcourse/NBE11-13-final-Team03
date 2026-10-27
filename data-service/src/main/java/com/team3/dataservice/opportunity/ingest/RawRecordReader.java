@@ -33,7 +33,7 @@ public class RawRecordReader {
             JOIN raw_external_record r ON r.id = q.raw_record_id AND r.source_id = q.source_id
             JOIN external_source s ON s.id = r.source_id
             LEFT JOIN raw_ingest_states st ON st.source_id = r.source_id AND st.raw_external_id = r.external_id
-            WHERE q.status = :pending
+            WHERE q.status = :pending AND q.id > :afterId
             ORDER BY q.id
             LIMIT :limit
             FOR UPDATE OF q SKIP LOCKED
@@ -93,8 +93,18 @@ public class RawRecordReader {
 
     /** PENDING 정제 요청을 id 순으로 선점한다. 호출 트랜잭션이 끝날 때까지 다른 처리기는 이 요청을 건너뛴다 */
     public List<RawRecordRow> claimPending(int limit) {
+        return claimPending(0, limit);
+    }
+
+    /**
+     * afterId보다 큰 요청만 선점한다. 한 번의 요청 처리 안에서 이미 처리한 구간을 다시 훑지 않게 한다:
+     * 처리한 요청은 status를 바꾸므로 (status, id) 인덱스에 vacuum 전까지 죽은 항목이 쌓이고, 매번 처음부터 찾으면 그 항목을 계속 지나친다
+     * (실데이터 14만 건 적재에서 선점 1회 평균 12ms, 처리량에 비례해 늘어남 — ingest 튜닝 E3).
+     */
+    public List<RawRecordRow> claimPending(long afterId, int limit) {
         return jdbc.query(CLAIM_PENDING, new MapSqlParameterSource()
                 .addValue("pending", PENDING)
+                .addValue("afterId", afterId)
                 .addValue("limit", limit), ROW);
     }
 
@@ -105,6 +115,15 @@ public class RawRecordReader {
                 .addValue("limit", limit), ROW);
     }
 
+    /**
+     * 현재 트랜잭션만 커밋 때 WAL 디스크 기록(fsync)을 기다리지 않게 한다 (SET LOCAL, 트랜잭션이 끝나면 원래대로).
+     * DB가 비정상 종료되면 마지막 수백 ms의 커밋이 사라질 수 있지만, 정규화 결과와 처리 상태(raw_ingest_states)가 같은 트랜잭션이라
+     * 함께 사라지고 원본은 남으므로 다음 대조가 다시 정규화한다. 요청 상태 변경이 사라지면 PENDING으로 남아 다시 처리된다 (이미 처리한 해시는 건너뜀).
+     */
+    public void relaxCommitDurability() {
+        jdbc.getJdbcTemplate().execute("SET LOCAL synchronous_commit = off");
+    }
+
     public void markStatus(Collection<Long> requestIds, String status) {
         if (requestIds.isEmpty()) {
             return;
@@ -112,6 +131,25 @@ public class RawRecordReader {
         jdbc.update(MARK_STATUS, new MapSqlParameterSource()
                 .addValue("status", status)
                 .addValue("ids", requestIds));
+    }
+
+    /** 처리 상태 여러 건을 한 번에 기록한다 (묶음 끝). saveState와 같은 규칙 */
+    public void saveStates(List<RawRecordRow> rows, List<String> outcomes, OffsetDateTime processedAt) {
+        if (rows.isEmpty()) {
+            return;
+        }
+        MapSqlParameterSource[] params = new MapSqlParameterSource[rows.size()];
+        for (int i = 0; i < rows.size(); i++) {
+            RawRecordRow row = rows.get(i);
+            params[i] = new MapSqlParameterSource()
+                    .addValue("sourceId", row.sourceId())
+                    .addValue("externalId", row.externalId())
+                    .addValue("rawRecordId", row.rawRecordId())
+                    .addValue("payloadHash", row.payloadHash())
+                    .addValue("outcome", outcomes.get(i))
+                    .addValue("processedAt", processedAt);
+        }
+        jdbc.batchUpdate(UPSERT_STATE, params);
     }
 
     public void saveState(RawRecordRow row, String outcome, OffsetDateTime processedAt) {

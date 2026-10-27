@@ -26,7 +26,9 @@ main 병합은 data-service 자동 배포를 시작하므로 SQL 적용 전에�
 - LISTEN/NOTIFY는 정제 요청 ID를 전달한다. 요청 테이블과 트리거는 유지한다.
 - data-service의 `hibernate.hbm2ddl.extra_physical_table_types: PARTITIONED TABLE`은 부모 테이블 인식을 위한 설정이다.
   backend는 원본 엔티티가 없어 이번 전환에서 해당 설정을 추가하지 않는다.
-- 열린 정제 쓰기 튜닝 PR #81이 같은 RawRecordReader를 변경하므로 나중에 병합하는 쪽에서 출처 조인을 유지한다.
+- main에 반영된 #81 정제 튜닝의 요청 커서·묶음 쓰기·JDBC 설정을 유지하며 원본 ID·출처 조인을 함께 사용한다.
+
+AWS 담당자의 실행 순서·서버별 명령·인계 지점은 [AWS 작업 순서](raw-partition-aws-runbook.md)를 따른다.
 
 ## 1. 사전 준비
 
@@ -166,6 +168,7 @@ FK가 존재하므로 원본을 DELETE하는 단순 절차를 실행하지 않�
 - data-service `test --rerun bootJar`: 394개 실행, 실패 0, 오류 0, 건너뜀 0; 실행 JAR 빌드 성공.
 - 조건부 정제 테스트는 전용 `YON_TEST_DB_URL`을 주입했다.
 - 벤치마크는 별도 `YON_BENCH_DB_URL`에서 원본 100건·트랜잭션 크기 100·청년정책 50%로
-  첫 적재·무변경·1% 변경 SQL의 동작만 확인했다. 성능 개선 수치로 해석하지 않는다.
+  큐 기반 첫 적재·무변경·1% 변경 SQL의 동작만 확인했다. 성능 개선 수치로 해석하지 않는다.
+- 최신 main의 정제 튜닝을 반영한 뒤 394개 전체 테스트를 다시 통과했고, 배포·롤백 셸 모의 테스트 5개도 Linux 컨테이너에서 통과했다.
 - CI의 테스트 실행 여부 검사도 로컬 결과 XML로 통과했다.
 - backend 전체 회귀 테스트와 운영 D+1 검증은 로컬에서 실행하지 않았다.

@@ -92,6 +92,8 @@ update가 먼저 실행되면 다음 문제가 생긴다.
 Application 테이블이 없는 새 로컬 DB는 첫 기동의 update가 테이블을 만들므로 SQL을 실행하지 않는다.
 단, `collection-outbox.sql`은 CHECK·기본값이 필요하므로 **새 DB도 계정·스키마 준비 후 첫 data-service 기동 전에 적용**한다.
 이전 완료 Outbox SQL 설치 DB는 실행별 알림 버전으로 올리기 전에 `collection-outbox-per-job.sql`을 application_user로 적용한다.
+정규화 엔티티 ID를 시퀀스로 바꾼 data-service를 데이터가 있는 DB에 처음 배포하기 전에 `opportunity-id-sequences.sql`을 application_user로 적용한다.
+IDENTITY 버전으로 되돌릴 때는 `opportunity-id-identity-rollback.sql`을 먼저 적용한다 ([ingest-write-tuning.md](ingest-write-tuning.md)).
 기존 메시지·본문을 유지하며 sync_job_id 유일성을 추가한다.
 
 ### data-service (backend와 DB 공유 1단계)
@@ -108,6 +110,7 @@ data-service/.env에는 DB_URL과 APPLICATION_DB_PASSWORD(backend와 같은 값)
 | backend | 회원·인증, 판정 프로필·판정 결과, 관심·선호 등 그 밖의 테이블 |
 
 - backend에 남는 공고·지역 엔티티는 판정·검색용 읽기 엔티티다. 컬럼을 추가·변경하지 않고 data-service 엔티티를 따라간다.
+  - 예외: ID 생성 전략. data-service 정규화 엔티티 8개는 시퀀스(`<테이블>_seq`)로 ID를 받고 backend 읽기 엔티티는 IDENTITY 선언 그대로다. backend는 이 테이블에 INSERT하지 않으므로 영향이 없다 ([ingest-write-tuning.md](ingest-write-tuning.md)).
 - 공고 테이블을 바꾸는 배포는 data-service를 먼저 배포한다.
 - 서버별 DB 계정 분리(data-service 전용 계정·스키마)와 Flyway 도입은 DB 분리 단계에서 함께 정한다.
 

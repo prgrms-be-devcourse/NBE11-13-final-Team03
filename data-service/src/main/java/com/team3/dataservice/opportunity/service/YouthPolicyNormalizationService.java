@@ -1,5 +1,6 @@
 package com.team3.dataservice.opportunity.service;
 
+import com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache;
 import com.team3.dataservice.opportunity.conditionset.ConditionSetKey;
 import com.team3.dataservice.opportunity.domain.entity.*;
 import com.team3.dataservice.opportunity.domain.repository.*;
@@ -78,7 +79,8 @@ public class YouthPolicyNormalizationService {
     private final OpportunityRegionRepository opportunityRegionRepository;
     private final RegionRepository regionRepository;
     private final YouthPolicyDetailRepository detailRepository;
-    private final ConditionSetRepository conditionSetRepository;
+    private final ConditionSetIdCache conditionSetIds;
+    private final OpportunitySourceLookup sourceLookup;
 
     @Transactional
     public NormalizationResult normalize(NormalizationCommand command) {
@@ -113,7 +115,7 @@ public class YouthPolicyNormalizationService {
         putConditions(snapshot, codes, income, raw);
         putDetail(snapshot, raw);
 
-        Optional<OpportunitySource> existing = sourceRepository.findBySourceIdAndExternalId(command.sourceId(), raw.plcyNo());
+        Optional<OpportunitySource> existing = sourceLookup.find(command.sourceId(), raw.plcyNo());
         Opportunity opportunity;
         if (existing.isPresent()) {
             opportunity = existing.get().getOpportunity();
@@ -125,14 +127,14 @@ public class YouthPolicyNormalizationService {
                     .category(blankToNull(raw.lclsfNm()))
                     .subCategory(blankToNull(raw.mclsfNm()))
                     .build());
-            sourceRepository.save(OpportunitySource.builder()
+            sourceLookup.remember(sourceRepository.save(OpportunitySource.builder()
                     .opportunity(opportunity)
                     .sourceId(command.sourceId())
                     .externalId(raw.plcyNo())
                     .sourceUrl(command.sourceUrl())
                     .firstSeenAt(command.seenAt())
                     .lastSeenAt(command.seenAt())
-                    .build());
+                    .build()));
         }
 
         OpportunityVersion current = opportunity.getCurrentVersion();
@@ -144,7 +146,7 @@ public class YouthPolicyNormalizationService {
         // 조건 묶음 키는 저장할 조건·거주지역과 같은 값으로 만든다.
         // 조건 엔티티는 불변이라 버전을 나중에 넣을 수 없고, 버전에는 묶음 ID가 먼저 있어야 한다.
         // 그래서 버전 없는 조건으로 키를 계산하고, 버전 저장 뒤 같은 값으로 다시 만들어 저장한다 (중복 아님, 지우지 말 것)
-        Long conditionSetId = conditionSetRepository.resolveId(ConditionSetKey.hash(
+        Long conditionSetId = conditionSetIds.resolve(ConditionSetKey.hash(
                 conditions(null, age, region, codes, income, raw), residenceCodes(region)));
         OpportunityVersion version = versionRepository.save(OpportunityVersion.builder()
                 .opportunity(opportunity)

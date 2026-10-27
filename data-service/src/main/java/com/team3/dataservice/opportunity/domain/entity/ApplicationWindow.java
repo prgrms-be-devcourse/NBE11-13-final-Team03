@@ -29,7 +29,9 @@ import java.util.Map;
 public class ApplicationWindow {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    // 묶음 INSERT(hibernate.jdbc.batch_size)를 쓰려면 IDENTITY가 아니라 시퀀스여야 한다. 50개씩 미리 받는다 (pooled)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "application_windows_seq")
+    @SequenceGenerator(name = "application_windows_seq", sequenceName = "application_windows_seq", allocationSize = 50)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

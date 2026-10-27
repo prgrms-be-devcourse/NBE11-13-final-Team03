@@ -39,7 +39,8 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
-@Import({TrainingCourseNormalizationService.class, RegionNormalizer.class, RegionDirectory.class})
+@Import({com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache.class,
+        com.team3.dataservice.opportunity.service.OpportunitySourceLookup.class,TrainingCourseNormalizationService.class, RegionNormalizer.class, RegionDirectory.class})
 class TrainingCourseNormalizationServiceTest {
 
     private static final Long SOURCE = 2L;

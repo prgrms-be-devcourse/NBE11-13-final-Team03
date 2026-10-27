@@ -1,5 +1,6 @@
 package com.team3.dataservice.opportunity.service;
 
+import com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache;
 import com.team3.dataservice.opportunity.conditionset.ConditionSetKey;
 import com.team3.dataservice.opportunity.domain.entity.*;
 import com.team3.dataservice.opportunity.domain.repository.*;
@@ -72,7 +73,8 @@ public class TrainingCourseNormalizationService {
     private final OpportunityRegionRepository opportunityRegionRepository;
     private final TrainingCourseDetailRepository trainingDetailRepository;
     private final RegionRepository regionRepository;
-    private final ConditionSetRepository conditionSetRepository;
+    private final ConditionSetIdCache conditionSetIds;
+    private final OpportunitySourceLookup sourceLookup;
 
     @Transactional
     public TrainingNormalizationResult normalizePage(TrainingNormalizationCommand command) {
@@ -108,7 +110,7 @@ public class TrainingCourseNormalizationService {
         Map<String, Object> snapshot = snapshot(raw, parsed, region);
 
         String externalId = externalId(raw);
-        Optional<OpportunitySource> existing = sourceRepository.findBySourceIdAndExternalId(sourceId, externalId);
+        Optional<OpportunitySource> existing = sourceLookup.find(sourceId, externalId);
         Opportunity opportunity;
         if (existing.isPresent()) {
             opportunity = existing.get().getOpportunity();
@@ -122,14 +124,14 @@ public class TrainingCourseNormalizationService {
                     .detailCategory(detailCategory(raw))
                     .detailUrl(detailUrl)
                     .build());
-            sourceRepository.save(OpportunitySource.builder()
+            sourceLookup.remember(sourceRepository.save(OpportunitySource.builder()
                     .opportunity(opportunity)
                     .sourceId(sourceId)
                     .externalId(externalId)
                     .sourceUrl(detailUrl)
                     .firstSeenAt(seenAt)
                     .lastSeenAt(seenAt)
-                    .build());
+                    .build()));
         }
 
         OpportunityVersion current = opportunity.getCurrentVersion();
@@ -142,7 +144,7 @@ public class TrainingCourseNormalizationService {
 
         // 훈련 지역은 시행 지역(IMPLEMENTATION)이라 판정 입력이 아님 → 조건 묶음 키에 거주지역 없음.
         // 조건 엔티티는 불변이라 버전 없는 조건으로 키를 먼저 계산하고, 버전 저장 뒤 다시 만들어 저장한다 (중복 아님)
-        Long conditionSetId = conditionSetRepository.resolveId(
+        Long conditionSetId = conditionSetIds.resolve(
                 ConditionSetKey.hash(trainingConditions(null, raw), List.of()));
         OpportunityVersion version = versionRepository.save(OpportunityVersion.builder()
                 .opportunity(opportunity)
@@ -176,7 +178,7 @@ public class TrainingCourseNormalizationService {
         return NcsClassification.middleName(raw.ncsCd()).orElse(null);
     }
 
-    static String externalId(TrainingCourseRaw raw) {
+    public static String externalId(TrainingCourseRaw raw) {
         return raw.trprId().trim() + ":" + Integer.parseInt(raw.trprDegr().trim());
     }
 
