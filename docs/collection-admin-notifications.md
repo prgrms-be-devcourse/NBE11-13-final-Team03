@@ -44,10 +44,27 @@ Slack 실패는 소비 기록과 함께 롤백하고 SQS에서 삭제하지 않�
 DB 트랜잭션은 이 한 건의 짧은 Slack 호출 동안만 유지한다. HTTP 전체 5초·연결 2초이며 리디렉션·자동 재시도를 하지 않는다.
 본문·원격 오류·Webhook URL을 로그나 예외 원인에 보존하지 않고 고정 오류 코드만 남긴다.
 
-Slack v2 본문에는 실행 종류·최종 결과·집계·소요시간을 표시한다. 페이지/NCS 실패는 레코드 수로 환산하지 않는다.
+Slack 본문은 한국어 여러 줄 요약이다. 공통 항목은 수집일·데이터 유형·신규·갱신·변경 없음·실패이고,
+v2에는 실행(실행 ID·실행 종류)·페이지 실패·소요 시간·상태 줄을 더한다.
+YOUTH_POLICY는 "청년 정책", EMPLOYMENT24는 "고용24"로 표시하고 숫자에는 천 단위 구분자와 건 단위를 붙인다.
+실행 종류는 SCHEDULED=정기 수집, MANUAL=수동 수집, MANUAL_RETRY=수동 재시도,
+상태는 SUCCESS=성공, PARTIAL_SUCCESS=부분 성공, FAILED=실패, INTERRUPTED=중단이다. 소요 시간은 분·초로 표시한다.
+v1에는 실행·페이지 실패·소요 시간·상태가 없으므로 해당 줄을 생략하며 실패 건수로 상태를 추정하지 않는다.
+페이지/NCS 실패는 레코드 수로 환산하지 않는다. 실패 레코드가 0이어도 페이지 실패가 있으면 상태는 부분 성공/실패일 수 있고,
+페이지 실패 줄이 그 이유를 보여 준다. 같은 날 정기 수집과 수동 재시도가 모두 오면 실행 줄로 구분한다.
 
 ```text
-[수동 재시도 · 부분 실패] EMPLOYMENT24 2026-10-27 · 실행 #7 · 새 1,203 · 교체 88 · 유지 139,201 · 레코드 실패 4 · 페이지 실패 1 · 소요 7분 00.000초
+[수집 결과]
+수집일: 2026-10-27
+데이터 유형: 고용24
+실행: #7 · 수동 재시도
+신규: 1,203건
+갱신: 88건
+변경 없음: 139,201건
+실패: 4건
+페이지 실패: 1건
+소요 시간: 7분 00초
+상태: 부분 성공
 ```
 
 Webhook 계약 근거: [Slack Incoming Webhooks 공식 문서](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks).
@@ -69,6 +86,9 @@ Webhook 계약 근거: [Slack Incoming Webhooks 공식 문서](https://docs.slac
 | NOTIFICATION_ADMIN_SQS_POLL_DELAY_MS | 1000, 양수 |
 
 운영 Webhook은 HTTPS hooks.slack.com(또는 Slack Gov)의 /services/... 경로만 허용한다.
+이미 수집 담당이 사용하는 Incoming Webhook이 있다면 같은 채널을 사용할지 확인하고 URL을 이 서비스의
+NOTIFICATION_ADMIN_SLACK_WEBHOOK_URL에 안전하게 주입한다. 다른 서비스의 환경변수 이름을 자동으로 참조하지 않는다.
+같은 수집 결과를 data-service와 notification-service가 각각 Slack으로 전송하지 않도록 발송 책임은 notification-service에 둔다.
 테스트는 명시적인 HTTP loopback Slack stub을 쓴다. URL에 자격정보·query·fragment를 넣거나 리디렉션으로 다른 호스트에 전송하지 않는다.
 사용자 source·DLQ와 관리자 source·DLQ의 URL이 겹치면 시작을 거부한다.
 두 Consumer가 켜져도 AWS 클라이언트·자격증명·토폴로지·스케줄러를 별도로 선택하며 기존 기본 후보를 대체하지 않는다.
@@ -96,9 +116,13 @@ SQL 롤백 시에도 기존 사용자 테이블을 변경하지 않는다. 기�
 
 ## 검증
 
+2026-10-27 한국어 요약 변경 후 `./gradlew test --rerun-tasks --tests 'com.team3.notification.admin.*'` 실행:
+5개 클래스 29개 통과, 건너뜀·실패·오류 0. PostgreSQL·LocalStack·HTTP stub을 사용했으며 실제 AWS/Slack 전송은 미실행이다.
+
 - v1/v2 계약·정확한 필드·숫자 타입·최종 상태·소요시간·기존 fingerprint 호환과 민감 본문 비노출 단위 테스트.
 - 기본 비활성·단독 활성화·두 Consumer 동시 활성화·큐 중복·설정 검증.
-- 실제 로컬 HTTP stub에 기존 메시지와 v2 결과·소요시간 전송, HTTP 오류·잘못된 응답·리디렉션 거부.
+- 실제 로컬 HTTP stub에 v1 6항목·v2 10항목 한국어 요약 전송, 두 출처·3종 실행 종류·4종 상태 번역과 원문 코드 비노출,
+  HTTP 오류·잘못된 응답·리디렉션 거부.
 - PostgreSQL 제한 계정·production DDL + LocalStack + HTTP stub 통합: 커밋 후 삭제,
   중복·동시 중복·본문 충돌, Slack 실패·삭제 실패·DB 커밋 실패 복구, 관리자 DLQ·사용자 큐 분리, 잘못된 토폴로지.
   같은 날 실패·성공 재시도의 각각 1회 전달 및 이전 버전 소비 기록의 중복 제거도 검증한다.
