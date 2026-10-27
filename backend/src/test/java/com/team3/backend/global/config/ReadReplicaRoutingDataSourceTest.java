@@ -9,7 +9,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -17,8 +19,8 @@ class ReadReplicaRoutingDataSourceTest {
 
     private static final String SEARCH = "com.team3.backend.search.service.OpportunitySearchService.search";
 
-    private final FakeDataSource primary = new FakeDataSource("primary", false);
-    private final FakeDataSource replica = new FakeDataSource("replica", false);
+    private final FakeDataSource primary = new FakeDataSource("primary", Failure.NONE);
+    private final FakeDataSource replica = new FakeDataSource("replica", Failure.NONE);
     private final ReadReplicaRoutingDataSource routing =
             new ReadReplicaRoutingDataSource(primary, replica, ReadReplicaDataSourceConfig.DEFAULT_PREFIXES);
 
@@ -57,11 +59,42 @@ class ReadReplicaRoutingDataSourceTest {
 
     @Test
     void 복제본_연결에_실패하면_primary로_대신_연결한다() throws SQLException {
-        var down = new ReadReplicaRoutingDataSource(primary, new FakeDataSource("replica", true),
+        var down = new ReadReplicaRoutingDataSource(primary, new FakeDataSource("replica", Failure.SQL),
                 ReadReplicaDataSourceConfig.DEFAULT_PREFIXES);
         transaction(SEARCH, true);
 
         assertThat(name(down.getConnection())).isEqualTo("primary");
+    }
+
+    @Test
+    void 복제본_풀이_RuntimeException을_던져도_primary로_대신_연결한다() throws SQLException {
+        // HikariCP는 풀을 처음 만들 때 연결이 안 되면 PoolInitializationException(RuntimeException)을 던진다
+        var down = new ReadReplicaRoutingDataSource(primary, new FakeDataSource("replica", Failure.RUNTIME),
+                ReadReplicaDataSourceConfig.DEFAULT_PREFIXES);
+        transaction(SEARCH, true);
+
+        assertThat(name(down.getConnection())).isEqualTo("primary");
+    }
+
+    @Test
+    void 복제본_실패_뒤_대기_시간_동안은_복제본을_시도하지_않는다() throws SQLException {
+        AtomicLong now = new AtomicLong(1_000);
+        var flaky = new FakeDataSource("replica", Failure.SQL);
+        var routing = new ReadReplicaRoutingDataSource(primary, flaky, ReadReplicaDataSourceConfig.DEFAULT_PREFIXES,
+                Duration.ofSeconds(30), now::get);
+        transaction(SEARCH, true);
+
+        assertThat(name(routing.getConnection())).isEqualTo("primary");
+        assertThat(flaky.attempts).isEqualTo(1);
+
+        now.addAndGet(29_999);
+        assertThat(name(routing.getConnection())).isEqualTo("primary");
+        assertThat(flaky.attempts).isEqualTo(1);
+
+        flaky.failure = Failure.NONE;
+        now.addAndGet(1);
+        assertThat(name(routing.getConnection())).isEqualTo("replica");
+        assertThat(flaky.attempts).isEqualTo(2);
     }
 
     @Test
@@ -96,20 +129,26 @@ class ReadReplicaRoutingDataSourceTest {
         return connection.toString();
     }
 
+    private enum Failure { NONE, SQL, RUNTIME }
+
     private static final class FakeDataSource extends AbstractDataSource {
         private final String name;
-        private final boolean down;
+        private Failure failure;
         private int opened;
+        private int attempts;
 
-        private FakeDataSource(String name, boolean down) {
+        private FakeDataSource(String name, Failure failure) {
             this.name = name;
-            this.down = down;
+            this.failure = failure;
         }
 
         @Override
         public Connection getConnection() throws SQLException {
-            if (down) {
-                throw new SQLException("connection refused");
+            attempts++;
+            switch (failure) {
+                case SQL -> throw new SQLException("connection refused");
+                case RUNTIME -> throw new IllegalStateException("pool initialization failed");
+                case NONE -> { }
             }
             opened++;
             return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(), new Class<?>[]{Connection.class},
