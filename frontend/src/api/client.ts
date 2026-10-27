@@ -51,6 +51,15 @@ function assertCurrentSession(session: number): void {
 
 /** 서버에서 재로그인 성공을 확인한 뒤에만 호출한다. 단순 401/네트워크 오류에는 호출하지 않는다. */
 export function resetAuthRecovery(): void {
+  advanceAuthSession()
+}
+
+/** 서버 로그아웃 204 확인 후 이전 세션의 재발급·늦은 401을 차단한다. 로그인 성공을 의미하지 않는다. */
+export function endAuthSession(): void {
+  advanceAuthSession()
+}
+
+function advanceAuthSession(): void {
   const previousAttempt = reissueAttempt
   authSession += 1
   authGeneration += 1
@@ -88,11 +97,6 @@ async function csrfToken(): Promise<string> {
   return token
 }
 
-function isTransientFailure(error: ApiError): boolean {
-  return error.kind === 'network' || error.kind === 'timeout' ||
-    (error.kind === 'http' && error.status !== undefined && error.status >= 500 && error.status < 600)
-}
-
 function reissue(attempt: ReissueAttempt): Promise<void> {
   if (!attempt.promise) {
     const controller = new AbortController()
@@ -110,7 +114,9 @@ function reissue(attempt: ReissueAttempt): Promise<void> {
         reissueAttempt = { generation: authGeneration, session: authSession }
       } catch (error: unknown) {
         const normalized = toApiError(error)
-        if (attempt === reissueAttempt && isTransientFailure(normalized)) {
+        // 401은 리프레시 토큰 무효로 확정된 실패라 재로그인 확인 전까지 유지한다.
+        // 그 밖의 실패(네트워크·5xx·CSRF 403 등)는 고정하지 않는다.
+        if (attempt === reissueAttempt && normalized.status !== 401) {
           // 기존 요청은 실패 Promise를 계속 공유한다. 실패 이후 시작한 새 요청만 복구를 시도한다.
           reissueAttempt = { generation: authGeneration, session: authSession }
         }

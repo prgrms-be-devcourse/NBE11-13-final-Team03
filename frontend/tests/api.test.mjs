@@ -124,8 +124,41 @@ test('parallel authenticated 401s share reissue; late 401 replays without anothe
   assert.equal(counts.get('/users/me/late'), 2)
 })
 
-test('non-transient reissue failure is shared and retained until confirmed authentication changes', async () => {
-  for (const failure of [401, 403]) {
+test('non-401 reissue failure is shared by in-flight requests, then a new auth check actually retries and recovers', async () => {
+  for (const failure of [403, 400]) {
+    let rotations = 0, recovered = false
+    let releaseLate
+    const late = new Promise((resolve) => { releaseLate = resolve })
+    const counts = new Map()
+    const api = await client(async (config) => {
+      if (config.url === '/auth/reissue') {
+        rotations++
+        if (!recovered) return rejectHttp(config, failure, 'AUTH_001')
+        return response(config, '')
+      }
+      const count = (counts.get(config.url) ?? 0) + 1
+      counts.set(config.url, count)
+      if (config.url === '/users/me/late' && count === 1) { await late; return rejectHttp(config, 401) }
+      if (rotations >= 2) return response(config, { id: 1 })
+      return rejectHttp(config, 401)
+    }, 'XSRF-TOKEN=csrf-test')
+    const lateRequest = api.get('/users/me/late', { requiresAuth: true }).catch((error) => error)
+    const results = await Promise.allSettled(Array.from({ length: 3 }, () => api.get('/users/me', { requiresAuth: true })))
+    assert.ok(results.every((result) => result.status === 'rejected' && result.reason.status === failure))
+    assert.equal(rotations, 1)
+    // 실패 전에 시작한 요청의 늦은 401은 같은 실패를 공유하고 새 재발급을 시작하지 않는다.
+    releaseLate()
+    assert.equal((await lateRequest).status, failure)
+    assert.equal(rotations, 1)
+    recovered = true
+    const { data } = await api.get('/users/me', { requiresAuth: true })
+    assert.deepEqual(data, { id: 1 })
+    assert.equal(rotations, 2)
+  }
+})
+
+test('reissue 401 (invalid refresh token) is shared and retained until confirmed authentication changes', async () => {
+  for (const failure of [401]) {
     let rotations = 0
     const api = await client(async (config) => {
       if (config.url === '/auth/reissue') {
