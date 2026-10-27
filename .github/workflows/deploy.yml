@@ -9,7 +9,9 @@ name: Deploy
 # 수동 실행(Run workflow)에서 service와 image_tag를 넣으면 그 이미지로 배포한다 (롤백용, 예: sha-<40자리 커밋 SHA>).
 #
 # 필요한 설정 (Settings → Secrets and variables → Actions)
-#   vars:    EC2_MAIN_HOST, EC2_DATA_HOST, EC2_USER, (선택) EC2_DEPLOY_DIR
+#   vars:    EC2_MAIN_HOST, EC2_DATA_HOST, EC2_USER, (선택) EC2_DEPLOY_DIR, (선택) EC2_JUMP_HOST
+#            EC2_JUMP_HOST가 있으면 데이터 서버는 그 서버(메인 서버 탄력적 IP)를 거쳐 접속한다 (ProxyJump).
+#            이때 EC2_DATA_HOST는 데이터 서버의 사설 IP다 (공개 IP는 재시작마다 바뀌고 탄력적 IP는 메인 서버에만 있음).
 #   secrets: EC2_SSH_KEY (두 서버 공용 배포 전용 개인키)
 # 서비스의 서버 변수(EC2_MAIN_HOST / EC2_DATA_HOST)가 비어 있으면 그 배포는 건너뛴다.
 # GHCR 로그인은 이 실행의 GITHUB_TOKEN(packages: read)으로 EC2에서 잠깐 하고 바로 로그아웃한다. 별도 토큰 불필요.
@@ -62,6 +64,7 @@ jobs:
           RUN_WORKFLOW: ${{ github.event.workflow_run.name }}
           MAIN_HOST: ${{ vars.EC2_MAIN_HOST }}
           DATA_HOST: ${{ vars.EC2_DATA_HOST }}
+          JUMP: ${{ vars.EC2_JUMP_HOST }}
         run: |
           set -euo pipefail
           SERVICE="${INPUT_SERVICE:-}"
@@ -102,6 +105,13 @@ jobs:
             echo "IMAGE_VAR=$IMAGE_VAR"
             echo "COMPOSE_DIR=$COMPOSE_DIR"
             echo "EC2_HOST=$HOST"
+            if [ "$SERVICE" = data-service ] && [ -n "$JUMP" ]; then
+              if ! [[ "$JUMP" =~ ^[A-Za-z0-9.-]+$ ]]; then
+                echo "::error::EC2_JUMP_HOST 형식이 아닙니다 (IP 또는 도메인)"
+                exit 1
+              fi
+              echo "JUMP_HOST=$JUMP"
+            fi
             echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/$SERVICE:$TAG"
           } >> "$GITHUB_ENV"
 
@@ -123,11 +133,21 @@ jobs:
         if: env.SKIP != 'true'
         env:
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_USER: ${{ vars.EC2_USER }}
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+          if [ -n "${JUMP_HOST:-}" ]; then
+            # 경유 서버만 공개 주소로 키를 받고, 대상(사설 IP)의 키는 경유 서버 안에서 사설망으로 받는다
+            ssh-keyscan -H "$JUMP_HOST" >> ~/.ssh/known_hosts
+            printf 'Host deploy-jump\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n' \
+              "$JUMP_HOST" "$EC2_USER" > ~/.ssh/config
+            chmod 600 ~/.ssh/config
+            ssh deploy-jump "ssh-keyscan -H '$EC2_HOST'" >> ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+          fi
 
       - name: Deploy to EC2
         if: env.SKIP != 'true'
@@ -138,9 +158,11 @@ jobs:
         run: |
           set -euo pipefail
           TARGET="$EC2_USER@$EC2_HOST"
-          SSH="ssh -i $HOME/.ssh/deploy_key"
+          JUMP_OPT=""
+          if [ -n "${JUMP_HOST:-}" ]; then JUMP_OPT="-o ProxyJump=deploy-jump"; fi
+          SSH="ssh -i $HOME/.ssh/deploy_key $JUMP_OPT"
           $SSH "$TARGET" "mkdir -p '$DEPLOY_DIR'"
-          scp -i ~/.ssh/deploy_key "$COMPOSE_DIR/docker-compose.yml" "$TARGET:$DEPLOY_DIR/docker-compose.yml"
+          scp -i ~/.ssh/deploy_key $JUMP_OPT "$COMPOSE_DIR/docker-compose.yml" "$TARGET:$DEPLOY_DIR/docker-compose.yml"
           # 토큰은 명령줄에 넣지 않고 표준입력으로 권한 600 파일에 쓴다. 원격 스크립트가 로그인 후 바로 지운다.
           printf '%s' "$GHCR_TOKEN" | $SSH "$TARGET" "umask 077 && cat > '$DEPLOY_DIR/.ghcr_token'"
           $SSH "$TARGET" \
@@ -221,4 +243,4 @@ jobs:
 
       - name: Clean up SSH key
         if: always()
-        run: rm -f ~/.ssh/deploy_key
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/config
