@@ -68,7 +68,7 @@ backend를 배포할 때 `EC2_DATA_HOST`가 비어 있으면 경고를 남긴다
 - [ ] Ubuntu, t3.small, x86_64 (이미지 플랫폼 기본값 `linux/amd64`), 같은 VPC·서브넷
 - [ ] 공개 IP: 메인 서버는 탄력적 IP(사용자 접속). 데이터 서버는 배포 SSH용, DB 서버는 관리 SSH용 공개 IP가 필요하다 (서버끼리는 사설 IP)
 - [ ] 보안 그룹 (위 표)
-- [ ] Docker, compose 플러그인, 스왑, 시간대
+- [ ] Docker, compose 플러그인(**Docker Compose 2.24 이상**: `docker compose version`. 메인 compose의 `env_file` `path`/`required` 문법), 스왑, 시간대
 
 ```bash
 sudo apt-get update
@@ -199,6 +199,11 @@ done
 
 수신·사용자 API·푸시·SQS 기능은 모두 기본 꺼짐이다. 켜는 시점과 값(`NOTIFICATION_INTERNAL_API_KEY` 등)은 알림 담당이 정하고, backend `.env`의 `NOTIFICATION_PUBLISHER_ENABLED`·`NOTIFICATION_FACADE_ENABLED`와 함께 켠다.
 
+기능을 켜기 전에 추가로 적용할 SQL (위 1번과 같은 방식, `notification_user`, 알림 서버를 멈춘 상태에서)
+- 푸시 슬롯 모드(`NOTIFICATION_PUSH_SLOTS_ENABLED`): `notification-push-slots.sql`. 푸시 만료 분리 이전의 delivery SQL을 적용했던 기존 DB는 그 전에 `notification-push-expiry.sql` (새 DB는 delivery SQL에 포함)
+- 새 적합 알림 우선순위(#80 머지 후): `notification-new-match-priority.sql`
+- 그 밖에 알림 SQL이 추가되면 파일 머리말의 적용 시점을 따르고 이 목록에 더한다
+
 ## 운영 중 자주 쓰는 명령 (메인·데이터 서버의 배포 폴더)
 
 ```bash
@@ -208,13 +213,14 @@ c logs -f --tail 200
 c restart
 cat deploy.env deploy.env.prev
 docker stats --no-stream
+free -h
 ```
 (`restart`는 `.env`를 바꾼 뒤. 평소 배포·롤백은 Actions 수동 실행으로 한다)
 
 배포가 3분 안에 응답하지 않으면 이전 이미지로 되돌린다. 첫 배포라 이전 이미지가 없으면 재시작 반복을 막기 위해 그 서비스를 멈추고(`compose stop`) 실패한다. 로그를 보고 `.env`를 고친 뒤 Actions에서 다시 배포한다.
 
 ## 주의
-- **메모리**: 서버마다 2GB. 힙은 비율로 잡는다. 메인 서버는 backend `-XX:MaxRAMPercentage=50.0` + 알림 서버 `25.0`, 데이터 서버는 `70.0`(`.env`의 `BACKEND_JAVA_OPTS`·`NOTIFICATION_JAVA_OPTS`·`DATA_SERVICE_JAVA_OPTS`로 조정). 스왑은 필수. 배포 후 `docker stats`로 확인한다.
+- **메모리**: 서버마다 2GB. 힙은 비율로 잡는다. 메인 서버는 backend `-XX:MaxRAMPercentage=50.0` + 알림 서버 `25.0`, 데이터 서버는 `70.0`(`.env`의 `BACKEND_JAVA_OPTS`·`NOTIFICATION_JAVA_OPTS`·`DATA_SERVICE_JAVA_OPTS`로 조정). 스왑은 필수. 배포 후 `docker stats`(컨테이너별)와 `free -h`(스왑 사용량)로 확인한다. 힙 합계가 1.5GB라 비힙까지 2GB를 넘기 쉬우므로, 스왑이 계속 쓰이면 컨테이너 `mem_limit`(이때 비율은 컨테이너 한도 기준)를 둔다.
 - **data-service는 하나만**: 수집 스케줄러·대조가 중복 실행되지 않게 컨테이너·서버를 늘리지 않는다.
 - **SSH 22번 포트**: GitHub 호스팅 러너 IP 대역이 넓다. 비밀번호 로그인 금지, 배포 전용 키 사용. 나중에 SSM 접속 검토.
 - **`ddl-auto: update`**: enum CHECK 제약은 갱신하지 않는다. enum 값이 늘어나는 배포는 제약 재생성 SQL을 먼저 실행한다.
