@@ -143,6 +143,13 @@ cd ~/yon-db
 { echo 'SET ROLE application_user;'; cat sql/normalization-notifications.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1
 ```
 
+### D. 원본 스냅샷 출처 파티셔닝
+
+수집·정제를 중지한 뒤 원본 전환 SQL → 점검 → 파티셔닝 PR 병합·배포 순서를 지킨다.
+backend·행동 로그 전환은 포함하지 않는다. 기존 DB는 SQL 적용 전 병합하지 않는다.
+전환 후 옛 이미지로 자동 롤백돼도 DB는 복구되지 않으므로 데이터 서비스를 멈추고 SQL도 되돌려야 한다.
+명령·기대값·D+1 확인과 롤백은 [원본 파티셔닝 절차](../docs/raw-external-record-partitioning.md)를 따른다.
+
 ### 백업
 
 DB는 DB 서버의 도커 볼륨(`yon-db_postgres_data`)에 있다. 인스턴스를 지우면 함께 사라진다.

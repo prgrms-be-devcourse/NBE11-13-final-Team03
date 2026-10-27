@@ -77,6 +77,8 @@ update는 컬럼 타입 변경·삭제를 하지 않으므로, 그런 변경은 
 Flyway 도입과 backend validate 전환은 후속 작업으로 팀이 함께 결정한다.
 
 **database/scripts에 SQL이 있는 변경은 새 버전 서버를 기동하기 전에 먼저 적용한다.**
+파티션 부모 테이블을 관리하는 서비스는 `hibernate.hbm2ddl.extra_physical_table_types: PARTITIONED TABLE` 설정이 필요하다.
+원본 출처 파티셔닝은 [전환 절차](raw-external-record-partitioning.md)의 서비스 중지 → SQL → 병합·배포 순서를 따른다.
 update가 먼저 실행되면 다음 문제가 생긴다.
 
 - SQL에만 있는 CHECK 제약·기본값이 빠진 채 테이블·컬럼이 만들어지고, 이후 SQL은 객체가 이미 있어 실패한다.

@@ -242,9 +242,11 @@ class RawIngestBenchmarkTest {
                     FROM raw_external_record WHERE id = ?
                     """, id);
             jdbc.update("""
-                    INSERT INTO raw_normalization_request (raw_record_id, previous_raw_record_id, event_type, status, created_at)
-                    SELECT max(id), ?, 'UPDATED', 'PENDING', now() FROM raw_external_record
-                    WHERE external_id = (SELECT external_id FROM raw_external_record WHERE id = ?)
+                    INSERT INTO raw_normalization_request (raw_record_id, previous_raw_record_id, source_id, event_type, status, created_at)
+                    SELECT max(r.id), ?, p.source_id, 'UPDATED', 'PENDING', now()
+                    FROM raw_external_record r JOIN raw_external_record p
+                      ON r.source_id = p.source_id AND r.external_id = p.external_id
+                    WHERE p.id = ? GROUP BY p.source_id
                     """, id, id);
         }
         jdbc.execute("ANALYZE");
