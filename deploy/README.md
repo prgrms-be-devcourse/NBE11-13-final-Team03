@@ -5,7 +5,7 @@
 | 서버 | 컨테이너 | 폴더 | 배포 |
 |---|---|---|---|
 | DB 서버 | PostgreSQL 16 | `deploy/db` | 수동 (처음 한 번) |
-| 메인 서버 | `backend` (알림 서버 `notification-service`도 이 서버에 추가 예정) | `deploy/main` | 자동 (`Publish backend image` 성공 시) |
+| 메인 서버 | `backend`, `notification-service` (컨테이너만 나눠 한 서버) | `deploy/main` | 자동 (`Publish backend image`·`Notification service` 성공 시 그 서비스만) |
 | 데이터 서버 | `data-service` (수집·원본 저장·정규화·조건 묶음, **1개만**) | `deploy/data` | 자동 (`Data service` 성공 시) |
 
 - 프론트(React)는 S3 + CloudFront로 따로 배포한다 (이 폴더 범위 밖).
@@ -41,16 +41,17 @@ EC2 재구축 전에 TLS 종단(nginx+certbot 또는 ALB/CloudFront)을 정하�
 |---|---|
 | `backend-image.yml` (Publish backend image) | main push → 테스트 → `ghcr.io/<저장소>/backend:sha-<커밋>` 게시 |
 | `data-service.yml` (Data service) | main push 중 `data-service/**`·`database/**` 변경 시 → 테스트 → `ghcr.io/<저장소>/data-service:sha-<커밋>` 게시 |
-| `deploy.yml` (Deploy) | 위 둘 중 하나가 **성공하면** 그 서비스를 그 서버에 배포 |
+| `notification-service.yml` (Notification service) | main push 중 `notification-service/**` 등 변경 시 → 테스트 → `ghcr.io/<저장소>/notification-service:sha-<커밋>` 게시 |
+| `deploy.yml` (Deploy) | 위 셋 중 하나가 **성공하면** 그 서비스를 그 서버에 배포 |
 
 배포 순서 (`deploy.yml`)
 1. 서비스의 서버 변수(`EC2_MAIN_HOST` / `EC2_DATA_HOST`)가 비어 있으면 건너뜀
 2. GHCR에 그 커밋 이미지가 있는지 확인
 3. 그 서버 폴더의 `docker-compose.yml`을 배포 폴더로 복사
-4. `deploy.env`의 이미지 줄(`BACKEND_IMAGE` / `DATA_SERVICE_IMAGE`)만 바꾸고 `docker compose pull/up -d <서비스>`
-5. 약 3분 동안 backend는 HTTP 8080 응답을, data-service는 컨테이너 안에서 인증된 gRPC 9092 읽기 RPC를 확인한다. 실패하면 로그를 남기고 **이전 이미지로 되돌린 뒤 실패**
+4. `deploy.env`의 이미지 줄(`BACKEND_IMAGE` / `DATA_SERVICE_IMAGE` / `NOTIFICATION_IMAGE`)만 바꾸고 `docker compose pull/up -d <서비스>`
+5. 약 3분 동안 backend는 HTTP 8080 응답을, data-service는 컨테이너 안에서 인증된 gRPC 9092 읽기 RPC를, notification-service는 컨테이너 안의 8081 포트를 확인한다. 실패하면 로그를 남기고 **이전 이미지로 되돌린 뒤 실패**
 
-- 수동 실행: Actions → Deploy → Run workflow → `service`(backend/data-service), `image_tag`(비우면 최신 커밋, 롤백은 `sha-<40자리 커밋 SHA>`)
+- 수동 실행: Actions → Deploy → Run workflow → `service`(backend/data-service/notification-service), `image_tag`(비우면 최신 커밋, 롤백은 `sha-<40자리 커밋 SHA>`)
 - 배포는 한 번에 하나씩 (`concurrency: deploy-production`)
 
 ### 서버 준비 순서: DB → 데이터 → 메인
@@ -67,7 +68,7 @@ backend를 배포할 때 `EC2_DATA_HOST`가 비어 있으면 경고를 남긴다
 - [ ] Ubuntu, t3.small, x86_64 (이미지 플랫폼 기본값 `linux/amd64`), 같은 VPC·서브넷
 - [ ] 공개 IP: 메인 서버는 탄력적 IP(사용자 접속). 데이터 서버는 배포 SSH용, DB 서버는 관리 SSH용 공개 IP가 필요하다 (서버끼리는 사설 IP)
 - [ ] 보안 그룹 (위 표)
-- [ ] Docker, compose 플러그인, 스왑, 시간대
+- [ ] Docker, compose 플러그인(**Docker Compose 2.24 이상**: `docker compose version`. 메인 compose의 `env_file` `path`/`required` 문법), 스왑, 시간대
 
 ```bash
 sudo apt-get update
@@ -136,11 +137,11 @@ docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1 < 
 
 ### C. 정규화 요청 NOTIFY 트리거 (data-service 첫 기동 후 한 번)
 
-data-service가 처음 뜨면서 테이블을 만든 뒤 DB 서버에서 실행한다. 반복 실행해도 된다. 없어도 1분 폴링으로 정규화는 되지만 즉시 시작되지 않는다.
+data-service가 처음 뜨면서 테이블을 만든 뒤 DB 서버에서 실행한다. 반복 실행해도 된다. `SET ROLE`은 계정에 설정된 `search_path`를 적용하지 않으므로 스키마를 함께 지정한다. 없어도 1분 폴링으로 정규화는 되지만 즉시 시작되지 않는다.
 
 ```bash
 cd ~/yon-db
-{ echo 'SET ROLE application_user;'; cat sql/normalization-notifications.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1
+{ echo 'SET ROLE application_user;'; echo 'SET search_path TO application, pg_catalog;'; cat sql/normalization-notifications.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1
 ```
 
 ### D. 정규화 ID 시퀀스 준비 (데이터가 있는 DB에 시퀀스 ID 버전 data-service를 처음 배포하기 전 한 번)
@@ -189,6 +190,34 @@ nano .env && chmod 600 .env
 
 `.env`는 `deploy/main/.env.example`을 붙여 넣고 채운다. 그다음 Actions → Deploy → `backend`로 배포한다.
 
+### 알림 서버 (notification-service)
+
+backend와 같은 서버에서 컨테이너만 나눠 돈다. 호스트 포트를 열지 않고 backend만 compose 네트워크 안에서 `http://notification-service:8081`로 부른다 (compose가 backend에 `NOTIFICATION_BASE_URL`을 넣는다).
+`ddl-auto: validate`라 테이블을 먼저 만들어야 뜬다.
+
+1. DB 서버에서 알림 테이블 생성 (처음 한 번, `notification_user`로. 순서는 `database/local/03-apply-notification-ddl.sh`와 같다)
+
+```bash
+scp database/scripts/notification-{inbox,user-api,withdrawal,delivery,admin}.sql ubuntu@<DB 서버>:~/yon-db/sql/
+```
+DB 서버에서:
+```bash
+cd ~/yon-db
+for f in inbox user-api withdrawal delivery admin; do
+  { echo 'SET ROLE notification_user;'; echo 'SET search_path TO notification, pg_catalog;'; cat sql/notification-$f.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1 || break
+done
+```
+
+2. 메인 서버 배포 폴더에 `notification.env` 작성 (`deploy/main/notification.env.example`, `chmod 600`). backend `.env`와 파일을 나눠 `application_user` 비밀번호가 알림 컨테이너에 들어가지 않게 한다.
+3. Actions → Deploy → `notification-service`로 배포한다 (또는 `notification-service` 변경이 main에 병합되면 자동). 이미지는 알림 서버 변경이 있었던 커밋에만 있으므로 수동 배포 때는 `image_tag`에 그 커밋을 넣는다.
+
+수신·사용자 API·푸시·SQS 기능은 모두 기본 꺼짐이다. 켜는 시점과 값(`NOTIFICATION_INTERNAL_API_KEY` 등)은 알림 담당이 정하고, backend `.env`의 `NOTIFICATION_PUBLISHER_ENABLED`·`NOTIFICATION_FACADE_ENABLED`와 함께 켠다.
+
+기능을 켜기 전에 추가로 적용할 SQL (위 1번과 같은 방식, `notification_user`, 알림 서버를 멈춘 상태에서)
+- 푸시 슬롯 모드(`NOTIFICATION_PUSH_SLOTS_ENABLED`): `notification-push-slots.sql`. 푸시 만료 분리 이전의 delivery SQL을 적용했던 기존 DB는 그 전에 `notification-push-expiry.sql` (새 DB는 delivery SQL에 포함)
+- 새 적합 알림 우선순위(#80 머지 후): `notification-new-match-priority.sql`
+- 그 밖에 알림 SQL이 추가되면 파일 머리말의 적용 시점을 따르고 이 목록에 더한다
+
 ## 운영 중 자주 쓰는 명령 (메인·데이터 서버의 배포 폴더)
 
 ```bash
@@ -198,13 +227,14 @@ c logs -f --tail 200
 c restart
 cat deploy.env deploy.env.prev
 docker stats --no-stream
+free -h
 ```
 (`restart`는 `.env`를 바꾼 뒤. 평소 배포·롤백은 Actions 수동 실행으로 한다)
 
 배포가 3분 안에 응답하지 않으면 이전 이미지로 되돌린다. 첫 배포라 이전 이미지가 없으면 재시작 반복을 막기 위해 그 서비스를 멈추고(`compose stop`) 실패한다. 로그를 보고 `.env`를 고친 뒤 Actions에서 다시 배포한다.
 
 ## 주의
-- **메모리**: 서버마다 2GB. 힙은 비율로 잡는다. 메인 서버 backend는 알림 서버와 나눠 쓰도록 `-XX:MaxRAMPercentage=50.0`, 데이터 서버는 `70.0`(`.env`의 `BACKEND_JAVA_OPTS`·`DATA_SERVICE_JAVA_OPTS`로 조정). 스왑은 필수. 배포 후 `docker stats`로 확인한다.
+- **메모리**: 서버마다 2GB. 힙은 비율로 잡는다. 메인 서버는 backend `-XX:MaxRAMPercentage=50.0` + 알림 서버 `25.0`, 데이터 서버는 `70.0`(`.env`의 `BACKEND_JAVA_OPTS`·`NOTIFICATION_JAVA_OPTS`·`DATA_SERVICE_JAVA_OPTS`로 조정). 스왑은 필수. 배포 후 `docker stats`(컨테이너별)와 `free -h`(스왑 사용량)로 확인한다. 힙 합계가 1.5GB라 비힙까지 2GB를 넘기 쉬우므로, 스왑이 계속 쓰이면 컨테이너 `mem_limit`(이때 비율은 컨테이너 한도 기준)를 둔다.
 - **data-service는 하나만**: 수집 스케줄러·대조가 중복 실행되지 않게 컨테이너·서버를 늘리지 않는다.
 - **SSH 22번 포트**: GitHub 호스팅 러너 IP 대역이 넓다. 비밀번호 로그인 금지, 배포 전용 키 사용. 나중에 SSM 접속 검토.
 - **`ddl-auto: update`**: enum CHECK 제약은 갱신하지 않는다. enum 값이 늘어나는 배포는 제약 재생성 SQL을 먼저 실행한다.

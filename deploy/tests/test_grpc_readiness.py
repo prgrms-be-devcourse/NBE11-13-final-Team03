@@ -61,6 +61,12 @@ class ReadinessTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("stop data-service", trace)
 
+    def test_notification_checks_port_inside_container(self):
+        code, _, trace, error = self.run_check(service="notification-service")
+        self.assertEqual(code, 0, error)
+        self.assertIn("exec -T notification-service bash -c echo > /dev/tcp/127.0.0.1/8081", trace)
+        self.assertNotIn("CollectionGrpcProbe", trace)
+
     def test_backend_keeps_http_reachability_check(self):
         code, _, trace, error = self.run_check(service="backend")
         self.assertEqual(code, 0, error)
