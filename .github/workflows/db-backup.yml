@@ -1,0 +1,41 @@
+name: DB backup verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/db/**'
+      - 'deploy/tests/*db_backup*'
+      - '.github/workflows/db-backup.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/db/**'
+      - 'deploy/tests/*db_backup*'
+      - '.github/workflows/db-backup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Unit checks and timer syntax
+        run: |
+          python3 -m unittest discover -s deploy/tests -p test_db_backup.py -v
+          systemd-analyze calendar '*-*-* 03:30:00 Asia/Seoul' 'Sun *-*-01..07 04:30:00 Asia/Seoul'
+          python3 -m json.tool deploy/db/backup/s3-lifecycle.json > /dev/null
+      - name: Require local test dependencies
+        run: |
+          docker info
+          docker compose version
+          aws --version
+      - name: PostgreSQL 16 full, diff, logical and point-in-time restore
+        run: python3 deploy/tests/check_db_backup_postgres.py

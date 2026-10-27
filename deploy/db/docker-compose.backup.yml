@@ -1,0 +1,18 @@
+# Opt-in: docker compose -f docker-compose.yml -f docker-compose.backup.yml ...
+# Keep the existing project name and postgres_data volume. No automatic DB deployment.
+services:
+  postgres-db:
+    build:
+      context: .
+      dockerfile: backup/Dockerfile
+    image: yon-postgres:16-pgbackrest
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=yon archive-push %p
+      - -c
+      - archive_timeout=300
+    volumes:
+      - ./backup/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
