@@ -9,7 +9,7 @@
 | 메인 서버 | `backend`, `notification-service` (컨테이너만 나눠 한 서버) | `deploy/main` | 자동 (`Publish backend image`·`Notification service` 성공 시 그 서비스만) |
 | 데이터 서버 | `data-service` (수집·원본 저장·정규화·조건 묶음, **1개만**) | `deploy/data` | 자동 (`Data service` 성공 시) |
 
-- 프론트(React)는 S3 + CloudFront로 따로 배포한다 (이 폴더 범위 밖).
+- 프론트(React)는 S3 + CloudFront로 따로 배포한다 (`frontend.yml`, 아래 "프론트 배포").
 - 서버끼리는 **같은 VPC의 사설 IP**로 통신한다.
   - 메인·데이터 → DB: `DB_URL=jdbc:postgresql://<DB 사설 IP>:5432/yon`
   - 메인 → 데이터: `DATA_SERVICE_GRPC_ADDRESS=static://<데이터 사설 IP>:9092` (내부 키 `DATA_SERVICE_INTERNAL_API_KEY`)
@@ -46,6 +46,7 @@ EC2 재구축 전에 TLS 종단(nginx+certbot 또는 ALB/CloudFront)을 정하�
 | `data-service.yml` (Data service) | main push 중 `data-service/**`·`database/**` 변경 시 → 테스트 → `ghcr.io/<저장소>/data-service:sha-<커밋>` 게시 |
 | `notification-service.yml` (Notification service) | main push 중 `notification-service/**` 등 변경 시 → 테스트 → `ghcr.io/<저장소>/notification-service:sha-<커밋>` 게시 |
 | `deploy.yml` (Deploy) | 위 셋 중 하나가 **성공하면** 그 서비스를 그 서버에 배포 |
+| `frontend.yml` (Frontend) | PR·main push 중 `frontend/**` 변경 시 lint·테스트·빌드, main이면 S3 업로드 + CloudFront 무효화 |
 
 배포 순서 (`deploy.yml`)
 1. 서비스의 서버 변수(`EC2_MAIN_HOST` / `EC2_DATA_HOST`)가 비어 있으면 건너뜀
@@ -56,6 +57,22 @@ EC2 재구축 전에 TLS 종단(nginx+certbot 또는 ALB/CloudFront)을 정하�
 
 - 수동 실행: Actions → Deploy → Run workflow → `service`(backend/data-service/notification-service), `image_tag`(비우면 최신 커밋, 롤백은 `sha-<40자리 커밋 SHA>`)
 - 배포는 한 번에 하나씩 (`concurrency: deploy-production`)
+
+### 프론트 배포 (`frontend.yml`)
+
+CloudFront 한 배포가 기본 경로는 S3(프론트), `/api/*`·`/oauth2/*`·`/login/oauth2/*`는 메인 서버 backend로 보낸다.
+AWS 인증은 OIDC 역할로 한다 (계정에서 IAM 사용자·액세스 키를 만들 수 없음).
+
+| 준비 | 내용 |
+|---|---|
+| OIDC 공급자 | IAM → 자격 증명 공급자 `token.actions.githubusercontent.com` (대상 `sts.amazonaws.com`) |
+| IAM 역할 | 신뢰 정책: 위 공급자, `aud`=`sts.amazonaws.com`, `sub`=`repo:<조직>/<저장소>:ref:refs/heads/main`<br>권한: 프론트 버킷 `s3:ListBucket`(버킷)·`s3:PutObject`·`s3:DeleteObject`(버킷/*), 그 배포 `cloudfront:CreateInvalidation`만 |
+| Actions 변수 | `FRONTEND_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`, `FRONTEND_DEPLOY_ROLE_ARN` (키가 아니라 secret 불필요). 선택 `VITE_FIREBASE_*` (공개 설정) |
+
+- 업로드: `assets/`(해시 파일명)는 1년 캐시·삭제 안 함, 나머지는 `no-cache` + 빌드에서 사라진 파일 삭제 → CloudFront `/*` 무효화
+- `FRONTEND_BUCKET`이 비어 있으면 배포만 건너뛴다
+- 수동 재배포: Actions → Frontend → Run workflow (main)
+- 수동 배포(워크플로를 쓸 수 없을 때): `frontend`에서 `npm ci && npm run build` → `dist` 내용물을 버킷에 업로드 → CloudFront 무효화 `/*`
 
 ### 서버 준비 순서: DB → 데이터 → 메인
 
