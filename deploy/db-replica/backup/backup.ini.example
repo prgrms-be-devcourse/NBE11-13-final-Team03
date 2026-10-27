@@ -1,0 +1,19 @@
+[backup]
+compose_dir=/home/ubuntu/yon-db-replica
+compose_project=yon-db-replica
+compose_files=docker-compose.yml
+service=postgres-replica
+# The replica container has no POSTGRES_USER/POSTGRES_DB environment variables.
+db_user=postgres
+db_name=yon
+state_dir=/var/lib/yon-backup
+retain_daily=7
+retain_weekly=4
+release_reference=REPLACE_WITH_DEPLOYED_RELEASE
+
+[monitor]
+max_backup_age_hours=30
+max_weekly_age_days=8
+# Age of the last replayed transaction, not a direct replication-lag measurement.
+max_replay_age_seconds=600
+max_disk_used_percent=80

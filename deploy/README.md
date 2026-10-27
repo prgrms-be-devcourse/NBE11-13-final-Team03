@@ -178,13 +178,13 @@ backend의 PARTITIONED TABLE 인식 설정을 먼저 배포한 뒤 backend 중�
 
 ### 백업
 
-DB는 DB 서버의 도커 볼륨(`yon-db_postgres_data`)에 있다. 인스턴스를 지우면 함께 사라진다.
-아래는 수동 백업이다. 인스턴스 유실에 대비한 주기 백업(cron + S3 업로드)은 후속으로 추가한다.
-
-```bash
-cd ~/yon-db
-docker compose exec -T postgres-db pg_dump -U postgres -d yon -Fc > ~/yon-backup-$(date +%Y%m%d%H%M).dump
-```
+정기 백업은 **DB 복제본 서버**의 로컬 디스크에 보관한다. [백업 운영 절차](../docs/db-backup.md)를 따른다.
+`deploy/db-replica/backup/`을 `~/yon-db-replica/backup/`에 설치한다. standby만 허용하고 primary는 거부한다.
+11:00 KST(서버 가동·수집 종료 확인 전 임시 시각)에 daily 전체 덤프, 일요일에는 같은 덤프의 weekly 사본을 추가한다.
+완성 세트 기준 daily 7개·weekly 4개, SHA256·flock·디스크 80% 차단·복제 최신성 점검을 포함한다.
+**PITR 미지원, RPO 약 24시간. primary·replica 동시 유실에 대비한 외부 사본은 없다.**
+기존 DB/복제 설정은 변경하지 않으며 PR 병합만으로 활성화되지 않는다.
+AWS 담당자에게는 [작업 지침](../docs/db-backup-aws-instructions.md)을 전달한다.
 
 ## DB 읽기 복제본 (replica)
 
