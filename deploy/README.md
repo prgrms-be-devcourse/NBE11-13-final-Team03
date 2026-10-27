@@ -85,7 +85,9 @@ CloudFront 설정 (콘솔에서 한 번, 워크플로가 바꾸지 않음)
   ```js
   function handler(event) {
     var request = event.request;
-    if (!request.uri.includes('.')) request.uri = '/index.html';
+    if (request.uri.indexOf('.') === -1) {
+      request.uri = '/index.html';
+    }
     return request;
   }
   ```
