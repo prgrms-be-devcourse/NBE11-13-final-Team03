@@ -199,7 +199,8 @@ class AdminNotificationSqsPostgresTest {
         assertThat(receipts()).isEqualTo(1);
         assertThat(SLACK_BODIES).hasSize(1);
         assertThat(mapper.readTree(SLACK_BODIES.getFirst()).path("text").asString())
-                .contains("데이터 유형: 고용24", "수집일: 2026-10-27", "신규: 1,203건", "갱신: 88건", "변경 없음: 139,201건", "실패: 4건");
+                .contains("데이터 유형: 고용24", "수집일: 2026-10-27", "신규: 1,203건", "갱신: 88건", "변경 없음: 139,201건", "실패: 4건")
+                .doesNotContain("실행:", "페이지 실패:", "소요 시간:", "상태:"); // v1에는 실행·상태 정보가 없다.
         assertThat(jdbc.queryForObject("SELECT count(*) FROM consumed_messages", Long.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications", Long.class)).isZero();
     }
@@ -230,9 +231,9 @@ class AdminNotificationSqsPostgresTest {
         assertThat(receipts()).isEqualTo(2);
         assertThat(SLACK_BODIES).hasSize(2);
         assertThat(mapper.readTree(SLACK_BODIES.getFirst()).path("text").asString())
-                .contains("수집일: 2026-10-27", "상태: 실패").doesNotContain("실행", "소요", "페이지");
+                .contains("수집일: 2026-10-27", "실행: #7 · 정기 수집", "페이지 실패: 1건", "소요 시간: 7분 00초", "상태: 실패");
         assertThat(mapper.readTree(SLACK_BODIES.getLast()).path("text").asString())
-                .contains("수집일: 2026-10-27", "상태: 성공").doesNotContain("실행", "소요", "페이지");
+                .contains("수집일: 2026-10-27", "실행: #8 · 수동 재시도", "페이지 실패: 0건", "상태: 성공");
         verify(sqs, times(4)).deleteMessage(any(DeleteMessageRequest.class));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications", Long.class)).isZero();
     }
