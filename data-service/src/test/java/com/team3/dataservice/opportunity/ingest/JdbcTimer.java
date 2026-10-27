@@ -10,9 +10,13 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 벤치마크용 JDBC 계측. DataSource를 감싸 Statement 실행(execute*)과 커밋을 종류별로 세고 걸린 시간을 더한다.
@@ -25,6 +29,10 @@ final class JdbcTimer {
 
     private static final Map<Kind, LongAdder> COUNT = new EnumMap<>(Kind.class);
     private static final Map<Kind, LongAdder> NANOS = new EnumMap<>(Kind.class);
+    /** "INSERT opportunity_conditions"처럼 종류 + 대상 테이블별 [횟수, 나노초] */
+    private static final Map<String, LongAdder[]> BY_TABLE = new ConcurrentHashMap<>();
+    private static final Pattern TABLE = Pattern.compile(
+            "^(?:insert\\s+into|update|delete\\s+from)\\s+([\\w.]+)|\\bfrom\\s+([\\w.]+)");
 
     static {
         for (Kind k : Kind.values()) {
@@ -39,6 +47,16 @@ final class JdbcTimer {
     static void reset() {
         COUNT.values().forEach(LongAdder::reset);
         NANOS.values().forEach(LongAdder::reset);
+        BY_TABLE.clear();
+    }
+
+    /** 종류 + 테이블별 [횟수, 밀리초]. 시간 큰 순 */
+    static Map<String, long[]> byTable() {
+        Map<String, long[]> result = new LinkedHashMap<>();
+        BY_TABLE.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue()[1].sum(), a.getValue()[1].sum()))
+                .forEach(e -> result.put(e.getKey(), new long[]{e.getValue()[0].sum(), e.getValue()[1].sum() / 1_000_000}));
+        return result;
     }
 
     static long count(Kind kind) {
@@ -97,10 +115,12 @@ final class JdbcTimer {
     private static <T> T proxy(Class<T> type, T target, ResultWrapper wrapper, Timed timed, String preparedSql) {
         InvocationHandler handler = (p, method, args) -> {
             Kind kind = timed == null ? null : timed.kindOf(method);
+            String sql = null;
             if (kind == null && Statement.class.isAssignableFrom(type) && method.getName().startsWith("execute")) {
-                String sql = args != null && args.length > 0 && args[0] instanceof String s ? s : preparedSql;
+                sql = args != null && args.length > 0 && args[0] instanceof String s ? s : preparedSql;
                 kind = kindOf(sql);
             }
+            String tableKey = kind == null || kind == Kind.COMMIT ? null : kind + " " + tableOf(sql);
             long start = kind == null ? 0 : System.nanoTime();
             try {
                 Object result = method.invoke(target, args);
@@ -109,12 +129,29 @@ final class JdbcTimer {
                 throw e.getCause();
             } finally {
                 if (kind != null) {
-                    NANOS.get(kind).add(System.nanoTime() - start);
+                    long elapsed = System.nanoTime() - start;
+                    NANOS.get(kind).add(elapsed);
                     COUNT.get(kind).increment();
+                    if (tableKey != null) {
+                        LongAdder[] t = BY_TABLE.computeIfAbsent(tableKey, k -> new LongAdder[]{new LongAdder(), new LongAdder()});
+                        t[0].increment();
+                        t[1].add(elapsed);
+                    }
                 }
             }
         };
         return (T) Proxy.newProxyInstance(JdbcTimer.class.getClassLoader(), new Class<?>[]{type}, handler);
+    }
+
+    private static String tableOf(String sql) {
+        if (sql == null) {
+            return "?";
+        }
+        Matcher m = TABLE.matcher(sql.strip().toLowerCase(Locale.ROOT));
+        if (!m.find()) {
+            return "?";
+        }
+        return m.group(1) != null ? m.group(1) : m.group(2);
     }
 
     private static Kind kindOf(String sql) {

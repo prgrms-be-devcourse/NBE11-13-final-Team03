@@ -58,7 +58,8 @@ import static org.mockito.Mockito.doThrow;
         "yon.normalization.ingest.batch-size=2",
         "yon.normalization.ingest.transaction-size=2"
 })
-@Import({RawIngestProcessor.class, RawRecordReader.class, RawRecordNormalizer.class,
+@Import({com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache.class,
+        com.team3.dataservice.opportunity.service.OpportunitySourceLookup.class,RawIngestProcessor.class, RawRecordReader.class, RawRecordNormalizer.class,
         TrainingCourseNormalizationService.class, YouthPolicyNormalizationService.class,
         AgeNormalizer.class, ApplicationPeriodNormalizer.class, RegionNormalizer.class, RegionDirectory.class,
         CodeConditionNormalizer.class, IncomeNormalizer.class, YouthPolicyCodeTable.class,

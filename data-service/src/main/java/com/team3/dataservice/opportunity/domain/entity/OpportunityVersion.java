@@ -42,7 +42,9 @@ import java.util.Map;
 public class OpportunityVersion {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    // 묶음 INSERT(hibernate.jdbc.batch_size)를 쓰려면 IDENTITY가 아니라 시퀀스여야 한다. 50개씩 미리 받는다 (pooled)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "opportunity_versions_seq")
+    @SequenceGenerator(name = "opportunity_versions_seq", sequenceName = "opportunity_versions_seq", allocationSize = 50)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

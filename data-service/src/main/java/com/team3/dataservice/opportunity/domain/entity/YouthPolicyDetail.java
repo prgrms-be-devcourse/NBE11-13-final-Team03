@@ -29,7 +29,9 @@ import java.time.LocalDate;
 public class YouthPolicyDetail {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    // 묶음 INSERT(hibernate.jdbc.batch_size)를 쓰려면 IDENTITY가 아니라 시퀀스여야 한다. 50개씩 미리 받는다 (pooled)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "youth_policy_details_seq")
+    @SequenceGenerator(name = "youth_policy_details_seq", sequenceName = "youth_policy_details_seq", allocationSize = 50)
     private Long id;
 
     @OneToOne(fetch = FetchType.LAZY, optional = false)
