@@ -60,6 +60,11 @@ jobs:
 
           suites = [ET.parse(path).getroot() for path in pathlib.Path('backend/build/test-results/test').glob('TEST-*.xml')]
           assert suites, 'No backend test results'
+          partition = ET.parse('backend/build/test-results/test/TEST-com.team3.backend.behavior.UserBehaviorPartitionPostgresTest.xml').getroot()
+          assert int(partition.attrib['tests']) > 0, 'Behavior partition tests did not run'
+          for key in ('failures', 'errors', 'skipped'):
+              assert int(partition.attrib[key]) == 0, f'Behavior partition tests: {key}={partition.attrib[key]}'
+          print(f"Behavior partition tests passed: {partition.attrib['tests']}")
           counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
           print(f"Backend test totals: {counts}")
           PY

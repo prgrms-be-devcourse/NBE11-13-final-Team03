@@ -11,6 +11,7 @@ spring:
     open-in-view: false
     properties:
       hibernate.type.json_format_mapper: org.hibernate.type.format.jackson.Jackson3JsonFormatMapper
+      hibernate.hbm2ddl.extra_physical_table_types: PARTITIONED TABLE
 
   grpc:
     client:

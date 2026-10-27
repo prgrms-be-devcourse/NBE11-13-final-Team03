@@ -161,6 +161,12 @@ cd ~/yon-db
 ```
 IDENTITY 버전으로 되돌릴 때는 이전 버전을 띄우기 전에 같은 방식으로 `sql/opportunity-id-identity-rollback.sql`을 실행한다.
 
+### 사용자 행동 로그 월 파티셔닝
+
+backend의 PARTITIONED TABLE 인식 설정을 먼저 배포한 뒤 backend 중지 → 전환 SQL → 점검 → 재기동 순서로 수행한다.
+원본 스냅샷 파티셔닝과 독립적인 작업이며 SQL은 자동 실행되지 않는다.
+명령·D+1 검증·롤백·월 점검은 [행동 로그 파티셔닝 절차](../docs/user-behavior-events-partitioning.md)를 따른다.
+
 ### 백업
 
 DB는 DB 서버의 도커 볼륨(`yon-db_postgres_data`)에 있다. 인스턴스를 지우면 함께 사라진다.
