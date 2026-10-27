@@ -4,6 +4,8 @@ import com.team3.backend.auth.exception.AuthErrorCode;
 import com.team3.backend.auth.jwt.TokenProvider;
 import com.team3.backend.auth.jwt.TokenStatus;
 import com.team3.backend.auth.jwt.TokenType;
+import com.team3.backend.auth.security.CustomAuthenticationEntryPoint;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;
@@ -11,6 +13,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -24,10 +27,17 @@ import java.io.IOException;
 public class TokenAuthenticationFilter extends OncePerRequestFilter {
 
     private final TokenProvider tokenProvider;
+    private final CustomAuthenticationEntryPoint authenticationEntryPoint;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return request.getRequestURI().startsWith("/api/internal/");
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        // OAuth/static pages and refresh must remain usable with an expired access cookie.
+        // The frontend bootstraps CSRF on this non-personalized public GET before refreshing.
+        return !path.startsWith("/api/")
+                || path.startsWith("/api/internal/")
+                || path.equals("/api/auth/reissue")
+                || ("GET".equals(request.getMethod()) && path.equals("/api/interests/options"));
     }
 
     @Override
@@ -55,33 +65,30 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
                         TokenType.ACCESS
                 );
 
-        if (status == TokenStatus.EXPIRED) {
-            request.setAttribute(
-                    "auth_error",
-                    AuthErrorCode.INVALID_ACCESS_TOKEN
-            );
-
-            filterChain.doFilter(request, response);
+        if (status != TokenStatus.VALID) {
+            rejectInvalidToken(request, response);
             return;
         }
 
-        if (status == TokenStatus.INVALID) {
-            request.setAttribute(
-                    "auth_error",
-                    AuthErrorCode.INVALID_ACCESS_TOKEN
-            );
-
-            filterChain.doFilter(request, response);
+        Authentication authentication;
+        try {
+            authentication = tokenProvider.getAuthentication(token);
+        } catch (JwtException | IllegalArgumentException failure) {
+            // Parsing again may cross the expiry boundary or reject malformed principal claims.
+            rejectInvalidToken(request, response);
             return;
         }
-
-        Authentication authentication =
-                tokenProvider.getAuthentication(token);
 
         SecurityContextHolder.getContext()
                 .setAuthentication(authentication);
 
         filterChain.doFilter(request, response);
+    }
+
+    private void rejectInvalidToken(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        SecurityContextHolder.clearContext();
+        request.setAttribute("auth_error", AuthErrorCode.INVALID_ACCESS_TOKEN);
+        authenticationEntryPoint.commence(request, response, new BadCredentialsException("Invalid access token"));
     }
 
     private String resolveToken(HttpServletRequest request) {
