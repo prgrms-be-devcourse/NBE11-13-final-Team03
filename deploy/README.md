@@ -70,7 +70,30 @@ AWS 인증은 OIDC 역할로 한다 (계정에서 IAM 사용자·액세스 키�
 | Actions 변수 | `FRONTEND_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`, `FRONTEND_DEPLOY_ROLE_ARN` (키가 아니라 secret 불필요). 선택 `VITE_FIREBASE_*` (공개 설정) |
 
 - 업로드: `assets/`(해시 파일명)는 1년 캐시·삭제 안 함, 나머지는 `no-cache` + 빌드에서 사라진 파일 삭제 → CloudFront `/*` 무효화
+- 옛 `assets/`는 지우지 않아 배포마다 조금씩 쌓인다 (한 번에 수백 KB). 나이 기준 S3 수명 주기는 배포가 오래 없으면 현재 파일까지 지우므로 쓰지 않고, 필요할 때 현재 빌드에 없는 파일만 수동 정리한다
 - `FRONTEND_BUCKET`이 비어 있으면 배포만 건너뛴다
+
+CloudFront 설정 (콘솔에서 한 번, 워크플로가 바꾸지 않음)
+
+| behavior | 원본 | 설정 |
+|---|---|---|
+| 기본 (`*`) | S3 프론트 버킷 (OAC) | 기본 루트 객체 `index.html`, viewer-request 함수 `yon-spa-rewrite` (캐시는 파일별 Cache-Control을 따름) |
+| `/api/*`, `/oauth2/*`, `/login/oauth2/*` | 메인 서버 backend (HTTP 8080, 사용자 지정 헤더 `X-Forwarded-Proto: https`) | CachingDisabled + 원본 요청 정책 `AllViewer` (쿠키·쿼리·헤더 전체, Host 포함) |
+
+- SPA 딥링크: `BrowserRouter`라 `/mypage` 같은 경로를 새로고침하면 S3에 그 파일이 없다. 기본 behavior에만 붙인 `yon-spa-rewrite`가 확장자 없는 경로를 `/index.html`로 바꾼다 (`login-success.html`, `assets/*.js`처럼 확장자가 있으면 그대로)
+
+  ```js
+  function handler(event) {
+    var request = event.request;
+    if (!request.uri.includes('.')) request.uri = '/index.html';
+    return request;
+  }
+  ```
+
+- **배포 단위 사용자 지정 오류 응답(403/404 → `/index.html`)은 쓰지 않는다.** 같은 배포의 `/api/*` 응답까지 바뀌어 backend의 403/404 JSON이 `index.html`이 된다
+- 인증: `/api/*`에 쿠키가 전달돼야 로그인·`XSRF-TOKEN`이 동작한다 (`AllViewer`)
+- 소셜 로그인: Spring이 `redirect_uri`를 요청 Host·`X-Forwarded-Proto`로 만든다. `AllViewer`가 Host(CloudFront 도메인)를, 원본 사용자 지정 헤더가 `https`를 넘기고, backend는 `SERVER_FORWARD_HEADERS_STRATEGY=framework`로 이를 쓴다 → `https://<CloudFront 도메인>/login/oauth2/code/kakao`가 카카오 콘솔 등록 주소와 같아야 한다
+  - framework 전략은 헤더를 그대로 믿으므로 8080은 CloudFront에서만 접근하게 막아야 한다 (보안 그룹 CloudFront 접두사 목록)
 - 수동 재배포: Actions → Frontend → Run workflow (main)
 - 수동 배포(워크플로를 쓸 수 없을 때): `frontend`에서 `npm ci && npm run build` → `dist` 내용물을 버킷에 업로드 → CloudFront 무효화 `/*`
 

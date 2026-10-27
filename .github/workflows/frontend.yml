@@ -31,7 +31,8 @@ permissions:
 
 concurrency:
   group: frontend-${{ github.ref }}
-  cancel-in-progress: false
+  # PR은 새 푸시가 오면 이전 검증을 취소한다. main은 배포가 끊기지 않게 끝까지 돈다
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify:
@@ -114,6 +115,7 @@ jobs:
         if: env.SKIP != 'true'
         run: |
           set -euo pipefail
+          # 아티팩트를 내려받으면 파일 수정 시각이 바뀌어 sync가 매번 전부 다시 올린다 (의도: 규모가 작고 Cache-Control이 항상 갱신됨)
           # 파일 이름에 해시가 붙는 assets/는 오래 캐시하고 지우지 않는다 (열려 있던 화면이 옛 파일을 계속 찾을 수 있게)
           # 나머지(index.html, login-*.html, 이미지)는 매번 확인하고, 빌드에서 사라진 파일은 지운다
           aws s3 sync dist/assets "s3://$BUCKET/assets" --cache-control "public,max-age=31536000,immutable"
