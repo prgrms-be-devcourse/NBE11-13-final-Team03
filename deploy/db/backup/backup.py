@@ -11,7 +11,6 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
-import urllib.request
 import uuid
 from zoneinfo import ZoneInfo
 
@@ -33,9 +32,6 @@ class Backup:
         self.directory = Path(self.options["compose_dir"]).resolve()
         self.state = Path(self.options["state_dir"])
         self.state.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.webhook = Path(self.options["webhook_file"]).read_text().strip()
-        if not self.webhook.startswith(("https://", "http://127.0.0.1:")):
-            raise ValueError("Slack webhook 파일을 확인하세요")
         self.compose = ["docker", "compose", "--project-directory", str(self.directory)]
         for filename in self.options["compose_files"].splitlines():
             self.compose.extend(["-f", str(self.directory / filename.strip())])
@@ -46,7 +42,7 @@ class Backup:
                                 stdin=input_file, stderr=subprocess.PIPE, timeout=timeout,
                                 env=dict(os.environ, AWS_PAGER="", AWS_CLI_AUTO_PROMPT="off"))
         if result.returncode:
-            # Keep diagnostics private; do not put arbitrary stderr in Slack.
+            # Keep detailed diagnostics in the private state directory.
             diagnostic = self.state / "last-command-error.log"
             diagnostic.write_bytes(result.stderr[-16384:])
             raise RuntimeError(f"{command[0]} 실행 실패 (rc={result.returncode}); {diagnostic} 확인")
@@ -58,16 +54,6 @@ class Backup:
     def sql(self, query):
         return self.db("sh", "-ec", 'exec psql -X -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"',
                        "sh", query, timeout=30)
-
-    def notify(self, message):
-        data = json.dumps({"text": "[yon-db backup] " + message}).encode()
-        request = urllib.request.Request(self.webhook, data=data, headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=10) as response:
-                if not 200 <= response.status < 300:
-                    raise RuntimeError("Slack 응답 실패")
-        except Exception:
-            raise RuntimeError("Slack 알림 전송 실패; webhook과 네트워크를 확인하세요") from None
 
     def write_state(self, name, value):
         with tempfile.NamedTemporaryFile(mode="w", dir=self.state, delete=False) as stream:
@@ -134,7 +120,7 @@ class Backup:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                self.notify("SKIP " + kind + ": 이전 백업 실행 중. 작업 완료 후 다시 실행하세요")
+                print("SKIP " + kind + ": 이전 백업 실행 중. 작업 완료 후 다시 실행하세요", flush=True)
                 return 1
             started = time.time()
             self.write_state("attempt", {"kind": kind, "started_at": started})
@@ -154,12 +140,10 @@ class Backup:
                 if kind in ("daily", "full", "diff"):
                     self.write_state("latest-success", result)
                 self.write_state("attempt", dict(result, status="OK"))
-                self.notify(f"OK {kind} ({result['duration_seconds']}s). {location if kind in ('daily', 'logical', 'manual') else 'pgBackRest 저장소 확인 완료'}")
                 print(json.dumps(result, ensure_ascii=False), flush=True)
                 return 0
-            except Exception as error:
+            except Exception:
                 self.write_state("attempt", {"kind": kind, "status": "FAILED", "failed_at": time.time()})
-                self.notify("FAILED " + kind + ": " + str(error))
                 raise
 
     def monitor(self):
@@ -186,14 +170,7 @@ class Backup:
                     problems.append(f"WAL 아카이브 대기 {int(age)}초")
         except Exception as error:
             problems.append(str(error))
-        previous = self.read_state("monitor")
-        now = time.time()
-        if problems and (problems != previous.get("problems") or now - previous.get("notified_at", 0) >= settings.getfloat("alert_repeat_hours") * 3600):
-            self.notify("ALERT " + "; ".join(problems))
-            self.write_state("monitor", {"problems": problems, "notified_at": now})
-        elif not problems and previous.get("problems"):
-            self.notify("RECOVERED 백업·WAL·디스크 점검 정상")
-            self.write_state("monitor", {"problems": [], "notified_at": now})
+        self.write_state("monitor", {"problems": problems, "checked_at": time.time()})
         print(json.dumps({"problems": problems}, ensure_ascii=False), flush=True)
         return 1 if problems else 0
 

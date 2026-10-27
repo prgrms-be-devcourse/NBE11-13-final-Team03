@@ -56,11 +56,9 @@ def main():
         try:
             run("docker", "network", "create", network)
             run("docker", "run", "-d", "--name", s3, "--network", network, "--network-alias", "s3",
-                "-e", "SERVICES=s3", "-p", "127.0.0.1::4566", "-p", "127.0.0.1::8476", "localstack/localstack:4.12.0")
+                "-e", "SERVICES=s3", "-p", "127.0.0.1::4566", "localstack/localstack:4.12.0")
             wait(lambda: run("docker", "exec", s3, "awslocal", "s3api", "list-buckets", timeout=10))
             run("docker", "exec", s3, "awslocal", "s3api", "create-bucket", "--bucket", "yon-backup-test")
-            webhook = "from http.server import HTTPServer,BaseHTTPRequestHandler\nclass H(BaseHTTPRequestHandler):\n def do_POST(self):\n  import json\n  body=self.rfile.read(int(self.headers['Content-Length']));json.loads(body)\n  with open('/tmp/notifications.jsonl','ab') as f:f.write(body+b'\\n')\n  self.send_response(200);self.end_headers();self.wfile.write(b'ok')\nHTTPServer(('0.0.0.0',8476),H).serve_forever()"
-            run("docker", "exec", "-d", s3, "python3", "-c", webhook)
             compose = {"name": identifier, "services": {"postgres-db": {
                 "image": image, "container_name": database,
                 "environment": {"POSTGRES_PASSWORD": "disposable-test-only", "POSTGRES_DB": "yon"},
@@ -105,17 +103,13 @@ def main():
             if args.runner_image:
                 inside = PurePosixPath("/workspace") / directory.relative_to(ROOT).as_posix()
                 endpoint = "http://127.0.0.1:4566"
-                hook = "http://127.0.0.1:8476"
                 state = "/backup-state"
             else:
                 inside = directory
                 endpoint = "http://" + run("docker", "port", s3, "4566/tcp")
-                hook = "http://" + run("docker", "port", s3, "8476/tcp")
                 state = str(directory / "state")
-            (directory / "webhook").write_text(hook)
             config = (ROOT / "deploy/db/backup/backup.ini.example").read_text()
             config = config.replace("REPLACE_WITH_BACKUP_BUCKET", "yon-backup-test").replace("REPLACE_WITH_DEPLOYED_RELEASE", "integration-test")
-            config = config.replace("/home/ubuntu/yon-db/backup/slack-webhook", str(inside / "webhook"))
             config = config.replace("/home/ubuntu/yon-db", str(inside)).replace("/var/lib/yon-backup", state)
             config = config.replace("compose_files=docker-compose.yml", "compose_files=compose.json").replace("max_disk_used_percent=80", "max_disk_used_percent=100")
             (directory / "backup.ini").write_text(config)

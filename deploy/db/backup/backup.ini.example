@@ -8,7 +8,6 @@ compose_dir=/home/ubuntu/yon-db
 compose_files=docker-compose.yml
 service=postgres-db
 state_dir=/var/lib/yon-backup
-webhook_file=/home/ubuntu/yon-db/backup/slack-webhook
 # Update this after schema changes. Record matching application images in the run log.
 release_reference=REPLACE_WITH_DEPLOYED_RELEASE
 
@@ -16,4 +15,3 @@ release_reference=REPLACE_WITH_DEPLOYED_RELEASE
 max_backup_age_hours=30
 max_archive_queue_age_seconds=600
 max_disk_used_percent=80
-alert_repeat_hours=6

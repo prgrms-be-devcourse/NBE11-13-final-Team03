@@ -180,7 +180,7 @@ backend의 PARTITIONED TABLE 인식 설정을 먼저 배포한 뒤 backend 중�
 DB는 DB 서버의 도커 볼륨(`yon-db_postgres_data`)에 있다. 인스턴스를 지우면 함께 사라진다.
 정기 백업은 [백업 운영 절차](../docs/db-backup.md)를 따른다.
 `deploy/db/backup/`의 일일 논리 덤프 → S3를 먼저 검증하고, 주간 full·일일 diff·WAL로 전환한다.
-systemd 타이머·실패/적체 알림·별도 DB 복원 시험을 포함하며 DB 서버에서 AWS 담당자가 직접 설치한다.
+systemd 타이머·실패/적체 상태 점검·별도 DB 복원 시험을 포함하며 DB 서버에서 AWS 담당자가 직접 설치한다.
 DB가 앱 서버와 함께 있어도 현재 primary에서 실행한다. PR 병합만으로 활성화되지 않는다.
 AWS 담당자에게는 [담당자 작업 지침](../docs/db-backup-aws-instructions.md)을 전달한다.
 아래는 변경 직전 등을 위한 기존 수동 백업이다.

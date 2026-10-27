@@ -21,10 +21,8 @@ class BackupTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        (self.root / "webhook").write_text("https://example.invalid/test")
         example = (ROOT / "deploy/db/backup/backup.ini.example").read_text()
         example = example.replace("REPLACE_WITH_BACKUP_BUCKET", "test-bucket").replace("REPLACE_WITH_DEPLOYED_RELEASE", "test-release")
-        example = example.replace("/home/ubuntu/yon-db/backup/slack-webhook", str(self.root / "webhook"))
         example = example.replace("/home/ubuntu/yon-db", str(self.root)).replace("/var/lib/yon-backup", str(self.root / "state"))
         (self.root / "backup.ini").write_text(example)
         self.backup = MODULE.Backup(self.root / "backup.ini")
@@ -33,10 +31,8 @@ class BackupTest(unittest.TestCase):
         self.failure = None
         self.primary = "f"
         self.archive_age = "0"
-        self.notifications = []
         self.addCleanup(patch.stopall)
         patch.object(self.backup, "run", side_effect=self.run_command).start()
-        patch.object(self.backup, "notify", side_effect=self.notifications.append).start()
 
     def run_command(self, command, *, output=None, input_file=None, timeout=None):
         self.commands.append(command)
@@ -73,8 +69,7 @@ class BackupTest(unittest.TestCase):
         prefix = list(self.objects)[-1].rsplit("/", 1)[0]
         for name, details in manifest["files"].items():
             self.assertEqual(hashlib.sha256(self.objects[prefix + "/" + name]).hexdigest(), details["sha256"])
-        self.assertEqual(1, len(self.notifications))
-        self.assertTrue(self.notifications[0].startswith("OK"))
+        self.assertEqual("OK", self.backup.read_state("attempt")["status"])
 
     def test_failed_dump_does_not_upload_or_report_success(self):
         self.failure = "pg_dump "
@@ -82,7 +77,7 @@ class BackupTest(unittest.TestCase):
             self.backup.execute("daily")
         self.assertFalse(self.objects)
         self.assertFalse(self.backup.read_state("latest-success"))
-        self.assertTrue(self.notifications[-1].startswith("FAILED"))
+        self.assertEqual("FAILED", self.backup.read_state("attempt")["status"])
 
     def test_partial_upload_has_no_completion_manifest(self):
         self.failure = "/globals.sql --only-show-errors"
@@ -126,21 +121,21 @@ class BackupTest(unittest.TestCase):
             self.backup.execute("full")
         self.assertFalse(self.backup.read_state("latest-success"))
 
-    def test_monitor_deduplicates_alert_and_reports_recovery(self):
+    def test_monitor_records_failure_and_recovery(self):
         self.assertEqual(1, self.backup.monitor())
-        self.assertEqual(1, self.backup.monitor())
-        self.assertEqual(1, len(self.notifications))
+        self.assertTrue(self.backup.read_state("monitor")["problems"])
+        self.assertIn("checked_at", self.backup.read_state("monitor"))
         self.backup.write_state("latest-success", {"completed_at": time.time()})
         self.assertEqual(0, self.backup.monitor())
-        self.assertTrue(self.notifications[-1].startswith("RECOVERED"))
+        self.assertEqual([], self.backup.read_state("monitor")["problems"])
 
-    def test_wal_backlog_is_alerted_while_backup_is_fresh(self):
+    def test_wal_backlog_fails_monitor_while_backup_is_fresh(self):
         self.backup.mode = "physical"
         for kind in ("latest-success", "full", "logical"):
             self.backup.write_state(kind, {"completed_at": time.time()})
         self.archive_age = "700"
         self.assertEqual(1, self.backup.monitor())
-        self.assertIn("WAL", self.notifications[-1])
+        self.assertIn("WAL", "; ".join(self.backup.read_state("monitor")["problems"]))
 
     def test_placeholder_configuration_is_rejected(self):
         config = self.root / "backup.ini"
@@ -157,7 +152,7 @@ class BackupTest(unittest.TestCase):
             self.assertEqual(0, MODULE.main())
             execute.assert_called_once_with("full")
 
-    def test_command_error_keeps_details_out_of_notification_message(self):
+    def test_command_error_keeps_details_out_of_error_message(self):
         result = subprocess.CompletedProcess(["docker"], 1, stdout=b"", stderr=b"private-error-detail")
         with patch.object(MODULE.subprocess, "run", return_value=result):
             with self.assertRaises(RuntimeError) as error:

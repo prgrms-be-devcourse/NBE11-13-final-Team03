@@ -2,7 +2,7 @@
 
 파티셔닝(#86·#87)은 완료됐다. 이 작업은 기존 primary의 정기 백업을 준비하며 파티셔닝 SQL을 다시 실행하지 않는다.
 저장소 파일 병합은 운영 백업 활성화를 뜻하지 않는다. DB 서버는 자동 배포하지 않는다.
-운영 인스턴스·Compose 경로·S3·IAM·Slack은 AWS 담당자 확인 대기 상태다.
+운영 인스턴스·Compose 경로·S3·IAM은 AWS 담당자 확인 대기 상태다.
 
 ## 담당과 완료 기준
 
@@ -10,9 +10,9 @@
 | --- | --- |
 | 코드 담당 | 파일·로컬 검증·PR 준비, 검증한 버전 전달, 운영 확인 결과 기록 |
 | AWS 담당 | 실제 primary/볼륨 확인, 버킷·역할·네트워크·서버 파일 배치, 백업·복원 시험·타이머 실행 |
-| 함께 | 첫 예약 백업과 알림 확인, 복원 데이터·권한·소요 시간 확인 |
+| 함께 | 첫 예약 백업의 로그·상태 확인, 복원 데이터·권한·소요 시간 확인 |
 
-운영 완료 기준은 **실제 S3 백업 + 별도 DB 복원 성공 + 다음 예약 백업/알림 성공**이다.
+운영 완료 기준은 **실제 S3 백업 + 별도 DB 복원 성공 + 다음 예약 백업 성공 및 로그·상태 확인**이다.
 full/diff/WAL 운영 완료에는 첫 full·다음 diff·최신 복원·특정 시점 복원도 포함한다.
 파일·테스트 완료와 운영 완료를 구분해 작업 기록에 남긴다.
 
@@ -30,11 +30,11 @@ full/diff/WAL 운영 완료에는 첫 full·다음 diff·최신 복원·특정 �
 | physical | 상시 WAL 아카이브, 세그먼트 전환 300초 | pgbackrest/ |
 | physical | 매월 첫 일요일 04:30 논리 덤프 | logical/<UTC시각-고유ID>/ |
 | 수동 | DB 스키마 변경 직전 | manual/<UTC시각-고유ID>/ |
-| 점검 | 기동 10분 뒤, 이후 5분마다 | 로컬 상태 + Slack |
+| 점검 | 기동 10분 뒤, 이후 5분마다 | 서버 로그 + 로컬 상태 + 종료 코드 |
 
 systemd Persistent 타이머를 쓴다. 부팅 시 놓친 일정을 1회 보완한다.
 정기 실행 시 full 성공 기록이 7일 이상 오래됐으면 요일과 무관하게 full을 선택한다.
-호스트 flock으로 백업 중복을 막고, 겹친 작업은 SKIP 알림을 보낸다. 종료 후 담당자가 재실행한다.
+호스트 flock으로 백업 중복을 막고, 겹친 작업은 SKIP 로그와 종료 코드 1을 남긴다. 종료 후 담당자가 재실행한다.
 03:30 full이 04:30까지 끝나지 않으면 월간 덤프가 SKIP될 수 있으므로 월간 작업을 다시 실행한다.
 
 논리 덤프는 DB 전체(두 스키마·모든 파티션·시퀀스·소유자·권한)를 포함한다.
@@ -64,16 +64,11 @@ chmod 600 backup/backup.ini
 nano backup/backup.ini
 ```
 
-mode=logical, 실제 bucket·compose_dir·service·state_dir·webhook_file·release_reference를 채운다.
+mode=logical, 실제 bucket·compose_dir·service·state_dir·release_reference를 채운다.
 release_reference에는 현재 배포 커밋이나 팀의 릴리스 번호를 적는다. 스키마가 변경될 때 갱신하고 해당 앱 이미지도 작업 기록에 남긴다.
-Slack webhook은 별도 파일에 넣는다. 저장소·메신저 작업 결과에 실제 값을 붙이지 않는다.
 
 ```bash
 cd ~/yon-db
-umask 077
-touch backup/slack-webhook
-nano backup/slack-webhook
-chmod 600 backup/slack-webhook
 sudo install -m 644 backup/yon-db-backup@.service backup/yon-db-backup*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 systemd-analyze calendar '*-*-* 03:30:00 Asia/Seoul' 'Sun *-*-01..07 04:30:00 Asia/Seoul'
@@ -82,14 +77,14 @@ sudo journalctl -u yon-db-backup@daily.service -n 50 --no-pager
 ```
 
 systemd가 /var/lib/yon-backup을 ubuntu 소유·0700으로 만든다. 로그는 journal에 남겨 /var/log 파일 권한 문제를 피한다.
-OK 알림·S3 세트·manifest를 확인하고 아래 논리 복원 시험을 완료한다. 실패하면 타이머를 켜지 않는다.
+성공 종료 상태·S3 세트·manifest를 확인하고 아래 논리 복원 시험을 완료한다. 실패하면 타이머를 켜지 않는다.
 
 ```bash
 sudo systemctl enable --now yon-db-backup.timer yon-db-backup-monitor.timer
 systemctl list-timers 'yon-db-backup*'
 ```
 
-다음 예약 실행 후 OK와 S3의 새 manifest를 확인하면 초기 정기 백업 운영 완료다.
+다음 예약 실행 후 서비스의 성공 상태와 S3의 새 manifest를 확인하면 초기 정기 백업 운영 완료다.
 logical 모드의 복구 지점은 일 단위이며, 목표 RPO는 정상적인 매일 백업을 전제로 약 24시간이다.
 
 ## 3. 논리 복원 시험 — AWS 담당자 + 코드 담당
@@ -208,7 +203,7 @@ systemctl list-timers 'yon-db-backup*'
 현재 .env의 이미지가 과거 스키마와 호환된다고 가정하지 않는다. 파티셔닝 이전 시점이면 #86·#87 적용 여부도 확인한다.
 역할·호스트·DB_URL·보안 그룹을 확인하고, 실제 primary에서 archive_mode를 on으로 복구한 뒤 check와 새 full을 실행한다.
 복제본은 새 primary의 타임라인에 맞춰 재구성하며 옛 primary를 동시에 쓰기 가능하게 올리지 않는다.
-DB 복구가 이미 전송한 SQS/Slack/푸시까지 되돌리지는 않으므로 앱 재개 전에 알림/Outbox 재처리를 함께 확인한다.
+DB 복구가 이미 전송한 외부 알림까지 되돌리지는 않으므로 앱 재개 전에 알림/Outbox 재처리를 함께 확인한다.
 
 테이블 부분 복구도 전체를 별도 DB로 복원한 뒤 비교·병합한다.
 pg_dump -t 부모만으로 자식 파티션 데이터가 포함된다고 가정하지 않고, pg_restore가 테이블 이름을 바꿔 준다고 가정하지 않는다.
@@ -223,17 +218,23 @@ pg_dump -t 부모만으로 자식 파티션 데이터가 포함된다고 가정�
 | S3 전체 | noncurrent 7일, 미완료 multipart 7일, 빈 delete marker 정리 |
 
 S3 삭제는 비동기다. 정확한 시각의 영구 삭제나 모든 물리 백업의 90일 상한을 보장하지 않는다.
-새 full이 계속 실패하면 마지막 복구 가능 세트를 먼저 지우지 않는다. full 오래됨 경고를 받고 원인을 해결한다.
+새 full이 계속 실패하면 마지막 복구 가능 세트를 먼저 지우지 않는다. full 오래됨 점검 결과를 확인하고 원인을 해결한다.
 pgbackrest/에 현재 객체 만료·Glacier 전환·Object Lock을 적용하지 않는다.
 
-백업 성공이 30시간, full이 8일, 월간 논리 덤프가 40일을 넘으면 경고한다.
-physical 모드에서 WAL .ready 파일의 가장 오래된 대기가 600초를 넘거나 DB 디스크 80% 이상이면 경고한다.
+백업 성공이 30시간, full이 8일, 월간 논리 덤프가 40일을 넘으면 점검을 실패 처리한다.
+physical 모드에서 WAL .ready 파일의 가장 오래된 대기가 600초를 넘거나 DB 디스크 80% 이상이면 점검을 실패 처리한다.
 변경 없는 시간의 last_archived_time이 오래됐다는 이유만으로 장애를 판단하지 않는다.
 archive_timeout=300은 세그먼트 전환 주기다. S3 전송 시간·실패를 포함한 5분 RPO 보장은 아니며 목표치로 관리한다.
-동일 경고는 6시간마다 재알림하고 정상 복구를 알린다. webhook 실패는 작업 실패와 journal에 남긴다.
-명령의 상세 오류는 비공개 상태 디렉터리의 last-command-error.log에 보관하며 Slack에는 파일 경로만 보낸다.
-서버가 꺼지거나 타이머 자체가 멈추면 같은 서버의 점검도 멈춘다. AWS 담당자는 별도 서버 상태 감지와 매일 OK 수신 확인을 유지한다.
-누락되면 systemctl status/list-timers와 journalctl을 확인한다. Slack에 성공이 없다는 사실도 운영 확인 대상이다.
+점검 결과는 매 실행마다 journal과 상태 디렉터리의 monitor.json에 남긴다. 이상이 있으면 종료 코드 1, 정상이면 0이다.
+명령의 상세 오류는 비공개 상태 디렉터리의 last-command-error.log에 보관하고 로그에는 파일 경로만 남긴다.
+서버가 꺼지거나 타이머 자체가 멈추면 같은 서버의 점검도 멈춘다. AWS 담당자는 별도 서버 상태 감지와 매일 백업 성공 확인을 유지한다.
+누락되면 systemctl status/list-timers와 journalctl을 확인한다. 외부 알림 전송은 하지 않으므로 로그·상태를 직접 점검한다.
+
+```bash
+systemctl show yon-db-backup@scheduled.service -p Result -p ExecMainStatus
+sudo journalctl -u yon-db-backup@scheduled.service -u yon-db-backup@monitor.service --since today --no-pager
+sudo cat /var/lib/yon-backup/monitor.json
+```
 
 ## 작업 기록
 
@@ -243,7 +244,7 @@ archive_timeout=300은 세그먼트 전환 주기다. S3 전송 시간·실패�
 | 버킷/역할/접속 확인 | AWS 담당자 확인 필요 |
 | 파일 버전/현재 앱 이미지/스키마 참조 | |
 | 초기 daily S3 세트/복원 결과/소요 시간 | |
-| 첫 예약 백업/Slack | |
+| 첫 예약 백업/서버 로그·종료 상태 | |
 | pgBackRest·PostgreSQL 버전/재시작 일시 | |
 | full/diff/WAL·최신/시점 복원 결과 | |
 | 다음 분기 복원 훈련/담당자 | |
