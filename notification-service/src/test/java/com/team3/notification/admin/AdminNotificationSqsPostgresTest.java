@@ -198,7 +198,8 @@ class AdminNotificationSqsPostgresTest {
         consumer.runOnce();
         assertThat(receipts()).isEqualTo(1);
         assertThat(SLACK_BODIES).hasSize(1);
-        assertThat(mapper.readTree(SLACK_BODIES.getFirst()).path("text").asString()).contains("EMPLOYMENT24", "2026-10-27", "1,203", "88", "139,201", "4");
+        assertThat(mapper.readTree(SLACK_BODIES.getFirst()).path("text").asString())
+                .contains("데이터 유형: 고용24", "수집일: 2026-10-27", "신규: 1,203건", "갱신: 88건", "변경 없음: 139,201건", "실패: 4건");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM consumed_messages", Long.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications", Long.class)).isZero();
     }
@@ -228,8 +229,10 @@ class AdminNotificationSqsPostgresTest {
         }
         assertThat(receipts()).isEqualTo(2);
         assertThat(SLACK_BODIES).hasSize(2);
-        assertThat(SLACK_BODIES.getFirst()).contains("정기 수집 · 실패", "2026-10-27", "소요 7분 00.000초");
-        assertThat(SLACK_BODIES.getLast()).contains("수동 재시도 · 성공", "2026-10-27", "실행 #8");
+        assertThat(mapper.readTree(SLACK_BODIES.getFirst()).path("text").asString())
+                .contains("수집일: 2026-10-27", "상태: 실패").doesNotContain("실행", "소요", "페이지");
+        assertThat(mapper.readTree(SLACK_BODIES.getLast()).path("text").asString())
+                .contains("수집일: 2026-10-27", "상태: 성공").doesNotContain("실행", "소요", "페이지");
         verify(sqs, times(4)).deleteMessage(any(DeleteMessageRequest.class));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications", Long.class)).isZero();
     }

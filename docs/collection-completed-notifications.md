@@ -62,7 +62,8 @@ envelope는 schemaVersion=2, messageId, eventType=COLLECTION_COMPLETED, correlat
 운영 SQL·실제 env·외부 API·AWS·Slack 자원은 이번 변경으로 적용하지 않는다.
 
 1단계는 수집·재시도 API·메시지 보존까지다. 2단계 Publisher는 별도 관리자 SQS 큐에 발행하며 기본 비활성이다.
-3단계 notification-service가 v1/v2를 수신하고 Slack에 최종 결과·소요시간을 표시한다.
+3단계 notification-service가 v1/v2를 수신하고 Slack에 수집일·유형·4종 집계·최종 결과를 한국어로 표시한다.
+소요시간 등 나머지 v2 필드는 계약 검증에 유지하며 표시 형식은 [관리자 알림 안내](collection-admin-notifications.md)를 따른다.
 Consumer를 먼저 올린 뒤 v2 생산자를 배포하고 별도 큐·DLQ·IAM·Webhook 준비 후 활성화한다.
 사용자 Consumer는 이 메시지를 처리할 수 없다.
 

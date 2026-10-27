@@ -28,12 +28,12 @@ class SlackWebhookSenderTest {
             var body = mapper.readTree(received.get());
             assertThat(body.size()).isEqualTo(1);
             assertThat(body.path("text").asString()).isEqualTo(
-                    "[수집 완료] EMPLOYMENT24 2026-10-27 · 새 1,203 · 교체 88 · 유지 139,201 · 실패 4");
+                    "[수집 결과]\n수집일: 2026-10-27\n데이터 유형: 고용24\n신규: 1,203건\n갱신: 88건\n변경 없음: 139,201건\n실패: 4건");
         } finally { server.stop(0); }
     }
 
     @Test
-    void displaysV2ExecutionKindFinalOutcomeAndElapsedTime() throws Exception {
+    void displaysOnlyRequestedSummaryFieldsAndTranslatesEveryOutcome() throws Exception {
         var received = new AtomicReference<String>();
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/webhook-secret", exchange -> {
@@ -45,17 +45,19 @@ class SlackWebhookSenderTest {
             var fixture = CollectionCompletedMessageTest.v2Fixture();
             sender.send(CollectionCompletedMessage.decode(mapper, fixture));
             assertThat(mapper.readTree(received.get()).path("text").asString()).isEqualTo(
-                    "[수동 재시도 · 부분 실패] EMPLOYMENT24 2026-10-27 · 실행 #7 · 새 1,203 · 교체 88 · 유지 139,201 · 레코드 실패 4 · 페이지 실패 1 · 소요 7분 00.000초");
+                    "[수집 결과]\n수집일: 2026-10-27\n데이터 유형: 고용24\n신규: 1,203건\n갱신: 88건\n변경 없음: 139,201건\n실패: 4건\n상태: 부분 성공");
             var successful = fixture.replace("PARTIAL_SUCCESS", "SUCCESS").replace("\"failedCount\": 4", "\"failedCount\": 0")
                     .replace("\"failedPageCount\": 1", "\"failedPageCount\": 0");
-            sender.send(CollectionCompletedMessage.decode(mapper, successful));
-            assertThat(received.get()).contains("수동 재시도 · 성공");
+            sender.send(CollectionCompletedMessage.decode(mapper, successful.replace("EMPLOYMENT24", "YOUTH_POLICY")));
+            assertThat(mapper.readTree(received.get()).path("text").asString())
+                    .contains("데이터 유형: 청년 정책", "상태: 성공")
+                    .doesNotContain("실행", "페이지", "소요", "MANUAL_RETRY", "jobId", "durationMillis");
             sender.send(CollectionCompletedMessage.decode(mapper, fixture.replace("MANUAL_RETRY", "SCHEDULED")
                     .replace("PARTIAL_SUCCESS", "FAILED")));
-            assertThat(received.get()).contains("정기 수집 · 실패");
+            assertThat(mapper.readTree(received.get()).path("text").asString()).contains("상태: 실패");
             sender.send(CollectionCompletedMessage.decode(mapper, fixture.replace("MANUAL_RETRY", "MANUAL")
                     .replace("PARTIAL_SUCCESS", "INTERRUPTED")));
-            assertThat(received.get()).contains("수동 수집 · 중단");
+            assertThat(mapper.readTree(received.get()).path("text").asString()).contains("상태: 중단");
         } finally { server.stop(0); }
     }
 

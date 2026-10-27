@@ -25,27 +25,24 @@ public class SlackWebhookSender implements AutoCloseable {
 
     public void send(CollectionCompletedMessage message) {
         var result = message.payload();
+        var source = switch (result.dataSource()) {
+            case "YOUTH_POLICY" -> "청년 정책";
+            case "EMPLOYMENT24" -> "고용24";
+            default -> throw new IllegalArgumentException("INVALID_COLLECTION_COMPLETED_PAYLOAD");
+        };
         var text = String.format(Locale.ROOT,
-                "[수집 완료] %s %s · 새 %,d · 교체 %,d · 유지 %,d · 실패 %,d",
-                result.dataSource(), result.collectedDate(), result.newCount(), result.updatedCount(),
+                "[수집 결과]\n수집일: %s\n데이터 유형: %s\n신규: %,d건\n갱신: %,d건\n변경 없음: %,d건\n실패: %,d건",
+                result.collectedDate(), source, result.newCount(), result.updatedCount(),
                 result.unchangedCount(), result.failedCount());
         if (message.schemaVersion() == 2) {
-            var type = switch (result.syncType()) {
-                case "SCHEDULED" -> "정기 수집";
-                case "MANUAL" -> "수동 수집";
-                default -> "수동 재시도";
-            };
             var outcome = switch (result.status()) {
                 case "SUCCESS" -> "성공";
-                case "PARTIAL_SUCCESS" -> "부분 실패";
+                case "PARTIAL_SUCCESS" -> "부분 성공";
                 case "FAILED" -> "실패";
-                default -> "중단";
+                case "INTERRUPTED" -> "중단";
+                default -> throw new IllegalArgumentException("INVALID_COLLECTION_COMPLETED_PAYLOAD");
             };
-            text = String.format(Locale.ROOT,
-                    "[%s · %s] %s %s · 실행 #%d · 새 %,d · 교체 %,d · 유지 %,d · 레코드 실패 %,d · 페이지 실패 %,d · 소요 %d분 %02d.%03d초",
-                    type, outcome, result.dataSource(), result.collectedDate(), result.jobId(), result.newCount(),
-                    result.updatedCount(), result.unchangedCount(), result.failedCount(), result.failedPageCount(),
-                    result.durationMillis() / 60_000, result.durationMillis() / 1_000 % 60, result.durationMillis() % 1_000);
+            text += "\n상태: " + outcome;
         }
         var request = HttpRequest.newBuilder(webhook).timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json; charset=utf-8")
