@@ -143,6 +143,20 @@ cd ~/yon-db
 { echo 'SET ROLE application_user;'; cat sql/normalization-notifications.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1
 ```
 
+### D. 정규화 ID 시퀀스 준비 (데이터가 있는 DB에 시퀀스 ID 버전 data-service를 처음 배포하기 전 한 번)
+
+정규화 엔티티 ID를 IDENTITY → 시퀀스로 바꾼 버전(docs/ingest-write-tuning.md)을 처음 배포하기 **전에** 실행한다. 빠뜨리면 시퀀스가 1부터 만들어져 정규화가 PK 충돌로 멈춘다. 새 DB는 필요 없다.
+
+```bash
+scp database/scripts/opportunity-id-sequences.sql database/scripts/opportunity-id-identity-rollback.sql ubuntu@<DB 서버>:~/yon-db/sql/
+```
+DB 서버에서:
+```bash
+cd ~/yon-db
+{ echo 'SET ROLE application_user;'; cat sql/opportunity-id-sequences.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1
+```
+IDENTITY 버전으로 되돌릴 때는 이전 버전을 띄우기 전에 같은 방식으로 `sql/opportunity-id-identity-rollback.sql`을 실행한다.
+
 ### 백업
 
 DB는 DB 서버의 도커 볼륨(`yon-db_postgres_data`)에 있다. 인스턴스를 지우면 함께 사라진다.
