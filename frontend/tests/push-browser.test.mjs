@@ -25,9 +25,10 @@ test('Chrome with missing Firebase configuration disables enable and makes no pe
     const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});client.setQueryData(['auth','user'],user);
     const root=createRoot(document.querySelector('#root'));root.render(<QueryClientProvider client={client}><PushControls owner={user} settings={settings} disabled={false}/></QueryClientProvider>);
     try{
-      for(let i=0;i<1200&&!document.querySelector('#push-config-help');i++)await new Promise(resolve=>setTimeout(resolve,10));
-      const button=Array.from(document.querySelectorAll('button')).find(button=>button.textContent.includes('이 브라우저 푸시 연결'));
-      if(!document.querySelector('#push-config-help')||!button?.disabled)throw Error('missing config must disable enable: '+document.body.textContent.slice(0,1200)+' | '+JSON.stringify(client.getQueryCache().getAll().map(query=>({key:query.queryKey,status:query.state.status,error:query.state.error?.message}))));
+      const configHelp=()=>document.body.textContent.includes('지금은 푸시 알림을 사용할 수 없어요.');
+      for(let i=0;i<1200&&!configHelp();i++)await new Promise(resolve=>setTimeout(resolve,10));
+      const button=Array.from(document.querySelectorAll('button')).find(button=>button.textContent.trim()==='이 브라우저 연결');
+      if(!configHelp()||!button?.disabled)throw Error('missing config must disable enable: '+document.body.textContent.slice(0,1200)+' | '+JSON.stringify(client.getQueryCache().getAll().map(query=>({key:query.queryKey,status:query.state.status,error:query.state.error?.message}))));
       button.click();await new Promise(resolve=>setTimeout(resolve,50));
       document.querySelector('#result').textContent=JSON.stringify({ok:permissions===0&&workers===0&&requests===0,permissions,workers,requests});
     }catch(error){document.querySelector('#result').textContent=JSON.stringify({ok:false,error:String(error)})}

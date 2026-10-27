@@ -71,8 +71,10 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
       ensure(document.documentElement.scrollWidth<=innerWidth,'horizontal overflow');
       if(route==='/'){
         const hero=document.querySelector('section[aria-labelledby="home-title"]');
-        ensure(!hero.querySelector('form')&&hero.textContent.includes('맞춤 추천 보기'),'compact hero without duplicate search');
-        ensure(hero.querySelector('a[href="/opportunities"]')&&hero.querySelector('a[href="#recommendations"]')&&document.querySelector('#recommendations'),'real hero CTA destinations');
+        ensure(!hero.querySelector('form'),'compact hero without duplicate search');
+        // '맞춤 추천 보기'는 맞춤 조건이 확인된 로그인 사용자에게만 보인다. 비로그인은 추천 영역의 로그인 안내를 사용한다.
+        const recommend=hero.querySelector('a[href="#recommendations"]');
+        ensure(hero.querySelector('a[href="/opportunities"]')&&document.querySelector('#recommendations')&&(anonymous?!recommend&&!hero.textContent.includes('맞춤 추천 보기'):recommend?.textContent.includes('맞춤 추천 보기')),'real hero CTA destinations');
         if(anonymous){const intro=document.querySelector('[class*="recommendationIntro"]');ensure(intro&&intro.querySelectorAll('a').length===1&&intro.querySelector('a').getAttribute('href')==='/login?returnTo=%2F'&&getComputedStyle(intro).borderTopWidth==='0px','single-card anonymous recommendation');}
         if(state==='empty')ensure(document.querySelector('main').textContent.includes('아직 등록된 기회가 없어요'),'home empty state');
         if(state==='error')ensure(document.querySelector('main [role="alert"]')?.textContent.includes('네트워크 연결을 확인해 주세요'),'home network error');
@@ -100,9 +102,9 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
       }else{
         ensure(getComputedStyle(nav).display!=='none','desktop navigation');
         if(route==='/opportunities/42'){
-          const columns=document.querySelector('main article > div:last-child');
-          const body=columns.querySelector('[class*="mainContent"]');
-          ensure(rect(columns.querySelector('aside')).left>=rect(body).right&&rect(columns.firstElementChild).left>=rect(body).right,'detail summary side column');
+          const columns=document.querySelector('main article > [class*="columns"]');
+          const body=columns?.querySelector(':scope > [class*="mainContent"]'),summary=columns?.querySelector(':scope > [class*="summary"]');
+          ensure(body&&summary&&rect(summary).left>=rect(body).right,'detail summary side column');
         }
         const form=document.querySelector('header form'),input=form.querySelector('input');
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'테스트');form.requestSubmit();

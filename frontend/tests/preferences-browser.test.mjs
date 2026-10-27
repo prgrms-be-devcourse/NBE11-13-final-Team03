@@ -60,16 +60,16 @@ test('Chrome verifies saved paging/removal, detail and search save changes, reco
     const action=label=>Array.from(document.querySelectorAll('button')).find(element=>element.getAttribute('aria-label')===label);
     const menu=text=>Array.from(document.querySelectorAll('header nav a')).find(element=>element.textContent===text);
     try{
-      await wait(()=>action('테스트 저장 공고 42 저장 해제'));button('다음').click();
-      await wait(()=>action('테스트 저장 공고 62 저장 해제'));
+      await wait(()=>action('테스트 저장 공고 42 저장됨, 저장 해제'));button('다음').click();
+      await wait(()=>action('테스트 저장 공고 62 저장됨, 저장 해제'));
       ensure(document.querySelector('button[aria-current=page]').textContent==='2','0-based page displayed as 2');
-      action('테스트 저장 공고 62 저장 해제').click();action('테스트 저장 공고 62 저장 해제')?.click();
-      await wait(()=>action('테스트 저장 공고 42 저장 해제')&&button('다음').disabled);
+      action('테스트 저장 공고 62 저장됨, 저장 해제').click();action('테스트 저장 공고 62 저장됨, 저장 해제')?.click();
+      await wait(()=>action('테스트 저장 공고 42 저장됨, 저장 해제')&&button('다음').disabled);
       ensure(!saved.has(62)&&document.querySelector('button[aria-current=page]').textContent==='1','last item page correction');
       const detail=Array.from(document.querySelectorAll('main a')).find(a=>a.getAttribute('href')==='/opportunities/42');detail.click();
-      await wait(()=>action(policy.title+' 저장 해제')&&!action(policy.title+' 저장 해제').disabled);
-      action(policy.title+' 저장 해제').click();await wait(()=>action(policy.title+' 저장')&&!action(policy.title+' 저장').disabled);
-      action(policy.title+' 저장').click();await wait(()=>action(policy.title+' 저장 해제')&&!action(policy.title+' 저장 해제').disabled);
+      await wait(()=>action(policy.title+' 저장됨, 저장 해제')&&!action(policy.title+' 저장됨, 저장 해제').disabled);
+      action(policy.title+' 저장됨, 저장 해제').click();await wait(()=>action(policy.title+' 저장하기')&&!action(policy.title+' 저장하기').disabled);
+      action(policy.title+' 저장하기').click();await wait(()=>action(policy.title+' 저장됨, 저장 해제')&&!action(policy.title+' 저장됨, 저장 해제').disabled);
       ensure(calls.some(call=>call.url==='/opportunities/42/save'&&call.method==='post'&&call.params.source==='OTHER'),'detail save source');
       menu('홈').click();await wait(()=>action(recommendation.title+' 추천에서 숨기기')&&!action(recommendation.title+' 추천에서 숨기기').disabled);
       await wait(()=>action(latest.title+' 저장 해제')&&!action(latest.title+' 저장 해제').disabled);
@@ -89,10 +89,10 @@ test('Chrome verifies saved paging/removal, detail and search save changes, reco
       ensure(hidden.has(42)&&!saved.has(42),'unsave must preserve hidden state');
       action(latest.title+' 저장').click();await wait(()=>action(latest.title+' 저장 해제')&&!action(latest.title+' 저장 해제').disabled);
       ensure(calls.some(call=>call.url==='/opportunities/42/save'&&call.method==='post'&&call.params.source==='SEARCH'),'search source');
-      menu('저장한 기회').click();await wait(()=>action('테스트 저장 공고 42 저장 해제'));
+      menu('저장한 기회').click();await wait(()=>action('테스트 저장 공고 42 저장됨, 저장 해제'));
       button('로그아웃').click();await wait(()=>document.querySelector('#home-title')&&Array.from(document.querySelectorAll('header a')).some(a=>a.textContent==='로그인'));
-      menu('기회 탐색').click();await wait(()=>document.querySelector('#search-title')&&Array.from(document.querySelectorAll('main a')).some(a=>a.getAttribute('aria-label')===latest.title+' 저장하려면 로그인'));
-      const login=Array.from(document.querySelectorAll('main a')).find(a=>a.getAttribute('aria-label')===latest.title+' 저장하려면 로그인');
+      menu('기회 탐색').click();await wait(()=>document.querySelector('#search-title')&&Array.from(document.querySelectorAll('main a')).some(a=>a.getAttribute('aria-label')===latest.title+' 저장 안 함, 저장하려면 로그인'));
+      const login=Array.from(document.querySelectorAll('main a')).find(a=>a.getAttribute('aria-label')===latest.title+' 저장 안 함, 저장하려면 로그인');
       ensure(login.getAttribute('href')==='/login?returnTo=%2Fopportunities','anonymous return');
       ensure(!calls.some(call=>call.url.includes('behavior')),'no duplicate behavior event');
       ensure(calls.filter(call=>call.url==='/opportunities/62/save'&&call.method==='delete').length===1,'duplicate removal');
