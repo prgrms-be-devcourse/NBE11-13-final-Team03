@@ -20,6 +20,8 @@ body {
 #root {
   min-inline-size: 0;
   min-block-size: 100svh;
+  display: flex;
+  flex-direction: column;
 }
 
 h1,

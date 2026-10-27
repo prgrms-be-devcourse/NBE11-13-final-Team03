@@ -1,0 +1,21 @@
+.arrowLink {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  justify-self: start;
+  gap: var(--space-1);
+  min-block-size: 2.75rem;
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.arrowLink:hover {
+  color: var(--color-primary-dark);
+  text-decoration: underline;
+}
+
+.arrowLink > svg {
+  flex-shrink: 0;
+}

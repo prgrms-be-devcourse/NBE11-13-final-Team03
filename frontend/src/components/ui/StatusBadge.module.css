@@ -3,7 +3,7 @@
   max-inline-size: 100%;
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   font-size: var(--font-size-small);
   font-weight: 600;
   line-height: var(--line-height-small);
@@ -12,17 +12,17 @@
 
 .ELIGIBLE {
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-dark);
 }
 
 .POSSIBLY_ELIGIBLE {
-  background: var(--color-accent-yellow);
-  color: var(--color-text-primary);
+  background: var(--color-status-warning-soft);
+  color: var(--color-status-warning-text);
 }
 
 .NOT_ELIGIBLE {
-  background: var(--color-surface-muted);
-  color: var(--color-text-primary);
+  background: var(--color-status-muted-soft);
+  color: var(--color-status-muted-text);
 }
 
 .UNKNOWN {

@@ -4,7 +4,7 @@
 
 Y:ON 프런트엔드 API 통신 기반의 백엔드 계약, CSRF 처리, 토큰 재발급과 장애 복구 정책을 설명한다. 개발 환경 실행 방법은 [프런트엔드 README](../README.md)를 참고한다.
 
-현재 공통 클라이언트와 QueryClientProvider를 구성한 상태다. 실제 페이지의 API 함수·쿼리 훅·데이터 연결과 로그인 UI는 아직 구현하지 않았다. 이 문서의 코드·모의 테스트 확인 결과는 실제 브라우저 인증 통합을 보장하지 않는다.
+공통 클라이언트와 QueryClientProvider를 기반으로 홈·검색·상세 및 로그인 UI를 연결했다. 이 문서는 통신 기반의 내부 정책을 유지하며 현재 로그인·로그아웃·사용자 상태 연결은 [인증 UI 문서](auth.md)에서 설명한다. 코드·모의 테스트 확인 결과는 실제 브라우저 인증 통합을 보장하지 않는다.
 
 ## 2. 확인한 백엔드 인증·CSRF 계약
 
@@ -117,7 +117,9 @@ CSRF 토큰 값 자체를 캐싱하지 않는다. 로그인이나 재발급으�
 | 재발급 401·403 등 비일시적 실패 | 같은 인증 상태에서 실패를 계속 공유해 자동 반복을 막는다. 403의 원인을 인증 만료로 단정하지 않는다. |
 | 확인된 재로그인 후 `resetAuthRecovery()` 호출 | 인증 세션·세대를 변경하고 이전 실패를 해제한다. 진행 중인 이전 재발급을 취소하며 이전 세션의 지연된 401이 새 사용자 세션에서 재전송되지 않게 한다. |
 
-`resetAuthRecovery()`는 서버에서 재로그인 성공을 확인한 뒤에만 호출한다. 단순 401이나 네트워크 오류 때 호출해서는 안 된다. 이 함수 자체가 로그인하거나 쿠키를 발급하는 것은 아니다. 실제 로그인 완료 흐름과의 연결은 후속 로그인 구현에서 수행한다.
+`resetAuthRecovery()`는 서버에서 재로그인 성공을 확인한 뒤에만 호출한다. 단순 401이나 네트워크 오류 때 호출해서는 안 된다. 이 함수 자체가 로그인하거나 쿠키를 발급하는 것은 아니다.
+
+현재 로그인 완료에서는 새 쿠키의 `/users/me`를 자동 재발급 없이 직접 확인한 뒤에 이 함수를 연결한다. 서버 로그아웃 204 확인 뒤에는 별도의 `endAuthSession()`으로 이전 세션의 진행 중 재발급·지연된 401을 차단한다. 두 함수는 내부 세션 전이만 공유하며 호출 근거를 구분한다.
 
 ### 회귀 테스트 결과
 
@@ -129,9 +131,9 @@ CSRF 토큰 값 자체를 캐싱하지 않는다. 로그인이나 재발급으�
 
 ## 7. OAuth 로그인 연동 시 확인할 사항
 
-로그인 시작은 `/oauth2/authorization/kakao`, 콜백은 `/login/oauth2/code/kakao`다. [OAuth2SuccessHandler](../../backend/src/main/java/com/team3/backend/auth/oauth2/OAuth2SuccessHandler.java)와 [OAuth2FailureHandler](../../backend/src/main/java/com/team3/backend/auth/oauth2/OAuth2FailureHandler.java)는 각각 `/login-success.html`, `/login-failure.html`로 이동한다. 현재 백엔드 리소스에는 해당 HTML이 없고 프런트엔드에도 완료 경로가 없다.
+로그인 시작은 `/oauth2/authorization/kakao`, 콜백은 `/login/oauth2/code/kakao`다. [OAuth2SuccessHandler](../../backend/src/main/java/com/team3/backend/auth/oauth2/OAuth2SuccessHandler.java)와 [OAuth2FailureHandler](../../backend/src/main/java/com/team3/backend/auth/oauth2/OAuth2FailureHandler.java)는 각각 `/login-success.html`, `/login-failure.html`로 이동한다. 백엔드 리소스에 의존하지 않고 프런트엔드에 두 HTML 진입점과 완료 경로를 구성했다.
 
-로그인 UI와 OAuth 개발 프록시는 아직 추가하지 않았다. 로그인 구현 전에 리다이렉트 목적지와 카카오에 등록할 콜백 출처를 백엔드와 합의해야 한다. 확인된 로그인 성공 시점에 `resetAuthRecovery()`를 연결하고, 실제 쿠키 적용 및 이전 요청 정리도 함께 검증해야 한다.
+OAuth 개발 프록시는 프런트엔드 Host를 유지한다. 사용자 정보 200 확인 뒤 `resetAuthRecovery()`와 캐시 정리를 연결했다. 리다이렉트 목적지·카카오에 등록할 콜백 출처·운영 프록시 및 실제 쿠키 적용은 백엔드 담당자와 합의·통합 검증해야 한다. 자세한 순서와 예외는 [인증 UI 문서](auth.md)를 따른다.
 
 ## 8. 검증 결과와 미검증 범위
 
@@ -149,10 +151,10 @@ CSRF 토큰 값 자체를 캐싱하지 않는다. 로그인이나 재발급으�
 
 ## 9. 알려진 한계 및 후속 개선 사항
 
-- 실제 화면의 API 함수·쿼리 훅·데이터 연결, 로그인 UI·완료 경로와 초기화 함수 연결은 후속 작업이다.
-- 후속 로그인 구현에서는 서버의 로그인 성공과 인증 쿠키 적용을 확인한 뒤 `resetAuthRecovery()`를 호출해야 한다. 단순 로그인 화면 진입·리다이렉트 시작·401·통신 오류를 성공으로 간주해 호출하지 않는다. 이전 실패 해제와 이전 세션의 재발급 취소·지연된 401 차단을 로그인 완료 흐름에서도 검증해야 한다.
+- 실제 화면과 로그인 UI·완료 경로·초기화 함수 연결을 구현했다. 실제 브라우저·카카오·쿠키 통합은 후속 검증이다.
+- 로그인 완료는 사용자 정보 200 확인 뒤 `resetAuthRecovery()`를 호출한다. 단순 로그인 화면 진입·리다이렉트 시작·401·통신 오류를 성공으로 간주하지 않는다. 이전 실패 해제·이전 세션 재발급 취소·지연된 401 차단은 기존 및 인증 연결 회귀 테스트로 확인하며 실제 쿠키 동작은 별도 검증한다.
 - 전용 CSRF 발급 API가 없어 공개 관심 분야 조회에 의존한다. 필요하면 백엔드에서 공개 토큰 발급 경로를 제공하는 방안을 검토한다. 현재 처리를 위해 CSRF 보호를 끄거나 예외 경로를 추가할 필요는 없다.
 - Security 필터의 403을 일관된 JSON `ErrorResponse`로 제공하는 방안을 검토한다. 프런트엔드는 현재도 다른 형식의 403을 처리한다.
 - 여러 브라우저 탭 사이의 재발급 조율과 응답 유실 시 Refresh Token 회전 문제는 별도 검토가 필요하다.
-- [Vite 설정](../vite.config.ts)의 `/api` 프록시는 개발 서버 전용이다. 기본 대상은 `http://localhost:8080`이며 [.env.example](../.env.example)의 `BACKEND_URL`로 변경한다. 경로 rewrite나 브라우저용 `VITE_` 변수를 사용하지 않는다. preview·실제 배포에는 별도 동일 출처 `/api` 서버 연결이 필요하다.
+- [Vite 설정](../vite.config.ts)의 API·OAuth 프록시는 개발 서버 전용이다. 기본 대상은 `http://localhost:8080`이며 [.env.example](../.env.example)의 `BACKEND_URL`로 변경한다. 경로 rewrite나 브라우저용 `VITE_` 변수를 사용하지 않는다. preview·실제 배포에는 별도 동일 출처 연결과 프런트엔드 완료 HTML 제공이 필요하다.
 - 배포 환경의 HTTPS·쿠키 속성과 OAuth 콜백 출처를 실제 브라우저에서 확인해야 한다.
