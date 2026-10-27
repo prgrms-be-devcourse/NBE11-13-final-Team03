@@ -90,6 +90,8 @@ yon:
     replica:
       # 복제본 연결을 이 시간 안에 못 얻으면 primary로 대신 연결한다
       connection-timeout-ms: 2000
+      # 복제본 연결에 실패하면 이 시간 동안은 복제본을 건너뛰고 바로 primary를 쓴다 (장애 중 요청마다 대기 시간이 붙지 않게)
+      failure-cooldown-ms: 30000
       transaction-prefixes:
   eligibility:
     # 판정 결과 제공 방식. local: 같은 애플리케이션 안에서 직접 호출 (MSA 전환 시 원격 구현을 추가하고 값을 바꾼다)

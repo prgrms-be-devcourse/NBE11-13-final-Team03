@@ -5,6 +5,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -12,6 +14,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.jdbc.datasource.LazyConnectionDataSourceProxy;
 
 import javax.sql.DataSource;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -24,6 +27,9 @@ import java.util.List;
 @ConditionalOnExpression("'${DB_REPLICA_URL:}' != ''")
 public class ReadReplicaDataSourceConfig {
 
+    /** 기동 검증(ApplicationDatabaseBoundaryConfig)이 복제본 풀을 구분하는 빈 이름 */
+    static final String REPLICA_BEAN = "replicaDataSource";
+
     static final List<String> DEFAULT_PREFIXES = List.of(
             "com.team3.backend.search.service.OpportunitySearchService.",
             "com.team3.backend.search.service.OpportunityDetailService.",
@@ -35,26 +41,36 @@ public class ReadReplicaDataSourceConfig {
         return pool(environment, environment.getRequiredProperty("spring.datasource.url"), "primary");
     }
 
-    @Bean
-    @ConfigurationProperties("spring.datasource.hikari")
+    /**
+     * 공통 hikari 설정을 먼저 바인딩한 뒤 복제본 전용 값을 덮어쓴다.
+     * (@ConfigurationProperties는 빈 메서드 뒤에 바인딩되어, yaml에 connection-timeout·read-only가 생기면 아래 값을 덮어쓰게 된다)
+     */
+    @Bean(REPLICA_BEAN)
     HikariDataSource replicaDataSource(Environment environment,
                                        @Value("${DB_REPLICA_URL}") String replicaUrl,
                                        @Value("${yon.datasource.replica.connection-timeout-ms:2000}") long connectionTimeoutMs) {
         HikariDataSource replica = pool(environment, replicaUrl, "replica");
+        Binder.get(environment).bind("spring.datasource.hikari", Bindable.ofInstance(replica));
+        replica.setPoolName("replica");
         replica.setReadOnly(true);
         // 복제본이 죽었을 때 primary로 넘어가기까지 사용자 요청이 오래 기다리지 않게 짧게 둔다
         replica.setConnectionTimeout(connectionTimeoutMs);
+        // 풀을 만들 때 연결을 시도하지 않는다. 복제본이 꺼진 채 첫 조회가 와도 PoolInitializationException(RuntimeException) 대신
+        // 연결 실패(SQLException)로 나와 primary로 넘어간다
+        replica.setInitializationFailTimeout(-1);
         return replica;
     }
 
     @Bean
     @Primary
     DataSource dataSource(@Qualifier("primaryDataSource") DataSource primary,
-                          @Qualifier("replicaDataSource") DataSource replica,
-                          @Value("${yon.datasource.replica.transaction-prefixes:}") List<String> prefixes) {
+                          @Qualifier(REPLICA_BEAN) DataSource replica,
+                          @Value("${yon.datasource.replica.transaction-prefixes:}") List<String> prefixes,
+                          @Value("${yon.datasource.replica.failure-cooldown-ms:30000}") long failureCooldownMs) {
         List<String> routed = prefixes.stream().filter(prefix -> !prefix.isBlank()).toList();
-        return new LazyConnectionDataSourceProxy(
-                new ReadReplicaRoutingDataSource(primary, replica, routed.isEmpty() ? DEFAULT_PREFIXES : routed));
+        return new LazyConnectionDataSourceProxy(new ReadReplicaRoutingDataSource(primary, replica,
+                routed.isEmpty() ? DEFAULT_PREFIXES : routed, Duration.ofMillis(failureCooldownMs),
+                () -> System.nanoTime() / 1_000_000));
     }
 
     private static HikariDataSource pool(Environment environment, String url, String poolName) {
