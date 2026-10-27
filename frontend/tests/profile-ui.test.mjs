@@ -30,9 +30,10 @@ function renderComponent(component, props) {
   finally { client.clear() }
 }
 
-function render({ path = '/mypage', auth = user, profileData = profile, interests = [], optionData = options, error, optionError, regionData, regionError } = {}) {
+function render({ path = '/mypage', auth = user, authFetching = false, profileData = profile, interests = [], optionData = options, error, optionError, regionData, regionError } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Infinity, gcTime: Infinity } } })
   client.setQueryData(['auth', 'user'], auth)
+  if (authFetching) client.getQueryCache().find({ queryKey: ['auth', 'user'] }).setState({ fetchStatus: 'fetching' })
   if (error) client.getQueryCache().build(client, { queryKey: ['profile', user.id] }).setState({ status: 'error', error, fetchStatus: 'idle' })
   else client.setQueryData(['profile', user.id], profileData)
   client.setQueryData(['user-interests', user.id], interests)
@@ -43,6 +44,18 @@ function render({ path = '/mypage', auth = user, profileData = profile, interest
   try { return renderToStaticMarkup(e(QueryClientProvider, { client }, e(MemoryRouter, { initialEntries: [path] }, e(AppRoutes)))) }
   finally { client.clear() }
 }
+
+test('actual Provider and ProfileGate keep profile and interest forms rendered during confirmed-user background verification', () => {
+  for (const path of ['/mypage/profile', '/mypage/interests', '/onboarding']) {
+    const before = render({ path, regionData: regionRows })
+    const refreshing = render({ path, authFetching: true, regionData: regionRows })
+    assert.match(before, /<form/)
+    assert.match(refreshing, /<form/)
+    assert.doesNotMatch(refreshing, /로그인 상태를 확인하고 있어요|로그인이 필요해요/)
+    if (path === '/mypage/interests') assert.match(refreshing, /관심 분야 저장/)
+    else assert.match(refreshing, /생년월일 \(필수\)/)
+  }
+})
 test('all profile routes require confirmed auth and never expose cached personal information to anonymous users', () => {
   for (const path of ['/mypage', '/onboarding', '/mypage/profile', '/mypage/interests']) {
     const html = render({ path, auth: null })

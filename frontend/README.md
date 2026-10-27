@@ -90,6 +90,8 @@ await apiClient.get('/users/me', { requiresAuth: true })
 
 검색·상세·홈에서 저장·해제, 개인화 추천에서 숨김, `/saved`에서 저장 목록을 제공한다.
 
+통합 검색에서 인증 사용자용 신청 가능성 복수 선택 필터를 제공한다.
+
 `/notifications`에서 알림 목록·읽음·클릭 처리, 헤더에서 미읽음 수, `/settings/notifications`에서 인앱 알림 설정을 제공한다. 계약과 검증 범위는 [알림 문서](docs/notifications.md)를 참고한다.
 
 같은 설정 화면에 FCM 웹 푸시 연결·해제를 구현했다. 실제 Firebase 웹 앱 설정과 VAPID 공개 키가 없으면 연결을 비활성화한다. 환경변수와 제한 사항은 [FCM 문서](docs/fcm.md)를 참고한다.
@@ -98,7 +100,7 @@ await apiClient.get('/users/me', { requiresAuth: true })
 
 **미구현**
 
-숨김 해제는 조회 API 부재로 UI를 제공하지 않는다. 신청 가능성 검색 필터는 미구현이다.
+숨김 해제는 조회 API 부재로 UI를 제공하지 않는다.
 
 **실서버 미검증**
 

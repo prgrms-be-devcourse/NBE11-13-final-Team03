@@ -13,6 +13,7 @@ import { parsePushClick, pushTarget, pushClickPath } from '../src/push/protocol.
 import { safeReturnPath, loginPath } from '../src/auth/returnPath.ts'
 import { changePushIdentity, releasePushSession, pushLock } from '../src/push/lifecycle.ts'
 import { createAuthActions, authQueryKey } from '../src/auth/session.ts'
+import { getNotificationSettings, putNotificationSettings, runNotificationChange } from '../src/api/notifications.ts'
 
 const adapter = apiClient.defaults.adapter, descriptors = Object.fromEntries(['document', 'localStorage', 'navigator'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
 afterEach(() => {
@@ -215,6 +216,116 @@ function sessionFixture() {
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'XSRF-TOKEN=test-push' } })
   return { store: () => parsePushStore(value), unsubscribed: () => unsubscribed }
 }
+
+function orphanFixture({ raw = null, subscribed = true, worker = true, locks = true } = {}) {
+  let active = subscribed, unsubscribes = 0, foreignReads = 0, inspections = 0
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => raw, setItem: (_key, next) => { raw = next } } })
+  const own = { scope: 'https://yon.test/assets/yon-fcm-push/', pushManager: { getSubscription: async () => active ? { unsubscribe: async () => { unsubscribes++; active = false; return true } } : null }, getNotifications: async () => [] }
+  const foreign = { scope: 'https://yon.test/unrelated/', pushManager: { getSubscription: async () => { foreignReads++; throw Error('unrelated subscription must stay untouched') } } }
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {
+    ...(locks ? { locks: { request: async (_name, _options, work) => work({}) } } : {}),
+    ...(worker ? { serviceWorker: { getRegistrations: async () => { inspections++; return [own, foreign] } } } : {}),
+  } })
+  return { active: () => active, unsubscribes: () => unsubscribes, foreignReads: () => foreignReads, inspections: () => inspections }
+}
+
+for (const action of ['account-change', 'logout']) test(`missing push ownership metadata: ${action} revokes only the dedicated browser subscription without inventing endpoint IDs`, async () => {
+  const f = orphanFixture()
+  apiClient.defaults.adapter = async () => { throw Error('unknown server endpoint must not be deleted') }
+  await (action === 'account-change' ? changePushIdentity(22) : releasePushSession(11))
+  assert.equal(f.active(), false)
+  assert.equal(f.unsubscribes(), 1)
+  assert.equal(f.foreignReads(), 0)
+})
+
+test('missing worker, absent subscription, invalid metadata and cleanup without Web Locks remain safe', async () => {
+  for (const options of [{ worker: false }, { subscribed: false }, { raw: '{broken-json' }, { locks: false }]) {
+    const f = orphanFixture(options)
+    await changePushIdentity(22)
+    await releasePushSession(22)
+    assert.equal(f.foreignReads(), 0)
+    if (options.worker === false) assert.equal(f.inspections(), 0)
+    else assert.equal(f.active(), false)
+  }
+})
+
+for (const action of ['account-change', 'logout']) test(`failed dedicated unsubscribe: ${action} rejects and retains the old binding for retry`, async () => {
+  const f = sessionFixture()
+  let fail = true
+  navigator.serviceWorker.getRegistrations = async () => [{ scope: 'https://yon.test/assets/yon-fcm-push/', pushManager: { getSubscription: async () => ({ unsubscribe: async () => !fail }) }, getNotifications: async () => [] }]
+  apiClient.defaults.adapter = async config => response(config, '', 204)
+  const run = () => action === 'account-change' ? changePushIdentity(22) : releasePushSession(11)
+  await assert.rejects(run(), /해제를 확인하지 못했어요/)
+  assert.equal(f.store().binding, 11)
+  fail = false
+  await run()
+  assert.equal(f.store().binding, null)
+})
+
+test('logout with missing ownership metadata cleans local reception before confirmed server logout', async () => {
+  const f = orphanFixture(), calls = [], client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'XSRF-TOKEN=test-only' } })
+  client.setQueryData(authQueryKey, { id: 11, role: 'USER' })
+  apiClient.defaults.adapter = async config => {
+    calls.push(config.url)
+    assert.equal(f.active(), false)
+    return response(config, '', 204)
+  }
+  try {
+    await createAuthActions(client).logout()
+    assert.deepEqual(calls, ['/auth/logout'])
+    assert.equal(client.getQueryData(authQueryKey), null)
+  } finally { client.clear() }
+})
+
+test('subscription inspection failure with lost metadata prevents cookie logout and never clears the confirmed user', async () => {
+  orphanFixture()
+  navigator.serviceWorker.getRegistrations = async () => { throw new Error('fixture subscription inspection failed') }
+  const owner = { id: 11, role: 'USER' }, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(authQueryKey, owner)
+  let requests = 0
+  apiClient.defaults.adapter = async config => { requests++; return response(config, '', 204) }
+  try {
+    await assert.rejects(createAuthActions(client).logout(), /subscription inspection failed/)
+    assert.equal(requests, 0)
+    assert.equal(client.getQueryData(authQueryKey), owner)
+  } finally { client.clear() }
+})
+
+test('automatic token reconnect and a concurrent real notification settings mutation preserve the last user save without a reconnect PUT', async () => {
+  const tokenStarted = deferred(), finishToken = deferred()
+  let settings = { inAppEnabled: true, pushEnabled: true, pushConsentAt: null, updatedAt: null }
+  const puts = [], client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
+  const owner = { id: 11, role: 'USER' }
+  client.setQueryData(authQueryKey, owner)
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'XSRF-TOKEN=test-only' } })
+  apiClient.defaults.adapter = async config => {
+    assert.equal(config.url, '/users/me/notification-settings')
+    if (config.method === 'put') {
+      const value = typeof config.data === 'string' ? JSON.parse(config.data) : config.data
+      puts.push(value); settings = { ...settings, ...value }
+    }
+    return response(config, { ...settings })
+  }
+  const f = fixture({ permission: () => 'granted', settings: getNotificationSettings, update: putNotificationSettings,
+    token: async () => { tokenStarted.resolve(); await finishToken.promise; return 'test-only-token' },
+  }, { binding: 11, users: { 11: { endpointIds: [7], phase: 'active' } } })
+  try {
+    const reconnect = f.controller.enable(false)
+    await tokenStarted.promise
+    await runNotificationChange(client, owner, { kind: 'settings', values: { inAppEnabled: false, pushEnabled: true } })
+    finishToken.resolve(); await reconnect
+    assert.deepEqual(puts, [{ inAppEnabled: false, pushEnabled: true }])
+    assert.equal(settings.inAppEnabled, false)
+    assert.equal(f.store().users[11].phase, 'active')
+    assert.ok(f.calls.includes('register'))
+    await runNotificationChange(client, owner, { kind: 'settings', values: { inAppEnabled: true, pushEnabled: false } })
+    await f.controller.enable(false)
+    assert.deepEqual(puts.at(-1), { inAppEnabled: true, pushEnabled: false })
+    assert.equal(puts.length, 2)
+    assert.ok(f.calls.includes('remove-token'))
+  } finally { finishToken.resolve(); client.clear() }
+})
 test('verified account change revokes local subscription, retains old cleanup IDs and sends no foreign authenticated DELETE', async () => {
   const f = sessionFixture()
   apiClient.defaults.adapter = async () => { throw Error('must not call old account API') }

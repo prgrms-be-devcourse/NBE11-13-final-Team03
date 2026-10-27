@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import axios, { AxiosError } from 'axios'
-import { QueryClient, QueryObserver, MutationObserver } from '@tanstack/react-query'
+import { QueryClient, QueryObserver, MutationObserver, focusManager } from '@tanstack/react-query'
 
 // 실제 session/API/Query 규칙을 결합한다. UI 경계의 이동·오류 콜백만 관찰한다.
 const originalAdapter = axios.defaults.adapter
@@ -58,6 +58,54 @@ function harness({ oauthPage = false, cachedUser = user } = {}) {
     close() { offMutation(); offQuery(); offRecommendations(); client.clear() },
   }
 }
+
+test('tab-return background auth refresh preserves the confirmed user branch; a subsequent real 401 blocks protected views', async () => {
+  browserState()
+  const started = deferred(), finish = deferred()
+  let expired = false
+  adapter = async config => {
+    if (config.url === '/users/me/recommendations') return response(config, [])
+    assert.equal(config.url, '/users/me')
+    if (expired) return fail(config, 401, 'AUTH_004')
+    started.resolve(); await finish.promise; return response(config, { ...user })
+  }
+  const h = harness(), statuses = []
+  const unsubscribe = h.query.subscribe(() => statuses.push(h.status()))
+  h.client.mount()
+  try {
+    focusManager.setFocused(false)
+    h.client.getQueryCache().find({ queryKey: authQueryKey }).setState({ dataUpdatedAt: Date.now() - 31_000 })
+    focusManager.setFocused(true)
+    await started.promise
+    assert.equal(h.query.getCurrentResult().isFetching, true)
+    assert.equal(h.status(), 'authenticated')
+    assert.equal(h.query.getCurrentResult().data, user)
+    finish.resolve(); await tick()
+    assert.equal(h.status(), 'authenticated')
+    assert.equal(h.query.getCurrentResult().data, user)
+    assert.ok(statuses.every(status => status === 'authenticated'))
+    expired = true
+    await h.query.refetch()
+    assert.equal(h.status(), 'anonymous')
+    assert.equal(h.recommendationEnabled(), false)
+  } finally { finish.resolve(); unsubscribe(); h.client.unmount(); h.close(); focusManager.setFocused(undefined) }
+})
+
+test('cached authentication is not trusted after background verification fails; initial authentication still waits', async () => {
+  browserState()
+  adapter = async config => {
+    if (config.url === '/users/me/recommendations') return response(config, [])
+    throw new AxiosError('fixture offline', 'ERR_NETWORK', config, {})
+  }
+  const h = harness()
+  try {
+    await h.query.refetch()
+    assert.equal(h.status(), 'error')
+    assert.equal(h.recommendationEnabled(), false)
+    assert.equal(authStatus({ isPending: true, isFetching: true, isError: false, data: undefined }, { isPending: false, isError: false, error: null }, false), 'checking')
+    assert.equal(authStatus({ isPending: false, isFetching: true, isError: false, data: user }, { isPending: true, isError: false, variables: 'logout', error: null }, false), 'checking')
+  } finally { h.close() }
+})
 
 test('OAuth failure and retry share the full mutation pipeline, preserve old recovery failure until verified, and navigate only after completion', async () => {
   browserState(); saveLoginReturn('/opportunities?page=2')

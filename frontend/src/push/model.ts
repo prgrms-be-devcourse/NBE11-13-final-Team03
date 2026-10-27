@@ -62,8 +62,11 @@ export function createPushController(userId: number, deps: PushDependencies) {
           await deps.deactivate(old); deps.assertOwner()
           record.endpointIds = record.endpointIds.filter(id => id !== old); deps.save(store)
         }
-        const updated = await deps.update({ inAppEnabled: settings.inAppEnabled, pushEnabled: true }); deps.assertOwner()
-        if (!updated.pushEnabled) throw new PushError('푸시 알림 켜기를 확인하지 못했어요.')
+        // 자동 재연결은 endpoint만 갱신한다. 사용자가 그 사이 저장한 설정을 덮어쓰지 않는다.
+        if (request) {
+          const updated = await deps.update({ inAppEnabled: settings.inAppEnabled, pushEnabled: true }); deps.assertOwner()
+          if (!updated.pushEnabled) throw new PushError('푸시 알림 켜기를 확인하지 못했어요.')
+        }
         record.phase = 'active'; deps.save(store)
       })
     })

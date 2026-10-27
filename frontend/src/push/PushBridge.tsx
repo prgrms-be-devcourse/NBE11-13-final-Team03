@@ -25,6 +25,7 @@ export default function PushBridge() {
         const store = loadPushStore()
         if (store.binding === owner!.id && store.users[owner!.id]?.phase === 'active') {
           const controller = await runtime.browserPushController(client, owner!)
+          // 자동 재연결은 토큰·endpoint만 확인하며 사용자 알림 설정을 PUT하지 않는다.
           if (status.permission === 'granted') await controller.enable(false)
           else await controller.disable()
         }

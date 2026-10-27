@@ -55,8 +55,11 @@ export function authObservationOptions(client: QueryClient, transition: AuthTran
 export function authStatus(query: AuthQueryState, transition: AuthTransition, oauthPage: boolean): AuthStatus {
   if (transition.isPending || (oauthPage && !transition.isError)) return 'checking'
   if (oauthPage && transition.isError) return 'error'
-  if (query.isPending || query.isFetching) return 'checking'
+  if (query.isPending) return 'checking'
   if (query.isError) return 'error'
+  // 이미 확인된 사용자의 백그라운드 재조회는 보호 폼을 언마운트하지 않는다.
+  // 사용자 정보가 없는 최초 확인·불확실한 세션 복구는 계속 checking으로 차단한다.
+  if (query.isFetching && !query.data) return 'checking'
   return query.data ? 'authenticated' : 'anonymous'
 }
 
