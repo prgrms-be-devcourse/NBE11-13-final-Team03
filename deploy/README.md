@@ -21,7 +21,9 @@
 |---|---|
 | `yon-db` | 5432 ← `yon-main`, `yon-data` 보안 그룹만 / 22 |
 | `yon-main` | `BACKEND_PORT`(8080) ← 공개 / 22 |
-| `yon-data` | 9092 ← `yon-main` 보안 그룹만 / 22 |
+| `yon-data` | 9092 ← `yon-main` 보안 그룹만 / 22 ← `yon-main` 보안 그룹만 (배포·관리 SSH 모두 메인 서버 경유) |
+
+탄력적 IP는 계정당 1개라 메인 서버에만 둔다. 데이터·DB 서버의 공개 IP는 재시작마다 바뀌므로 접속·배포 모두 메인 서버를 거쳐 사설 IP로 한다.
 
 **5432·9092는 0.0.0.0/0으로 열지 않는다.** data-service는 Spring Security가 없다.
 한 겹 더: DB 서버 `.env`의 `DB_BIND_IP`, 데이터 서버 `.env`의 `DATA_SERVICE_BIND_IP`에 각 서버의 사설 IP를 넣으면 포트가 사설 IP에만 바인딩된다 (보안 그룹 실수 대비).
@@ -88,7 +90,8 @@ sudo timedatectl set-timezone Asia/Seoul
 | 종류 | 이름 | 값 |
 |---|---|---|
 | Variable | `EC2_MAIN_HOST` | 메인 서버 탄력적 IP 또는 도메인 |
-| Variable | `EC2_DATA_HOST` | 데이터 서버 공개 IP (SSH용) |
+| Variable | `EC2_DATA_HOST` | 데이터 서버 사설 IP (`EC2_JUMP_HOST`를 쓸 때). 쓰지 않으면 공개 IP |
+| Variable | `EC2_JUMP_HOST` | (선택) 메인 서버 탄력적 IP. 있으면 데이터 서버 배포는 메인 서버를 거쳐 SSH한다 (ProxyJump) |
 | Variable | `EC2_USER` | `ubuntu` |
 | Variable | `EC2_DEPLOY_DIR` | (선택) 기본값 `/home/<EC2_USER>/yon` |
 | Secret | `EC2_SSH_KEY` | **배포 전용** 개인키 전체 (두 서버 공용) |
