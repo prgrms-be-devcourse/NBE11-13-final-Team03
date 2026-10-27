@@ -230,6 +230,22 @@ test('option loading, errors and successful empty lists remain distinct without 
   assert.doesNotMatch(empty, /분류 목록을 불러오지 못했어요/)
 })
 
+test('region list loading or failure does not block other filters; a loaded list still rejects unknown or malformed codes', () => {
+  const applyDisabled = (html) => /<button[^>]*disabled=""[^>]*>필터 적용/.test(html)
+  const applied = { ...defaultSearchParams(), region: '1100000000' }
+  assert.equal(applyDisabled(renderFilters(applied, { regions: { status: 'loading' } })), false)
+  assert.equal(applyDisabled(renderFilters(applied, { regions: { status: 'error', onRetry: () => {} } })), false)
+  assert.equal(applyDisabled(renderFilters({ ...defaultSearchParams(), region: '4111000000' }, { regions: { status: 'ready', options: regionOptions } })), false)
+  assert.equal(applyDisabled(renderFilters(applied, { regions: { status: 'ready', options: regionOptions } })), true)
+  for (const status of ['loading', 'error']) {
+    assert.equal(applyDisabled(renderFilters({ ...defaultSearchParams(), region: '11x' }, { regions: { status, onRetry: () => {} } })), true)
+  }
+  // URL의 형식 오류 지역 코드는 파싱 단계에서 제외되므로 필터 적용을 막지 않는다.
+  const fromUrl = parseSearchParams(new URLSearchParams('region=1100000000x&type=YOUTH_POLICY')).params
+  assert.equal(fromUrl.region, '')
+  assert.equal(applyDisabled(renderFilters(fromUrl, { regions: { status: 'error', onRetry: () => {} } })), false)
+})
+
 test('unavailable or mismatched URL classifications stay visible but cannot be applied as new selections', () => {
   const html = renderFilters({ ...defaultSearchParams(), category: '일자리', subCategory: '정보통신' })
   assert.match(html, /기존 조건: 정보통신/)

@@ -8,7 +8,7 @@ import { registerPushEndpoint, deactivatePushEndpoint } from '../api/push.ts'
 import { readPushConfig, supportsPush } from './config.ts'
 import { createPushController, PushError } from './model.ts'
 import { loadPushStore, savePushStore } from './storage.ts'
-import { pushLock, pushScopeSuffix, revokeBrowserPush } from './lifecycle.ts'
+import { hasBrowserPush, pushLock, pushScopeSuffix, revokeBrowserPush } from './lifecycle.ts'
 import workerUrl from './firebase-messaging-sw.ts?worker&url'
 
 const config = readPushConfig(import.meta.env)
@@ -26,8 +26,7 @@ export async function inspectPush(userId: number) {
   // 설정이 없을 때는 SDK의 IndexedDB 지원 검사나 서비스 워커 조회를 기다리지 않는다.
   if (!config) return { ready: false, supported: basicSupport, permission, connected: false, phase: store.users[userId]?.phase ?? null, knownEndpoints: store.users[userId]?.endpointIds.length ?? 0 }
   const supported = basicSupport && await isSupported().catch(() => false)
-  const registrations = supported ? await navigator.serviceWorker.getRegistrations() : []
-  const subscribed = (await Promise.all(registrations.filter(value => new URL(value.scope).pathname.endsWith(pushScopeSuffix)).map(value => value.pushManager.getSubscription()))).some(Boolean)
+  const subscribed = supported && await hasBrowserPush()
   return { ready: true, supported, permission,
     connected: subscribed && store.binding === userId && store.users[userId]?.phase === 'active', phase: store.users[userId]?.phase ?? null,
     knownEndpoints: store.users[userId]?.endpointIds.length ?? 0 }

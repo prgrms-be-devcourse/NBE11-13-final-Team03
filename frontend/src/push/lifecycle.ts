@@ -10,6 +10,11 @@ export async function pushLock<T>(work: () => Promise<T>): Promise<T> {
     return work()
   })
 }
+export async function hasBrowserPush(): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return false
+  const registrations = await navigator.serviceWorker.getRegistrations()
+  return (await Promise.all(registrations.filter(value => new URL(value.scope).pathname.endsWith(pushScopeSuffix)).map(value => value.pushManager.getSubscription()))).some(Boolean)
+}
 export async function revokeBrowserPush(): Promise<void> {
   if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
   const registrations = await navigator.serviceWorker.getRegistrations()
@@ -29,6 +34,8 @@ export async function changePushIdentity(userId: number | null): Promise<void> {
   let initial
   try { initial = loadPushStore() } catch { await cleanupPush(revokeBrowserPush); return }
   if (initial.binding !== null && initial.binding === userId) return
+  // 소유 정보도 전용 구독도 없으면 정리할 것이 없다. 락 없이 확인해 매 인증 확인마다 다른 탭 작업과 경합하지 않는다.
+  if (initial.binding === null && !await hasBrowserPush()) return
   await cleanupPush(async () => {
     let store
     try { store = loadPushStore() } catch { await revokeBrowserPush(); return }

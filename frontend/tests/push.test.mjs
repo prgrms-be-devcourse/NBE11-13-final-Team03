@@ -12,7 +12,7 @@ import { emptyPushStore, parsePushStore, pushStorageKey } from '../src/push/stor
 import { parsePushClick, pushTarget, pushClickPath } from '../src/push/protocol.ts'
 import { safeReturnPath, loginPath } from '../src/auth/returnPath.ts'
 import { changePushIdentity, releasePushSession, pushLock } from '../src/push/lifecycle.ts'
-import { createAuthActions, authQueryKey } from '../src/auth/session.ts'
+import { createAuthActions, authQueryKey, authQueryOptions } from '../src/auth/session.ts'
 import { getNotificationSettings, putNotificationSettings, runNotificationChange } from '../src/api/notifications.ts'
 
 const adapter = apiClient.defaults.adapter, descriptors = Object.fromEntries(['document', 'localStorage', 'navigator'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
@@ -21,6 +21,7 @@ afterEach(() => {
   for (const [key, value] of Object.entries(descriptors)) { if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key] }
 })
 const response = (config, data = '', status = 200) => ({ config, data, status, statusText: '', headers: {} })
+const rejectStatus = (config, status) => { throw new AxiosError('fixture', 'ERR_BAD_RESPONSE', config, {}, response(config, { code: 'COMMON_500', message: 'fixture', fieldErrors: {} }, status)) }
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { resolve, promise } }
 function fixture(overrides = {}, initial = emptyPushStore()) {
   let store = structuredClone(initial)
@@ -278,17 +279,81 @@ test('logout with missing ownership metadata cleans local reception before confi
   } finally { client.clear() }
 })
 
-test('subscription inspection failure with lost metadata prevents cookie logout and never clears the confirmed user', async () => {
+test('subscription inspection failure with lost metadata still sends cookie logout and clears the confirmed user', async () => {
   orphanFixture()
   navigator.serviceWorker.getRegistrations = async () => { throw new Error('fixture subscription inspection failed') }
-  const owner = { id: 11, role: 'USER' }, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  client.setQueryData(authQueryKey, owner)
-  let requests = 0
-  apiClient.defaults.adapter = async config => { requests++; return response(config, '', 204) }
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'XSRF-TOKEN=test-only' } })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(authQueryKey, { id: 11, role: 'USER' })
+  const calls = []
+  apiClient.defaults.adapter = async config => { calls.push(config.url); return response(config, '', 204) }
   try {
-    await assert.rejects(createAuthActions(client).logout(), /subscription inspection failed/)
-    assert.equal(requests, 0)
+    assert.equal(await createAuthActions(client).logout(), null)
+    assert.deepEqual(calls, ['/auth/logout'])
+    assert.equal(client.getQueryData(authQueryKey), null)
+  } finally { client.clear() }
+})
+
+function busyLockOnce() {
+  let busy = true, requests = 0
+  navigator.locks = { request: async (_name, _options, callback) => { requests++; const held = busy; busy = false; return callback(held ? null : {}) } }
+  return { requests: () => requests }
+}
+for (const kind of ['logout', 'withdraw']) test(`push lock held by another tab still sends ${kind}, keeps cleanup unconfirmed, then retries local revoke after 204`, async () => {
+  const f = sessionFixture(), lock = busyLockOnce(), calls = [], client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(authQueryKey, { id: 11, role: 'USER' })
+  apiClient.defaults.adapter = async config => {
+    calls.push(`${config.method.toUpperCase()} ${config.url}`)
+    // 정리 실패를 성공으로 기록하지 않은 상태에서 서버 요청을 보낸다.
+    assert.equal(f.store().binding, 11)
+    assert.equal(f.unsubscribed(), 0)
+    return response(config, '', 204)
+  }
+  try {
+    assert.equal(await createAuthActions(client)[kind](), null)
+    assert.deepEqual(calls, [kind === 'withdraw' ? 'DELETE /users/me' : 'POST /auth/logout'])
+    assert.equal(client.getQueryData(authQueryKey), null)
+    assert.equal(lock.requests(), 2)
+    // 쿠키가 없으므로 서버 DELETE 없이 로컬 수신만 끊고, 재시도할 endpoint ID는 원래 소유자에게 남긴다.
+    assert.equal(f.unsubscribed(), 1)
+    assert.deepEqual(f.store(), { binding: null, users: { 11: { endpointIds: [7], phase: 'cleanup' } } })
+  } finally { client.clear() }
+})
+test('push cleanup failure never converts a failed server logout into success', async () => {
+  const f = sessionFixture(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } }), owner = { id: 11, role: 'USER' }
+  navigator.locks = { request: async (_name, _options, callback) => callback(null) }
+  client.setQueryData(authQueryKey, owner)
+  apiClient.defaults.adapter = async config => rejectStatus(config, 500)
+  try {
+    await assert.rejects(createAuthActions(client).logout(), error => error instanceof ApiError && error.status === 500)
     assert.equal(client.getQueryData(authQueryKey), owner)
+    assert.equal(f.store().binding, 11)
+  } finally { client.clear() }
+})
+test('auth check succeeds while another tab holds the push lock, keeps the old binding and retries cleanup on the next check', async () => {
+  const f = sessionFixture(), lock = busyLockOnce(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  apiClient.defaults.adapter = async config => { assert.equal(config.url, '/users/me'); return response(config, { id: 22, nickname: null, email: null, role: 'USER' }) }
+  try {
+    assert.equal((await client.fetchQuery(authQueryOptions(client))).id, 22)
+    assert.equal(f.store().binding, 11)
+    assert.equal(f.unsubscribed(), 0)
+    assert.equal((await client.fetchQuery({ ...authQueryOptions(client), staleTime: 0 })).id, 22)
+    assert.equal(lock.requests(), 2)
+    assert.equal(f.unsubscribed(), 1)
+    assert.deepEqual(f.store(), { binding: null, users: { 11: { endpointIds: [7], phase: 'cleanup' } } })
+  } finally { client.clear() }
+})
+test('auth check for a browser without push binding or dedicated subscription takes no lock and revokes nothing', async () => {
+  const f = orphanFixture({ subscribed: false })
+  let locks = 0
+  navigator.locks = { request: async () => { locks++; throw Error('lock must not be requested') } }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'XSRF-TOKEN=test-only' } })
+  apiClient.defaults.adapter = async config => response(config, { id: 22, nickname: null, email: null, role: 'USER' })
+  try {
+    for (let index = 0; index < 3; index++) assert.equal((await client.fetchQuery({ ...authQueryOptions(client), staleTime: 0 })).id, 22)
+    assert.equal(locks, 0)
+    assert.equal(f.unsubscribes(), 0)
   } finally { client.clear() }
 })
 
@@ -370,7 +435,8 @@ test('FCM worker leaves background display to SDK, intercepts safe clicks and ne
   assert.ok(sw.indexOf("addEventListener('notificationclick'") < sw.indexOf('getMessaging(initializeApp'))
   assert.match(sw, /onBackgroundMessage\(messaging, \(\) => \{\}\)/)
   assert.doesNotMatch(sw, /\.showNotification\(|apiClient|document\.cookie|fetch\(/)
-  assert.match(sw, /client\.navigate\(url\)/); assert.match(sw, /clients\.openWindow\(url\)/)
+  // 전용 scope 워커는 앱 탭을 제어하지 않으므로 navigate() 대신 앱 라우터에 이동을 요청한다.
+  assert.doesNotMatch(sw, /\.navigate\(/); assert.match(sw, /client\.postMessage\(/); assert.match(sw, /clients\.openWindow\(/)
   const runtime = fs.readFileSync(new URL('../src/push/browser.ts', import.meta.url), 'utf8')
   assert.match(runtime, /onMessage\(messaging/); assert.match(runtime, /seen\.has\(messageId\)/)
   assert.doesNotMatch(runtime, /new Notification\(|\.showNotification\(|console\./)

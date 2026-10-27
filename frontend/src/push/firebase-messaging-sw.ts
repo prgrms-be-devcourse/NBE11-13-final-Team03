@@ -2,7 +2,7 @@
 import { initializeApp } from '@firebase/app'
 import { getMessaging, onBackgroundMessage } from '@firebase/messaging/sw'
 import { readPushConfig } from './config'
-import { pushTarget, pushClickPath } from './protocol'
+import { pushTarget, pushClickPath, pushNavigateType } from './protocol'
 
 const worker = self as unknown as ServiceWorkerGlobalScope
 worker.addEventListener('install', event => { event.waitUntil(worker.skipWaiting()) })
@@ -13,10 +13,12 @@ worker.addEventListener('notificationclick', event => {
   event.stopImmediatePropagation(); event.notification.close()
   event.waitUntil((async () => {
     const target = pushTarget(raw.FCM_MSG, worker.location.origin)
-    const url = new URL(target ? pushClickPath(target) : '/notifications', worker.location.origin).href
+    const path = target ? pushClickPath(target) : '/notifications'
     const clients = await worker.clients.matchAll({ type: 'window', includeUncontrolled: true })
     const client = clients.find(client => new URL(client.url).origin === worker.location.origin)
-    if (client) { await client.navigate(url); await client.focus() } else await worker.clients.openWindow(url)
+    // 앱 탭은 전용 scope의 이 워커가 제어하지 않아 navigate()가 거부된다. 앱 라우터에 이동을 요청하고 포커스한다.
+    if (client) { client.postMessage({ type: pushNavigateType, path }); await client.focus() }
+    else await worker.clients.openWindow(new URL(path, worker.location.origin).href)
   })())
 })
 const config = readPushConfig(import.meta.env)

@@ -1,15 +1,29 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { authQueryKey } from '../auth/session'
 import { assertNotificationOwner, notificationKeys } from '../api/notifications'
 import { loadPushStore, parsePushStore, pushStorageKey } from './storage'
+import { pushMessagePath } from './protocol'
 
 export default function PushBridge() {
-  const auth = useAuth(), client = useQueryClient()
+  const auth = useAuth(), client = useQueryClient(), navigate = useNavigate()
   const [notice, setNotice] = useState<number | null>(null)
   const owner = auth.status === 'authenticated' ? auth.user : undefined
+  // 알림 클릭 이동은 로그인 여부와 무관하게 받는다. 인증이 필요하면 알림 화면이 로그인 안내를 처리한다.
+  useEffect(() => {
+    const container = typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined
+    if (!container) return
+    const received = (event: MessageEvent) => {
+      if (event.origin && event.origin !== window.location.origin) return
+      const path = pushMessagePath(event.data)
+      if (path) navigate(path)
+    }
+    container.addEventListener('message', received)
+    container.startMessages()
+    return () => container.removeEventListener('message', received)
+  }, [navigate])
   useEffect(() => {
     if (!owner) return
     let cancelled = false, version = 0, stop = () => {}

@@ -22,6 +22,11 @@ export async function resetPersonalizedQueries(client: QueryClient): Promise<voi
   // reset은 활성 observer의 과거 데이터도 즉시 비운다. 새 쿠키의 공개 조회는 다시 실행한다.
   void client.resetQueries({ predicate: (query) => isPersonalizedQuery(query) && !['recommendations', 'profile', 'user-interests', 'saved-opportunities', 'notifications'].includes(String(query.queryKey[0])) }).catch(() => {})
 }
+// 푸시 정리 실패는 인증 판정과 분리한다. 성공으로 기록하지 않으므로 남은 이전 소유 정보로 다음 인증 확인에서 다시 정리한다.
+// 이전 소유자에게 묶인 동안에는 PushBridge가 새 사용자의 앱 내 푸시 안내·재연결을 하지 않는다.
+async function syncPushIdentity(userId: number | null): Promise<void> {
+  try { await changePushIdentity(userId) } catch { /* 다음 인증 확인 또는 푸시 설정 화면에서 다시 정리한다. */ }
+}
 export function authQueryOptions(client: QueryClient) {
   return {
     queryKey: authQueryKey,
@@ -29,7 +34,7 @@ export function authQueryOptions(client: QueryClient) {
       const previous = client.getQueryData<AuthUser | null>(authQueryKey)
       const user = await getCurrentUser(signal)
       if (signal.aborted) throw new ApiError('cancelled', '인증 확인이 취소되었습니다.')
-      await changePushIdentity(user?.id ?? null)
+      await syncPushIdentity(user?.id ?? null)
       if (signal.aborted) throw new ApiError('cancelled', '인증 확인이 취소되었습니다.')
       if (previous?.id !== user?.id) await resetPersonalizedQueries(client)
       return user
@@ -71,17 +76,19 @@ export function createAuthActions(client: QueryClient) {
       await client.cancelQueries({ queryKey: authQueryKey })
       if (kind === 'oauth') {
         const user = await verifyOAuthUser()
-        await changePushIdentity(user.id)
+        await syncPushIdentity(user.id)
         resetAuthRecovery()
         await resetPersonalizedQueries(client)
         client.setQueryData(authQueryKey, user)
         return user
       }
       await client.cancelQueries({ predicate: isPersonalizedQuery })
+      let pushReleased = true
       try {
         const user = client.getQueryData<AuthUser | null>(authQueryKey)
         // 탈퇴도 세션 종료다. 인증이 남아 있는 동안 푸시 엔드포인트를 먼저 해제한다.
-        if (user) await releasePushSession(user.id)
+        // 푸시 정리 실패가 서버 로그아웃·탈퇴를 막지 않는다. 실패한 정리 상태는 저장소에 그대로 남긴다.
+        if (user) await releasePushSession(user.id).catch(() => { pushReleased = false })
         await (kind === 'withdraw' ? deleteCurrentUser() : postLogout())
       } catch (error) {
         if (isUncertainLogout(error)) {
@@ -93,6 +100,8 @@ export function createAuthActions(client: QueryClient) {
         throw error
       }
       endAuthSession()
+      // 서버 해제는 쿠키가 없어 재시도하지 않는다. 로컬 수신만 한 번 더 끊고, 실패하면 다음 인증 확인에서 재시도한다.
+      if (!pushReleased) await syncPushIdentity(null)
       await resetPersonalizedQueries(client)
       client.setQueryData(authQueryKey, null)
       return null

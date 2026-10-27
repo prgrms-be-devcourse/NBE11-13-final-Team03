@@ -39,7 +39,8 @@ function SearchFilters({ applied, options, optionsLoading, optionsError, onRetry
   const optionError = optionsError ? searchErrorMessage(optionsError) : undefined
   const error = dateRangeError(draft)
   const regionTree = regions.status === 'ready' ? buildRegionTree(regions.options) : undefined
-  const invalidRegion = !!draft.region && (!isSearchRegionCode(draft.region) || !regionTree?.valid || !regionTree.byValue.has(draft.region))
+  // 목록 로딩·실패 중에는 형식만 검사해 다른 필터 적용을 막지 않는다. 목록을 받은 뒤에는 존재 여부까지 검증한다.
+  const invalidRegion = !!draft.region && (!isSearchRegionCode(draft.region) || (regions.status === 'ready' && (!regionTree?.valid || !regionTree.byValue.has(draft.region))))
   const update = (key: 'detailCategory' | 'applicationStatus' | 'deadlineFrom' | 'deadlineTo' | 'startDateFrom' | 'startDateTo', value: string) => setDraft((current) => ({ ...current, [key]: value }))
 
   function submit(event: FormEvent<HTMLFormElement>) {
