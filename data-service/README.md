@@ -18,6 +18,9 @@
 정기·수동 수집과 수동 전체 재시도는 100건 단위 저장·최대 3회 일시 오류 재시도 후
 실행당 한 건을 `collection_outbox_events`에 저장합니다. 같은 날 후속 실행도 별도 알립니다.
 v2 본문에 실행 종류·최종 상태·페이지 실패 수·소요시간을 포함합니다.
+온통청년 HTTP 403·429·5xx와 연결 오류는 같은 페이지를 최초 요청 포함 최대 3회 시도하고, 재시도 전 2초·4초 대기합니다.
+중간 페이지의 재시도를 소진해도 뒤쪽 조회를 계속하며, 첫 페이지 실패·연속 3페이지 실패 또는 재시도 불가 오류는 중단합니다.
+회복한 페이지는 한 번만 저장하고 최종 결과만 알립니다. HTTP 401·잘못된 요청/응답·HTTP 200 응답 본문의 권한 오류는 재시도하지 않습니다.
 수동 재시도는 `POST /api/admin/collection/syncs/{jobId}/retry`로 전체 출처를 새 실행으로 수집합니다.
 **새 버전 기동 전에 application_user로 `database/scripts/collection-outbox.sql`을 적용해야 합니다. 새 DB도 포함합니다.**
 기존 SQL 설치 DB는 `collection-outbox-per-job.sql`을 먼저 적용합니다. 이전 메시지는 유지합니다.
@@ -77,7 +80,7 @@ backend의 `/api/admin/collection/**` 공개 HTTP API·ADMIN 권한은 유지된
 
 | 환경변수 | 하는 일 | 양쪽에서 켜면 | data-service | 메인 서비스 |
 |---|---|---|---|---|
-| `COLLECTION_SCHEDULE_ENABLED` | 정기 수집 (매일 09:30) | 출처 잠금으로 동시 실행은 막히지만, 한쪽이 끝난 뒤 다른 쪽이 또 수집 | `true` | `false` |
+| `COLLECTION_SCHEDULE_ENABLED` | 정기 수집 (고용24 09:30·온통청년 09:45 KST) | 출처 잠금으로 동시 실행은 막히지만, 한쪽이 끝난 뒤 다른 쪽이 또 수집 | `true` | `false` |
 | `YON_NORMALIZATION_INGEST_ENABLED` | 정규화 요청 처리 (LISTEN/NOTIFY, 1분 폴링, 1시간 대조) | 요청은 SKIP LOCKED라 중복 처리는 없지만 같은 일을 두 곳에서 함 | `true` | `false` |
 | `YON_NORMALIZATION_CONDITION_SET_BACKFILL_ENABLED` | 기동 시 조건 묶음 백필 | 동시 기동하면 같은 묶음을 만들다 경합 | `true` | `false` |
 | `REGION_CODE_SYNC_ON_STARTUP` | 기동 시 지역 사전 동기화 | 같은 동기화를 두 번 | 필요할 때만 `true` | `false` |

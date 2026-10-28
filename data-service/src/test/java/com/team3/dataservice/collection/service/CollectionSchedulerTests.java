@@ -5,6 +5,9 @@ import com.team3.dataservice.collection.domain.SyncJobStatus;
 import com.team3.dataservice.collection.domain.repository.SyncHistoryRepository;
 import java.time.ZonedDateTime;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -30,11 +33,12 @@ class CollectionSchedulerTests {
         runner.run(context -> assertEquals(1, context.getBeansOfType(CollectionScheduler.class).size()));
     }
 
-    @Test
-    void cronRunsAtNineThirtyKoreanTime() throws Exception {
-        var schedule = CollectionScheduler.class.getMethod("collect").getAnnotation(Scheduled.class);
+    @ParameterizedTest
+    @CsvSource({"collectYouthPolicy,09:44:59", "collectEmployment24,09:29:59"})
+    void cronRunsAtEachSourceTimeInKorea(String method, String time) throws Exception {
+        var schedule = CollectionScheduler.class.getMethod(method).getAnnotation(Scheduled.class);
         assertEquals("Asia/Seoul", schedule.zone());
-        var before = ZonedDateTime.parse("2026-10-18T09:29:59+09:00[Asia/Seoul]");
+        var before = ZonedDateTime.parse("2026-10-18T" + time + "+09:00[Asia/Seoul]");
         var next = CronExpression.parse(schedule.cron()).next(before);
         assertEquals(before.plusSeconds(1), next);
         assertEquals(next.plusDays(1), CronExpression.parse(schedule.cron()).next(next));
@@ -43,7 +47,8 @@ class CollectionSchedulerTests {
     @Test
     void oneSourceFailureDoesNotPreventTheOtherSource() {
         doThrow(new IllegalStateException("active")).when(sync).startScheduled(CollectionSource.YOUTH_POLICY);
-        scheduler.collect();
+        scheduler.collectYouthPolicy();
+        scheduler.collectEmployment24();
         verify(sync).startScheduled(CollectionSource.EMPLOYMENT24);
     }
 
@@ -51,6 +56,23 @@ class CollectionSchedulerTests {
     void noCatchUpBeforeScheduledTime() {
         scheduler.recoverMissedSchedule(ZonedDateTime.parse("2026-10-18T09:29:59+09:00[Asia/Seoul]"));
         verifyNoInteractions(sync, histories);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"09:30:00", "09:44:59"})
+    void startupBeforeNineFortyFiveOnlyCatchesUpEmployment24(String time) {
+        scheduler.recoverMissedSchedule(ZonedDateTime.parse("2026-10-18T" + time + "+09:00[Asia/Seoul]"));
+        verify(sync).startScheduled(CollectionSource.EMPLOYMENT24);
+        verifyNoMoreInteractions(sync);
+        verify(histories, never()).existsBySourceSourceCodeAndStatusAndStartedAtGreaterThanEqualAndStartedAtLessThan(
+                eq("YOUTH_POLICY"), any(), any(), any());
+    }
+
+    @Test
+    void startupAtNineFortyFiveCanCatchUpBothSources() {
+        scheduler.recoverMissedSchedule(ZonedDateTime.parse("2026-10-18T09:45:00+09:00[Asia/Seoul]"));
+        verify(sync).startScheduled(CollectionSource.YOUTH_POLICY);
+        verify(sync).startScheduled(CollectionSource.EMPLOYMENT24);
     }
 
     @Test
