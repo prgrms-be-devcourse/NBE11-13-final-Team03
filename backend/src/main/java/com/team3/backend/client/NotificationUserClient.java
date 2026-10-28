@@ -26,7 +26,7 @@ public interface NotificationUserClient {
     @PutMapping("/internal/users/{userId}/notification-settings")
     Response settings(@PathVariable("userId") long userId, @RequestBody Settings body);
     @PostMapping("/internal/users/{userId}/notification-endpoints")
-    Response endpoint(@PathVariable("userId") long userId, @RequestBody Endpoint body);
+    Response endpoint(@PathVariable("userId") long userId, @RequestBody EndpointRegistration body);
     @DeleteMapping("/internal/users/{userId}/notification-endpoints/{id}")
     Response removeEndpoint(@PathVariable("userId") long userId, @PathVariable("id") long id);
 }

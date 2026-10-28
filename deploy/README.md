@@ -320,12 +320,12 @@ backend와 같은 서버에서 컨테이너만 나눠 돈다. 호스트 포트�
 1. DB 서버에서 알림 테이블 생성 (처음 한 번, `notification_user`로. 순서는 `database/local/03-apply-notification-ddl.sh`와 같다)
 
 ```bash
-scp database/scripts/notification-{inbox,user-api,withdrawal,delivery,admin}.sql ubuntu@<DB 서버>:~/yon-db/sql/
+scp database/scripts/notification-{inbox,user-api,session-end,withdrawal,delivery,admin}.sql ubuntu@<DB 서버>:~/yon-db/sql/
 ```
 DB 서버에서:
 ```bash
 cd ~/yon-db
-for f in inbox user-api withdrawal delivery admin; do
+for f in inbox user-api session-end withdrawal delivery admin; do
   { echo 'SET ROLE notification_user;'; echo 'SET search_path TO notification, pg_catalog;'; cat sql/notification-$f.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1 || break
 done
 ```
@@ -338,6 +338,7 @@ done
 기능을 켜기 전에 추가로 적용할 SQL (위 1번과 같은 방식, `notification_user`, 알림 서버를 멈춘 상태에서)
 - 푸시 슬롯 모드(`NOTIFICATION_PUSH_SLOTS_ENABLED`): `notification-push-slots.sql`. 푸시 만료 분리 이전의 delivery SQL을 적용했던 기존 DB는 그 전에 `notification-push-expiry.sql` (새 DB는 delivery SQL에 포함)
 - 새 적합 알림 우선순위(#80 머지 후): `notification-new-match-priority.sql`
+- 로그아웃 시 푸시 Endpoint 정리(세션 바인딩, `docs/notification-session-end.md`): `notification-session-end.sql`. 알림 서버를 먼저 올리고 backend를 배포한다
 - 그 밖에 알림 SQL이 추가되면 파일 머리말의 적용 시점을 따르고 이 목록에 더한다
 
 ## 운영 중 자주 쓰는 명령 (메인·데이터 서버의 배포 폴더)

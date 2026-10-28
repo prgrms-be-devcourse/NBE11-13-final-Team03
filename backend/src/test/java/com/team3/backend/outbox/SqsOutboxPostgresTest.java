@@ -197,15 +197,16 @@ class SqsOutboxPostgresTest {
     }
 
     @Test
-    void notificationAndWithdrawalBothReachStandardQueueWithCorrelation() {
+    void notificationAndBothControlMessagesReachStandardQueueWithCorrelation() {
         saveNotification();
         outboxes.saveAndFlush(OutboxEvent.userWithdrawn(8L, NOW));
+        outboxes.saveAndFlush(OutboxEvent.userSessionEnded(9L, "44444444-4444-4444-8444-444444444444", NOW));
         worker.runOnce();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE status='PUBLISHED'", Long.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE status='PUBLISHED'", Long.class)).isEqualTo(3);
         var messages = drain();
-        assertThat(messages).hasSize(2);
+        assertThat(messages).hasSize(3);
         assertThat(messages.stream().map(message -> MAPPER.readTree(message.body()).path("eventType").asText()))
-                .containsExactlyInAnyOrder("NOTIFICATION_REQUESTED", "USER_WITHDRAWN");
+                .containsExactlyInAnyOrder("NOTIFICATION_REQUESTED", "USER_WITHDRAWN", "USER_SESSION_ENDED");
         for (var message : messages) {
             assertThat(message.messageAttributes().get("correlationId").stringValue())
                     .isEqualTo(MAPPER.readTree(message.body()).path("correlationId").asText());

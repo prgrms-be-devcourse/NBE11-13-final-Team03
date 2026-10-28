@@ -26,6 +26,10 @@ public class NotificationMessageFingerprint {
         return fingerprintFields(message);
     }
 
+    public String fingerprint(UserSessionEndedMessage message) {
+        return fingerprintFields(message);
+    }
+
     public String fingerprint(CollectionCompletedMessage message) {
         return fingerprintFields(message);
     }

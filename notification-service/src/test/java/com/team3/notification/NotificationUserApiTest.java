@@ -59,6 +59,9 @@ class NotificationUserApiTest {
         mvc.perform(post(ROOT + "/notification-endpoints").header("X-INTERNAL-KEY", "test-user-api-key")
                 .contentType(MediaType.APPLICATION_JSON).content("{\"fcmToken\":\"token\"}"))
                 .andExpect(status().isOk());
+        mvc.perform(post(ROOT + "/notification-endpoints").header("X-INTERNAL-KEY", "test-user-api-key")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"fcmToken\":\"token\",\"sessionId\":\"session-1\"}"))
+                .andExpect(status().isOk());
         mvc.perform(delete(ROOT + "/notification-endpoints/9").header("X-INTERNAL-KEY", "test-user-api-key"))
                 .andExpect(status().isNoContent());
         verify(service).list(7, null, 20);
@@ -67,6 +70,7 @@ class NotificationUserApiTest {
         verify(service).click(7, 9);
         verify(service).updateSettings(7, new SettingsRequest(false, true));
         verify(service).registerEndpoint(7, new EndpointRequest("token"));
+        verify(service).registerEndpoint(7, new EndpointRequest("token", "session-1"));
         verify(service).deactivateEndpoint(7, 9);
     }
 
@@ -79,6 +83,9 @@ class NotificationUserApiTest {
                 .andExpect(status().isBadRequest());
         mvc.perform(post(ROOT + "/notification-endpoints").header("X-INTERNAL-KEY", "test-user-api-key")
                 .contentType(MediaType.APPLICATION_JSON).content("{\"fcmToken\":\"bad token\"}"))
+                .andExpect(status().isBadRequest()).andExpect(content().json("{\"code\":\"INVALID_NOTIFICATION_REQUEST\"}"));
+        mvc.perform(post(ROOT + "/notification-endpoints").header("X-INTERNAL-KEY", "test-user-api-key")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"fcmToken\":\"token\",\"sessionId\":\"" + "s".repeat(37) + "\"}"))
                 .andExpect(status().isBadRequest()).andExpect(content().json("{\"code\":\"INVALID_NOTIFICATION_REQUEST\"}"));
         doThrow(new NotificationUserApiException(404, "NOTIFICATION_NOT_FOUND")).when(service).read(7, 9);
         mvc.perform(patch(ROOT + "/notifications/9/read").header("X-INTERNAL-KEY", "test-user-api-key"))

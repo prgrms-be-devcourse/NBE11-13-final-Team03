@@ -38,6 +38,22 @@ public class NotificationMessageDecoder {
         return root != null && root.isObject() && "USER_WITHDRAWN".equals(root.path("eventType").asText());
     }
 
+    public boolean isSessionEnd(String json) {
+        var root = mapper.readTree(json);
+        return root != null && root.isObject() && "USER_SESSION_ENDED".equals(root.path("eventType").asText());
+    }
+
+    public UserSessionEndedMessage decodeSessionEnd(String json) {
+        var root = mapper.readTree(json);
+        if (root == null || !root.isObject()) throw new IllegalArgumentException("Message must be an object");
+        for (String field : new String[]{"schemaVersion", "userId"}) {
+            if (!root.path(field).isIntegralNumber()) throw new IllegalArgumentException("Integer field required");
+        }
+        if (!root.path("sessionId").isTextual()) throw new IllegalArgumentException("sessionId must be a string");
+        return mapper.readerFor(UserSessionEndedMessage.class).without(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readValue(json);
+    }
+
     public UserWithdrawnMessage decodeWithdrawal(String json) {
         var root = mapper.readTree(json);
         if (root == null || !root.isObject()) throw new IllegalArgumentException("Message must be an object");

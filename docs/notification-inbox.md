@@ -5,7 +5,8 @@
 현재 schemaVersion=1 / eventType=NOTIFICATION_REQUESTED는 APPLICATION_OPENED, APPLICATION_CLOSED,
 DEADLINE_SOON, DEADLINE_EXTENDED, BECAME_ELIGIBLE, ELIGIBILITY_DOWNGRADED, ELIGIBILITY_REVIEW_REQUIRED, NEW_MATCH를 지원한다.
 NEW_MATCH는 최초 적합 정책 전건을 사용자별 인앱 1건으로 저장하며 계약·SQL 전환은
-[최초 적합 요약·자격 전환 알림](notification-match.md)을 따른다. USER_WITHDRAWN은 별도 탈퇴 메시지 경로다.
+[최초 적합 요약·자격 전환 알림](notification-match.md)을 따른다. USER_WITHDRAWN은 별도 탈퇴 메시지 경로,
+USER_SESSION_ENDED는 [로그아웃 세션 종료](notification-session-end.md) 경로다.
 
 아래 본문은 PR #38의 5단계 수신 기반 구현 이력이다. 이후 연결된 HTTP/SQS·설정·Delivery·탈퇴·슬롯의 현재 동작은
 [HTTP Publisher](notification-http-publisher.md), [SQS](notification-sqs.md), [사용자 API](notification-user-api.md),

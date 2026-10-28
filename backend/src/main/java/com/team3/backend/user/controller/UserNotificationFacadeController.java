@@ -51,7 +51,9 @@ public class UserNotificationFacadeController {
     }
     @PostMapping("/users/me/notification-endpoints")
     public ResponseEntity<?> endpoint(@AuthenticationPrincipal CustomUserDetails user, @Valid @RequestBody Endpoint body) {
-        return relay.call(() -> client.endpoint(user.getUserId(), body), 200, false, ENDPOINT_CONFLICT, USER_WITHDRAWN);
+        // The session comes from the access token, so a logout of this session can deactivate exactly this Endpoint.
+        var registration = new EndpointRegistration(body.fcmToken(), user.getSessionId());
+        return relay.call(() -> client.endpoint(user.getUserId(), registration), 200, false, ENDPOINT_CONFLICT, USER_WITHDRAWN);
     }
     @DeleteMapping("/users/me/notification-endpoints/{id}")
     public ResponseEntity<?> remove(@AuthenticationPrincipal CustomUserDetails user, @PathVariable @Positive long id) {

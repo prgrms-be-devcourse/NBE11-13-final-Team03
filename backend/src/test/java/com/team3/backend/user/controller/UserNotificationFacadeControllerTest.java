@@ -54,7 +54,7 @@ class UserNotificationFacadeControllerTest {
         when(client.settings(7)).thenReturn(response(200, "{\"inAppEnabled\":true,\"pushEnabled\":false}"));
         when(client.settings(7, new NotificationUserRequests.Settings(false, false)))
                 .thenReturn(response(200, "{\"inAppEnabled\":false,\"pushEnabled\":false}"));
-        when(client.endpoint(7, new NotificationUserRequests.Endpoint("test-token")))
+        when(client.endpoint(7, new NotificationUserRequests.EndpointRegistration("test-token", "facade-test")))
                 .thenReturn(response(200, "{\"id\":11,\"active\":true}"));
         when(client.removeEndpoint(7, 11)).thenReturn(response(204, ""));
         mvc.perform(patch("/api/notifications/9/read").with(user(principal)).with(csrf())).andExpect(status().isNoContent());
@@ -70,7 +70,8 @@ class UserNotificationFacadeControllerTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(11));
         mvc.perform(delete("/api/users/me/notification-endpoints/11").with(user(principal)).with(csrf()))
                 .andExpect(status().isNoContent());
-        verify(client).endpoint(7, new NotificationUserRequests.Endpoint("test-token"));
+        // The session comes from the authenticated principal, never from the browser body.
+        verify(client).endpoint(7, new NotificationUserRequests.EndpointRegistration("test-token", "facade-test"));
     }
 
     @Test
@@ -105,7 +106,7 @@ class UserNotificationFacadeControllerTest {
         // Ownership 404 and Endpoint 409 stay, but not the other way round.
         when(client.click(7, 99)).thenReturn(response(404, "private diagnostics"));
         when(client.removeEndpoint(7, 99)).thenReturn(response(404, "private diagnostics"));
-        when(client.endpoint(7, new NotificationUserRequests.Endpoint("other-owner")))
+        when(client.endpoint(7, new NotificationUserRequests.EndpointRegistration("other-owner", "facade-test")))
                 .thenReturn(response(409, "private diagnostics"));
         when(client.read(7, 9)).thenReturn(response(409, "private diagnostics"));
         mvc.perform(post("/api/notifications/99/click").with(user(principal)).with(csrf()))

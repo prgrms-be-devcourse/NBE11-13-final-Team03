@@ -102,11 +102,12 @@ class NotificationUserFeignTest {
         }
         assertThat(method.get()).isEqualTo("PUT");
         assertThat(mapper.readTree(receivedBody.get()).path("pushEnabled").asBoolean()).isFalse();
-        try (var response = client.endpoint(7, new NotificationUserRequests.Endpoint("test-token"))) {
+        try (var response = client.endpoint(7, new NotificationUserRequests.EndpointRegistration("test-token", "session-1"))) {
             assertThat(response.status()).isEqualTo(200);
         }
         assertThat(method.get()).isEqualTo("POST");
         assertThat(mapper.readTree(receivedBody.get()).path("fcmToken").asText()).isEqualTo("test-token");
+        assertThat(mapper.readTree(receivedBody.get()).path("sessionId").asText()).isEqualTo("session-1");
         try (var response = client.list(7, 123L, 10)) { assertThat(response.status()).isEqualTo(200); }
         assertThat(path.get()).contains("beforeId=123", "size=10");
     }
