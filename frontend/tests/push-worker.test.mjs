@@ -5,6 +5,41 @@ import { test } from 'node:test'
 import ts from 'typescript'
 import { readPushConfig, pushEnvironmentKeys } from '../src/push/config.ts'
 import { pushTarget, pushClickPath, pushNavigateType, pushMessagePath } from '../src/push/protocol.ts'
+import { resolveConfig } from 'vite'
+
+test('development prebundles Firebase app, window and service-worker SDKs together', async () => {
+  const config = await resolveConfig({ root: new URL('../', import.meta.url).pathname }, 'serve')
+  for (const entry of ['@firebase/app', '@firebase/messaging', '@firebase/messaging/sw']) {
+    assert.ok(config.optimizeDeps.include.includes(entry), `${entry} must not be discovered only during worker registration`)
+  }
+})
+
+for (const development of [true, false]) test(`worker registration uses ${development ? 'module in development' : 'classic for the IIFE production bundle'} before requesting a token`, async () => {
+  const source = fs.readFileSync(new URL('../src/push/browser.ts', import.meta.url), 'utf8')
+  const tokenSource = source.slice(source.indexOf('async function token()'), source.indexOf('async function removeToken()'))
+    .replaceAll('import.meta.env.DEV', String(development))
+  const compiled = ts.transpileModule(tokenSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+  const calls = []
+  const active = { active: {} }
+  const context = vm.createContext({
+    URL, config: { vapidKey: 'fixture-public-key' }, Notification: { permission: 'granted' },
+    workerUrl: '/assets/firebase-messaging-sw.js', location: { href: 'https://yon.test/', origin: 'https://yon.test' },
+    pushScopeSuffix: '/yon-push/', registration: undefined, tokenClient: undefined,
+    navigator: { serviceWorker: { getRegistration: async () => undefined, register: async (url, options) => {
+      calls.push({ url: url.href, ...options }); return active
+    } } },
+    messaging: () => ({}), getToken: async (_client, options) => {
+      assert.equal(options.serviceWorkerRegistration, active)
+      assert.equal(calls.length, 1)
+      return 'fixture-token'
+    },
+  })
+  assert.equal(await vm.runInContext(`${compiled}\ntoken()`, context), 'fixture-token')
+  assert.equal(calls[0].type, development ? 'module' : 'classic')
+  assert.equal(calls[0].scope, '/assets/yon-push/')
+  const viteConfig = fs.readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
+  assert.match(viteConfig, /worker:\s*\{\s*format:\s*'iife'\s*\}/)
+})
 
 function workerFixture(existing = true) {
   const handlers = {}, calls = []

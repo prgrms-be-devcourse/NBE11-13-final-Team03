@@ -37,7 +37,8 @@ async function token(): Promise<string> {
   const scope = new URL(`.${pushScopeSuffix}`, url).pathname
   const existing = await navigator.serviceWorker.getRegistration(new URL(scope, location.origin))
   if (existing && !new URL(existing.scope).pathname.endsWith(pushScopeSuffix)) throw new PushError('이 브라우저에 푸시 알림을 연결하지 못했어요. 새로고침한 뒤 다시 시도해 주세요.')
-  registration = await navigator.serviceWorker.register(url, { scope }).catch(() => { throw new PushError('이 브라우저에 푸시 알림을 연결하지 못했어요. 잠시 후 다시 시도해 주세요.') })
+  // Vite 개발 서버는 ES 모듈을 제공하고, 배포 빌드는 vite.config.ts의 IIFE 형식을 사용한다.
+  registration = await navigator.serviceWorker.register(url, { scope, type: import.meta.env.DEV ? 'module' : 'classic' }).catch(() => { throw new PushError('이 브라우저에 푸시 알림을 연결하지 못했어요. 잠시 후 다시 시도해 주세요.') })
   if (!registration.active) await new Promise<void>((resolve, reject) => {
     const worker = registration?.installing ?? registration?.waiting
     if (!worker) { reject(new PushError('이 브라우저에 푸시 알림을 연결하지 못했어요. 잠시 후 다시 시도해 주세요.')); return }
