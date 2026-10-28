@@ -19,14 +19,6 @@
         "permissions_boundary": null,
         "tags": {}
       },
-      "team03-github-actions-deploy": {
-        "path": "/",
-        "description": "",
-        "max_session_duration": 3600,
-        "assume_role_policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}",
-        "permissions_boundary": null,
-        "tags": {}
-      },
       "team03-frontend-deploy": {
         "path": "/",
         "description": "",
@@ -68,11 +60,6 @@
         "name": "fixture-app",
         "policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}"
       },
-      "team03-github-actions-deploy/fixture-app": {
-        "role": "team03-github-actions-deploy",
-        "name": "fixture-app",
-        "policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}"
-      },
       "team03-frontend-deploy/fixture-app": {
         "role": "team03-frontend-deploy",
         "name": "fixture-app",
@@ -86,10 +73,6 @@
       },
       "team03-data-sqs/arn:aws:iam::174170816230:policy/fixture-app": {
         "role": "team03-data-sqs",
-        "policy_arn": "arn:aws:iam::174170816230:policy/fixture-app"
-      },
-      "team03-github-actions-deploy/arn:aws:iam::174170816230:policy/fixture-app": {
-        "role": "team03-github-actions-deploy",
         "policy_arn": "arn:aws:iam::174170816230:policy/fixture-app"
       },
       "team03-frontend-deploy/arn:aws:iam::174170816230:policy/fixture-app": {

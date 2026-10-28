@@ -13,8 +13,8 @@ VPC = "vpc-032bd9d88d5c97147"
 BUCKET = "yon-frontend-team03-174170816230-ap-northeast-2-an"
 INSTANCES = ("i-05f26052a70059c73", "i-0b48442522e0c3400", "i-08a92649f4f51f8a5", "i-0f45b533faf285beb")
 GROUPS = ("sg-0fbaf2496d1edd1ed", "sg-042c6f59681a7b1bd", "sg-03c341b41a4087a48", "sg-04b53d2630b9a7ea9")
-ROLES = ("team03-main-sqs", "team03-data-sqs", "team03-github-actions-deploy", "team03-frontend-deploy", "team03-ec2-ecr-read")
-IMPORT_ROLES = ROLES[:4]
+IMPORT_ROLES = ("team03-main-sqs", "team03-data-sqs", "team03-frontend-deploy")
+ROLES = (*IMPORT_ROLES, "team03-ec2-ecr-read")
 TEMPORARY_POLICIES = {"YONNetworkInventoryReadTemporary", "YONNetworkImportReadTemporary", "YONTerraformImportReadTemporary"}
 
 

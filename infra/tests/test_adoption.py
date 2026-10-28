@@ -17,6 +17,24 @@ import collect_inventory
 
 
 class AdoptionTests(unittest.TestCase):
+    def test_current_roles_and_live_frontend_trust_are_preserved(self):
+        expected = {"team03-main-sqs", "team03-data-sqs", "team03-frontend-deploy"}
+        self.assertEqual(set(collect_inventory.IMPORT_ROLES), expected)
+        self.assertNotIn("team03-github-actions-deploy", collect_inventory.ROLES)
+        with tempfile.TemporaryDirectory() as path:
+            file, raw = make_inventory(Path(path))
+            trust = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow",
+                     "Principal": {"Federated": "arn:aws:iam::174170816230:oidc-provider/token.actions.githubusercontent.com"},
+                     "Action": "sts:AssumeRoleWithWebIdentity", "Condition": {"StringEquals": {
+                         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                         "token.actions.githubusercontent.com:sub": "repo:prgrms-be-devcourse@88020948/NBE11-13-final-Team03@1406626385:ref:refs/heads/main"}}}]}
+            raw["results"]["roles/team03-frontend-deploy"]["data"]["Role"]["AssumeRolePolicyDocument"] = trust
+            file.write_text(json.dumps(raw), encoding="utf-8")
+            config, targets = prepare_import.prepare(file)
+            self.assertEqual(set(config["roles"]), expected)
+            self.assertEqual(json.loads(config["roles"]["team03-frontend-deploy"]["assume_role_policy"]), trust)
+            self.assertFalse(any("team03-github-actions-deploy" in address for address in targets))
+
     def test_batch_refuses_a_different_existing_backend(self):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path) / "checkout"
@@ -31,10 +49,10 @@ class AdoptionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as path:
             file, _ = make_inventory(Path(path))
             config, targets = prepare_import.prepare(file)
-            self.assertEqual(len(config["roles"]), 4)
+            self.assertEqual(len(config["roles"]), 3)
             self.assertEqual(len(config["instances"]), 4)
             self.assertEqual(len(config["profiles"]), 2)
-            self.assertEqual(len(config["inline_policies"]), 4)
+            self.assertEqual(len(config["inline_policies"]), 3)
             self.assertGreater(len(targets), 50)
             self.assertFalse(any("Temporary" in key for key in targets))
             self.assertEqual(config["bucket"]["versioning_status"], "Disabled")
@@ -188,7 +206,7 @@ class AdoptionTests(unittest.TestCase):
                 output = directory / "collected"
                 self.assertTrue(collect_inventory.Collector().collect(output, "import"))
                 config, targets = prepare_import.prepare(output / "inventory.json")
-                self.assertEqual(len(config["roles"]), 4)
+                self.assertEqual(len(config["roles"]), 3)
                 self.assertGreater(len(targets), 50)
             policy = json.loads((Path(__file__).parents[1] / "iam/terraform-import-read.json").read_text())
             granted = [a.lower() for statement in policy["Statement"] for a in statement["Action"]]

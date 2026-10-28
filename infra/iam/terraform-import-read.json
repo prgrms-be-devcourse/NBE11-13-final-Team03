@@ -15,7 +15,6 @@
       "Resource": [
         "arn:aws:iam::174170816230:role/team03-main-sqs",
         "arn:aws:iam::174170816230:role/team03-data-sqs",
-        "arn:aws:iam::174170816230:role/team03-github-actions-deploy",
         "arn:aws:iam::174170816230:role/team03-frontend-deploy"
       ]
     },

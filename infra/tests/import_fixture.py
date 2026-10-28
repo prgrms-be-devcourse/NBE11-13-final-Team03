@@ -13,7 +13,7 @@ def make_inventory(directory):
         results[key] = {"status": "ok", "data": data}
 
     policy = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "sqs:GetQueueAttributes", "Resource": "*"}]}
-    role_names = ("team03-main-sqs", "team03-data-sqs", "team03-github-actions-deploy", "team03-frontend-deploy")
+    role_names = ("team03-main-sqs", "team03-data-sqs", "team03-frontend-deploy")
     put("identity", {"Account": account})
     put("vpc", {"Vpcs": [{"VpcId": n["vpc"]["id"]}]})
     put("sg-rules", {"SecurityGroupRules": [{"SecurityGroupRuleId": r["id"]} for d in ("ingress_rules", "egress_rules") for r in n[d].values()]})

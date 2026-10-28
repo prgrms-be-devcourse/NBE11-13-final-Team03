@@ -9,15 +9,27 @@ PR 병합만으로 import는 실행되지 않는다. 기존 main push는 backend
 | 범위 | 대상 |
 | --- | --- |
 | 네트워크 | VPC·서브넷 2·IGW·라우팅 테이블 2·인터넷 경로·서브넷 연결 2·서비스 SG 4·규칙 14, 합계 27개 |
-| IAM | main/data SQS 역할·GitHub backend/frontend 배포 역할 4개, 앱 프로파일 2개, 기존 inline 정책과 관리형 정책 연결, 연결된 계정 소유 정책, GitHub OIDC |
+| IAM | main/data SQS 역할·프론트 배포 역할 3개, 앱 프로파일 2개, 기존 inline 정책과 관리형 정책 연결, 연결된 계정 소유 정책, GitHub OIDC |
 | 서버 | EC2 4대·root EBS 설정·IMDS·종료 보호·모니터링·프로파일 연결, main EIP/연결, team03_key 공개 키·지문 |
 | 프론트 | 기존 S3 버킷·관측된 정책/공개 차단/소유권/암호화·현재 버전 관리 상태, CloudFront 배포·OAC·Function |
 
 AWS 관리형 IAM 정책은 연결만 관리한다. 존재하지 않는 S3 선택 설정은 생성하지 않는다.
-총 항목 수는 실제 정책/연결과 버킷 설정 개수에 따라 결정된다. **59개는 CI 합성 자료의 수이며 운영 예상값으로 고정하지 않는다.**
+총 항목 수는 실제 정책/연결과 버킷 설정 개수에 따라 결정된다. **56개는 CI 합성 자료의 수이며 운영 예상값으로 고정하지 않는다.**
 8080/22 접근, origin HTTP, IAM 신뢰/권한, 암호화 등 현재 운영 설정을 유지한다.
 8080 제한·SSM 전환·EBS 암호화·역할 삭제는 후속 PR이다. SQS는 CloudFormation 소유를 유지하고 새 S3 버킷은 만들지 않는다.
 스케줄·DB 데이터·.env·Compose·백업 복원·프론트 객체는 이번 관리 범위 밖이다. import만으로 전체 서비스 복구가 완성되지는 않는다.
+
+2026-10-28 운영 담당자 확인으로 삭제된 `team03-github-actions-deploy`는 조회·import 대상에서 제외했다.
+`team03-frontend-deploy`의 신뢰 정책은 실행 시 GetRole로 다시 조회해 현재 값을 그대로 사용한다.
+기존 기준본은 당시 내보내기 이력이며 삭제된 역할이나 과거 신뢰 정책을 복원하는 근거로 사용하지 않는다.
+
+## 보안 그룹 작업 순서
+
+**현재 snapshot으로 import → 사후 변경 0 확인·서버 밖 백업 → 별도 Terraform PR로 보안 그룹 변경** 순서다.
+import 전에는 8080 CloudFront 접두사 목록 제한과 `yon-db-replica` 5432의 `yon-db`·`yon-data` 소스 추가를 대기한다.
+import 후에는 관리 대상 보안 그룹을 Terraform에서 변경하고 계획을 검토한다.
+`yon-data` 22의 `yon-main` 참조는 03:49 UTC network snapshot에 반영돼 있다(운영 담당자 확인).
+긴급 변경이 먼저 필요하면 새 snapshot과 선언을 함께 검토·커밋한 뒤 진행한다. 규칙 ID 일치 검사나 no-op 검사를 완화하지 않는다.
 
 ## 담당자가 한 번 준비할 것
 
@@ -31,6 +43,17 @@ AWS 관리형 IAM 정책은 연결만 관리한다. 존재하지 않는 S3 선�
    생성·수정·삭제·PassRole 권한은 포함하지 않는다. 이번 import에 AdministratorAccess는 필요하지 않다.
    서버 역할에 부여하면 그 역할을 사용하는 앱도 조회 권한을 공유하므로 작업 시간에만 부여하고 완료 후 제거한다.
 5. 같은 자원·상태를 동시에 수정하지 않도록 하고 다른 IaC 소유자가 있으면 먼저 확인한다.
+
+도구가 없다면 [Terraform 1.17.0 공식 배포본](https://releases.hashicorp.com/terraform/1.17.0/)(Linux AMD64·SHA256 확인)과
+[AWS CLI 2 공식 Linux 설치 안내](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)를 따라 **메인 서버 호스트에 설치**한다.
+일괄 실행기는 호스트의 `aws`·`terraform` 명령을 호출하므로 `docker run amazon/aws-cli`만 있는 상태에서는 실행할 수 없다.
+설치한 실행 파일이 실행 사용자의 PATH에 있는지 아래 명령으로 확인한다. 사용자 로컬 설치라면 `$HOME/.local/bin`을 PATH에 포함한다.
+
+```bash
+terraform version
+aws --version
+python3 --version
+```
 
 임시 정책 이름 `YONNetworkInventoryReadTemporary`, `YONNetworkImportReadTemporary`, `YONTerraformImportReadTemporary`는 Terraform 관리에서 제외한다.
 같은 이름의 임시 관리형 정책 연결도 제외한다. 다른 이름을 사용했다면 실행 전에 구분한다.
@@ -74,7 +97,8 @@ Function LIVE/DEVELOPMENT 설정·소스가 다를 때도 미배포 변경을 �
 ## 결과·백업·권한 회수
 
 화면에는 `PASS: N targets, M pending imports, 0 AWS resource changes`와 비공개 실행 폴더가 출력된다.
-완료 기준은 마지막 검사에서 pending import 0, AWS 변경 0, `completed.json` 존재다.
+등록·사후 검사 완료 기준은 마지막 검사에서 pending import 0, AWS 변경 0, `completed.json` 존재다.
+**`completed.json`만으로 운영 작업 전체를 완료 처리하지 않는다. 아래 서버 밖 백업까지 확인해야 한다.**
 
 state 디렉터리 아래 `adoption-<UTC시각>/`에 원본 `inventory/`, Function 소스, `adoption.tfvars.json`, `targets.json`,
 저장 계획/JSON/로그, 기존 상태의 전후 사본, 계획 해시 `review.json`과 완료 기록을 보관한다.
@@ -83,9 +107,21 @@ Terraform provider 일부 정책·코드·헤더 속성은 민감한 값으로 �
 Git·공개 PR·채팅·CI artifact에 이 파일들을 올리지 않는다. POSIX에서는 umask 077과 폴더 0700/파일 0600을 사용한다.
 Windows ACL은 POSIX 모드로 대체되지 않으므로 운영 예시는 Ubuntu 기준이다.
 
-담당자는 최종 state·실행 기록을 별도 보호 위치에도 백업하고 서비스/배포 경로를 확인한 뒤 임시 조회 정책을 제거한다.
-같은 디스크 사본만으로 서버 유실에 대비하지 않는다. 실행자를 바꿀 때도 마지막 state와 코드 커밋을 함께 전달한다.
-공유할 결과는 코드 커밋·총 대상 수·마지막 pending import 0·AWS 변경 0·완료 시각만으로 충분하다.
+담당자는 완료 직후 **메인 서버 밖의 노트북 등 접근이 제한된 저장 위치로 `~/yon-terraform-state` 전체를 복사**한다.
+기존 SSH/SFTP 연결로 최종 `terraform.tfstate`와 이번 `adoption-<UTC시각>/` 실행 기록을 함께 받는다.
+서버의 `sha256sum ~/yon-terraform-state/terraform.tfstate`와 사본의 SHA256을 대조하고, 사본에서 `completed.json`과 실행 기록도 확인한다.
+같은 서버 디스크의 before/after 사본만으로는 외부 백업 완료로 보지 않는다. 서버를 잃어도 복구할 수 있는지 확인한다.
+서비스/배포 경로를 확인한 뒤 임시 조회 정책을 제거한다. 실행자를 바꿀 때도 마지막 state와 코드 커밋을 함께 전달한다.
+
+운영 최종 완료 조건:
+
+- [ ] pending import 0·AWS 변경 0·`completed.json` 확인.
+- [ ] 노트북 등 메인 서버 외부에 최종 state·실행 기록 복사, state 해시 일치 확인.
+- [ ] 기존 서비스 접속·배포 경로 정상 확인.
+- [ ] 임시 조회 정책 회수.
+
+PR에는 코드 커밋·대상 수·pending import 0·AWS 변경 0·외부 백업/해시 대조 여부·권한 회수 여부·완료 시각을 남긴다.
+state·로그·원본이나 노트북의 실제 비공개 경로를 공개 PR에 첨부하지 않는다.
 
 ## 검증 범위와 한계
 

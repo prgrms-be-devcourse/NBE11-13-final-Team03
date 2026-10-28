@@ -151,11 +151,6 @@ override_resource {
 }
 
 override_resource {
-  target = aws_iam_role.existing["team03-github-actions-deploy"]
-  values = { "path" : "/", "description" : "", "max_session_duration" : 3600, "assume_role_policy" : "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}", "permissions_boundary" : null, "tags" : {}, "name" : "team03-github-actions-deploy", "id" : "team03-github-actions-deploy", "arn" : "arn:aws:iam::174170816230:role/team03-github-actions-deploy" }
-}
-
-override_resource {
   target = aws_iam_role.existing["team03-frontend-deploy"]
   values = { "path" : "/", "description" : "", "max_session_duration" : 3600, "assume_role_policy" : "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}", "permissions_boundary" : null, "tags" : {}, "name" : "team03-frontend-deploy", "id" : "team03-frontend-deploy", "arn" : "arn:aws:iam::174170816230:role/team03-frontend-deploy" }
 }
@@ -186,11 +181,6 @@ override_resource {
 }
 
 override_resource {
-  target = aws_iam_role_policy.existing["team03-github-actions-deploy/fixture-app"]
-  values = { "role" : "team03-github-actions-deploy", "name" : "fixture-app", "policy" : "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}" }
-}
-
-override_resource {
   target = aws_iam_role_policy.existing["team03-frontend-deploy/fixture-app"]
   values = { "role" : "team03-frontend-deploy", "name" : "fixture-app", "policy" : "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}" }
 }
@@ -203,11 +193,6 @@ override_resource {
 override_resource {
   target = aws_iam_role_policy_attachment.existing["team03-data-sqs/arn:aws:iam::174170816230:policy/fixture-app"]
   values = { "role" : "team03-data-sqs", "policy_arn" : "arn:aws:iam::174170816230:policy/fixture-app" }
-}
-
-override_resource {
-  target = aws_iam_role_policy_attachment.existing["team03-github-actions-deploy/arn:aws:iam::174170816230:policy/fixture-app"]
-  values = { "role" : "team03-github-actions-deploy", "policy_arn" : "arn:aws:iam::174170816230:policy/fixture-app" }
 }
 
 override_resource {
@@ -303,8 +288,8 @@ override_resource {
 run "preserve_observed_infrastructure" {
   command = plan
   assert {
-    condition     = length(aws_iam_role.existing) == 4 && length(aws_instance.existing) == 4 && length(aws_security_group.service) == 4
-    error_message = "Keep all four service roles, instances and groups."
+    condition     = length(aws_iam_role.existing) == 3 && length(aws_instance.existing) == 4 && length(aws_security_group.service) == 4
+    error_message = "Keep three current IAM roles, four instances and four groups."
   }
   assert {
     condition     = length(aws_vpc_security_group_ingress_rule.existing) == 10 && aws_vpc_security_group_ingress_rule.existing["main_http"].cidr_ipv4 == "0.0.0.0/0" && aws_vpc_security_group_ingress_rule.existing["main_http"].from_port == 8080
@@ -315,7 +300,7 @@ run "preserve_observed_infrastructure" {
     error_message = "Keep route-table identity and all-protocol egress."
   }
   assert {
-    condition     = length(aws_iam_role_policy.existing) == 4 && length(aws_iam_instance_profile.existing) == 2 && length(aws_cloudfront_function.existing) == 1
+    condition     = length(aws_iam_role_policy.existing) == 3 && length(aws_iam_instance_profile.existing) == 2 && length(aws_cloudfront_function.existing) == 1
     error_message = "Bootstrap policies must not be imported; preserve application profiles and function."
   }
   assert {
