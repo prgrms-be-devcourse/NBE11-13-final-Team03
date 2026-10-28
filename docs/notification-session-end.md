@@ -47,10 +47,12 @@ HTTP 모드는 해당 messageId의 `status=SESSION_ENDED` receipt를 확인했�
 
 1. 사용자별 advisory lock(등록·탈퇴와 같은 잠금)
 2. 같은 messageId의 소비 기록이 있으면 기존 결과와 duplicateMessage=true. 내용이 다르면 409 MESSAGE_IDENTITY_CONFLICT
-3. `UPDATE notification_endpoints SET active=false WHERE user_id=? AND session_id=? AND active`
+3. `UPDATE notification_endpoints SET active=false WHERE user_id=? AND (session_id=? OR session_id IS NULL) AND active`
 4. `consumed_messages`에 `result=SESSION_ENDED` 기록 (notification_id 없음)
 
-- 같은 사용자의 다른 세션, session_id가 NULL인 기존 행, 같은 세션 ID 문자열의 다른 사용자는 건드리지 않는다.
+- 같은 사용자의 다른 세션, 같은 세션 ID 문자열의 다른 사용자는 건드리지 않는다.
+- session_id가 NULL인 행(세션 바인딩 이전에 등록)은 어느 세션 것인지 알 수 없으므로 그 사용자의 로그아웃이 함께 끈다.
+  다음 접속의 재등록이 세션을 채우면 그 뒤로는 다른 세션의 로그아웃에 영향받지 않는다. 별도 전환 작업은 없다.
 - 탈퇴 뒤 도착한 세션 종료는 바꿀 행이 없어도 소비 기록만 남긴다. Tombstone 410을 내지 않는다.
 - 설정(push_enabled)은 바꾸지 않는다. 로그아웃은 동의 철회가 아니다.
 - 비활성 행은 다음 로그인의 재등록으로 다시 활성화되고 그 세션에 묶인다.
@@ -59,7 +61,7 @@ HTTP 모드는 해당 messageId의 `status=SESSION_ENDED` receipt를 확인했�
 ## DB 적용·배포 순서
 
 새 컬럼·인덱스는 `database/scripts/notification-session-end.sql`(`notification_user`)이다. Notification은 `ddl-auto: validate`라
-컬럼이 없으면 기동하지 않는다. 기존 행은 session_id NULL로 남고 로그아웃의 영향을 받지 않는다.
+컬럼이 없으면 기동하지 않는다. 기존 행은 session_id NULL로 남으며, 그 사용자의 다음 로그아웃이 끄고 다음 재등록이 세션을 채운다.
 
 1. Notification을 멈추고 `notification-session-end.sql`을 한 번 적용한다 (빈 DB는 inbox → user-api → session-end → withdrawal → delivery 순서).
 2. 새 Notification을 기동해 validate한다.

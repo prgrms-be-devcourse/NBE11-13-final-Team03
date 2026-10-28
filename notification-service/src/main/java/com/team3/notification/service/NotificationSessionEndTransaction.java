@@ -11,8 +11,9 @@ import java.time.Clock;
 
 /**
  * Logout control: deactivates the push Endpoints registered by one login session.
- * Other sessions of the same user keep their Endpoints. The token row stays owned by the user and is
- * re-activated by the next registration, which also moves it to the session that registers it.
+ * Other sessions of the same user keep their Endpoints, except rows registered before session binding (NULL session),
+ * which cannot be told apart and are deactivated with this user's logout. The token row stays owned by the user and is
+ * re-activated by the next registration, which also binds it to the session that registers it.
  */
 @Service
 public class NotificationSessionEndTransaction {

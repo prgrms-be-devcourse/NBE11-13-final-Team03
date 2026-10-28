@@ -292,7 +292,7 @@ class NotificationReceptionPostgresTest {
         assertThat(result.duplicateMessage()).isFalse();
         assertThat(active(loggedOut.id())).isFalse();
         assertThat(active(phone.id())).isTrue();      // another session of the same user
-        assertThat(active(legacy.id())).isTrue();     // registered before session binding
+        assertThat(active(legacy.id())).isFalse();    // registered before session binding: no session to match, so this user's logout ends it
         assertThat(active(other.id())).isTrue();      // same session ID string, other user
         assertThat(userApi.settings(7).pushEnabled()).isTrue(); // logout is not a consent change
         assertThat(jdbc.queryForObject("SELECT count(*) FROM withdrawn_users", Long.class)).isZero();
@@ -315,6 +315,14 @@ class NotificationReceptionPostgresTest {
         userApi.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest("laptop-token"));
         assertThat(jdbc.queryForObject("SELECT session_id FROM notification_endpoints WHERE id = ?", String.class, loggedOut.id()))
                 .isEqualTo("66666666-6666-4666-8666-666666666666");
+        // The legacy row is bound by its next registration and from then on survives other sessions' logouts.
+        userApi.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest(
+                "legacy-token", "77777777-7777-4777-8777-777777777777"));
+        assertThat(active(legacy.id())).isTrue();
+        handler.handle(sessionEnd(Map.of("messageId", UUID.randomUUID().toString(), "sessionId", "66666666-6666-4666-8666-666666666666")));
+        assertThat(active(loggedOut.id())).isFalse();
+        assertThat(active(legacy.id())).isTrue();
+        assertThat(active(other.id())).isTrue();
     }
 
     @Test

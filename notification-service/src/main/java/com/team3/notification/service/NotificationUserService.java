@@ -110,12 +110,16 @@ public class NotificationUserService {
         return result.getFirst();
     }
 
-    /** Logout path (USER_SESSION_ENDED): no Tombstone check, since a withdrawn user's rows are already gone. */
+    /**
+     * Logout path (USER_SESSION_ENDED): no Tombstone check, since a withdrawn user's rows are already gone.
+     * Rows registered before session binding (session_id NULL) cannot be attributed to a session, so this user's
+     * logout deactivates them too; the next registration from any device binds them to a session.
+     */
     @Transactional
     public int deactivateSessionEndpoints(long userId, String sessionId) {
         return jdbc.update("""
                 UPDATE notification_endpoints SET active = false, updated_at = ?
-                WHERE user_id = ? AND session_id = ? AND active
+                WHERE user_id = ? AND (session_id = ? OR session_id IS NULL) AND active
                 """, Timestamp.from(clock.instant()), userId, sessionId);
     }
 
