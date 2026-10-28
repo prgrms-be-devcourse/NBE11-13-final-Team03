@@ -26,6 +26,12 @@ import java.io.IOException;
 @RequiredArgsConstructor
 public class TokenAuthenticationFilter extends OncePerRequestFilter {
 
+    /** 만료된 Access Token 쿠키가 있어도 통과해야 하는 경로. SecurityConfig의 permitAll 목록과 같은 값을 쓴다. */
+    public static final String REISSUE_PATH = "/api/auth/reissue";
+    /** 프론트가 재발급 전에 CSRF 쿠키를 받는 비개인화 공개 GET. SecurityConfig의 permitAll 목록과 같은 값을 쓴다. */
+    public static final String INTEREST_OPTIONS_PATH = "/api/interests/options";
+    public static final String INTERNAL_API_PREFIX = "/api/internal/";
+
     private final TokenProvider tokenProvider;
     private final CustomAuthenticationEntryPoint authenticationEntryPoint;
 
@@ -35,9 +41,9 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
         // OAuth/static pages and refresh must remain usable with an expired access cookie.
         // The frontend bootstraps CSRF on this non-personalized public GET before refreshing.
         return !path.startsWith("/api/")
-                || path.startsWith("/api/internal/")
-                || path.equals("/api/auth/reissue")
-                || ("GET".equals(request.getMethod()) && path.equals("/api/interests/options"));
+                || path.startsWith(INTERNAL_API_PREFIX)
+                || path.equals(REISSUE_PATH)
+                || ("GET".equals(request.getMethod()) && path.equals(INTEREST_OPTIONS_PATH));
     }
 
     @Override
