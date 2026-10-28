@@ -8,6 +8,7 @@ import { isOpportunityId } from './opportunityDetail.ts'
 export const notificationLabels = {
   APPLICATION_OPENED: '신청 시작', APPLICATION_CLOSED: '신청 종료', DEADLINE_SOON: '마감 임박', DEADLINE_EXTENDED: '신청기간 연장',
   BECAME_ELIGIBLE: '신청 가능성 변경', ELIGIBILITY_DOWNGRADED: '신청 가능성 하락', ELIGIBILITY_REVIEW_REQUIRED: '신청 조건 재확인',
+  NEW_MATCH: '새로운 추천',
 } as const
 export type NotificationItem = { id: number; opportunityId: number; type: keyof typeof notificationLabels; title: string; content: string; link: string; createdAt: string; readAt: string | null; clickedAt: string | null }
 export type NotificationPage = { items: NotificationItem[]; nextCursor: number | null; hasNext: boolean }
@@ -69,7 +70,9 @@ export const readNotification = (notificationId: number) => changeNotification('
 export const readAllNotifications = () => changeNotification('read-all')
 export const clickNotification = (notificationId: number) => changeNotification('click', notificationId)
 
-export function notificationTarget(item: { opportunityId: unknown; link: unknown }): string | null {
+export function notificationTarget(item: { type?: unknown; opportunityId: unknown; link: unknown }): string | null {
+  // NEW_MATCH의 opportunityId는 요약의 대표 정책이므로 개별 상세 화면으로 이동하지 않는다.
+  if (item.type === 'NEW_MATCH') return item.link === '/' ? '/' : null
   if (typeof item.opportunityId === 'number' && isOpportunityId(String(item.opportunityId))) return `/opportunities/${item.opportunityId}`
   // 서버 link는 상세 경로만 허용한다. 외부 주소·스킴·인증 경로로 이동하지 않는다.
   if (typeof item.link !== 'string' || !/^\/opportunities\/[1-9]\d*$/.test(item.link)) return null

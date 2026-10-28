@@ -93,6 +93,15 @@ test('navigation prefers a valid opportunity ID and rejects external, encoded, a
   for (const link of ['https://evil.invalid', '//evil.invalid', 'javascript:alert(1)', '/login', '/opportunities/%34%32', '/opportunities/42?next=evil', '/opportunities/9007199254740992']) assert.equal(notificationTarget({ opportunityId: null, link }), null)
 })
 
+test('NEW_MATCH summary is accepted and links to recommendations instead of its representative policy', () => {
+  const summary = { ...item, type: 'NEW_MATCH', link: '/' }
+  assert.equal(isNotificationPage({ ...page, items: [summary] }), true)
+  assert.equal(notificationTarget(summary), '/')
+  for (const link of ['https://evil.invalid', '//evil.invalid', '/login', '/opportunities/42']) {
+    assert.equal(notificationTarget({ ...summary, link }), null)
+  }
+})
+
 test('open shares duplicate work and sends read then click; active list/count refresh without unrelated caches or behavior events', async () => {
   csrf(); const client = makeClient(), owner = setOwner(client), calls = [], started = deferred(), finish = deferred()
   let read = false, clicked = false
