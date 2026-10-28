@@ -42,7 +42,7 @@ class NotificationSlotPostgresTest {
             s.execute(sql("database-boundaries.sql")); s.execute("ALTER ROLE notification_user PASSWORD 'slot-test-password'");
         }
         try(var c=DriverManager.getConnection(POSTGRES.getJdbcUrl(),"notification_user","slot-test-password");var s=c.createStatement()) {
-            for(String name:List.of("notification-inbox.sql","notification-user-api.sql","notification-withdrawal.sql",
+            for(String name:List.of("notification-inbox.sql","notification-user-api.sql","notification-session-end.sql","notification-withdrawal.sql",
                     "notification-delivery.sql","notification-push-expiry.sql","notification-push-slots.sql")) s.execute(sql(name));
             // Exercise the existing-DB upgrade as well as the updated fresh schema in this disposable container.
             s.execute("ALTER TABLE notification.notification_push_pending DROP CONSTRAINT notification_push_pending_priority_check");

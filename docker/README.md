@@ -67,7 +67,8 @@ application 스키마 테이블은 data-service(수집·정규화 테이블)와 
 - 예전 데이터를 계속 쓰려면 `docker/.env`에 `YON_DB_VOLUME=backend_postgres_data`를 넣는다.
   예전 구성은 3번(Notification 테이블)을 자동으로 실행하지 않았으므로, 기동 전에 `notification_user`로
   `database/scripts/notification-inbox.sql` → `database/scripts/notification-user-api.sql` →
-  `database/scripts/notification-withdrawal.sql` → `database/scripts/notification-delivery.sql` 순서로 한 번씩 적용해야
+  `database/scripts/notification-session-end.sql` → `database/scripts/notification-withdrawal.sql` →
+  `database/scripts/notification-delivery.sql` 순서로 한 번씩 적용해야
   notification-service가 뜬다(`ddl-auto: validate`). 이미 적용된 SQL은 재실행하지 않고 미적용분만 순서대로 적용한다.
   푸시 만료 분리 이전 버전에 이미 `notification-delivery.sql`을 적용했다면, 서버를 중지하고 백업·대상 확인 후
   `database/scripts/notification-push-expiry.sql`만 추가 적용한다. 기존 delivery SQL을 재실행하지 않는다.

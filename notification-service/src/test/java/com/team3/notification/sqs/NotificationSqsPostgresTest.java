@@ -64,7 +64,7 @@ class NotificationSqsPostgresTest {
             statement.execute("ALTER ROLE notification_user PASSWORD '" + PASSWORD + "'");
         }
         try (var connection = connection(); var statement = connection.createStatement()) {
-            for (String name : List.of("notification-inbox.sql", "notification-user-api.sql",
+            for (String name : List.of("notification-inbox.sql", "notification-user-api.sql", "notification-session-end.sql",
                     "notification-withdrawal.sql", "notification-delivery.sql")) {
                 statement.execute(resource("db-boundary/" + name));
             }
@@ -247,6 +247,22 @@ class NotificationSqsPostgresTest {
         assertThat(count("notifications")).isZero();
         assertThat(count("notification_deliveries")).isZero();
         assertThat(count("notification_endpoints")).isZero();
+        assertSourceEmpty();
+    }
+
+    @Test
+    void sessionEndThroughSqsDeactivatesThatSessionsEndpointAndIsAcknowledged() throws Exception {
+        consent();
+        var endpoint = users.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest(
+                "sqs-session-token", "44444444-4444-4444-8444-444444444444"));
+        var kept = users.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest(
+                "sqs-other-session-token", "55555555-5555-4555-8555-555555555555"));
+        send(resource("contracts/user-session-ended-v1.json")); consumer.runOnce();
+        assertThat(jdbc.queryForObject("SELECT active FROM notification_endpoints WHERE id = ?", Boolean.class, endpoint.id())).isFalse();
+        assertThat(jdbc.queryForObject("SELECT active FROM notification_endpoints WHERE id = ?", Boolean.class, kept.id())).isTrue();
+        assertThat(count("consumed_messages")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT result FROM consumed_messages", String.class)).isEqualTo("SESSION_ENDED");
+        assertThat(count("withdrawn_users")).isZero();
         assertSourceEmpty();
     }
 

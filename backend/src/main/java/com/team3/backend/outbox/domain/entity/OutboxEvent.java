@@ -82,6 +82,28 @@ public class OutboxEvent {
         return event;
     }
 
+    /**
+     * Logout control message: Notification deactivates the push Endpoints that this login session registered.
+     * Session IDs are reused per device across logins, so the dedup key is per message, not per session.
+     */
+    public static OutboxEvent userSessionEnded(Long userId, String sessionId, Instant now) {
+        var event = new OutboxEvent();
+        event.messageId = UUID.randomUUID();
+        event.sourceEventId = UUID.randomUUID();
+        event.userId = Objects.requireNonNull(userId);
+        event.eventType = "USER_SESSION_ENDED";
+        event.dedupKey = "USER_SESSION_ENDED:" + event.messageId;
+        event.payload = Map.of("schemaVersion", 1, "messageId", event.messageId.toString(),
+                "eventType", event.eventType, "sourceEventId", event.sourceEventId.toString(),
+                "correlationId", UUID.randomUUID().toString(), "causationId", event.sourceEventId.toString(),
+                "userId", userId, "sessionId", Objects.requireNonNull(sessionId),
+                "occurredAt", Objects.requireNonNull(now).toString());
+        event.status = OutboxStatus.PENDING;
+        event.nextRetryAt = now;
+        event.createdAt = now;
+        return event;
+    }
+
     public static OutboxEvent notification(UUID messageId, UUID sourceEventId, Long userId, Long opportunityId,
             String notificationType, Map<String, Object> envelope, Instant now) {
         var event = new OutboxEvent();

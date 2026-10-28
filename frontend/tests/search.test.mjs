@@ -179,6 +179,7 @@ test('real search observer isolates accounts, cancels late responses and does no
     if (call === 2) { secondStarted.resolve(); await secondFinish.promise; return response(config, empty(22)) }
     assert.equal(config.params.get('eligibilityStatuses'), null)
     assert.equal(config.requiresAuth, undefined)
+    assert.equal(config.recoverAuth, true)
     publicStarted.resolve(); await publicFinish.promise; return response(config, empty(0))
   }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
@@ -208,7 +209,7 @@ test('real search observer isolates accounts, cancels late responses and does no
   } finally { firstFinish.resolve(); secondFinish.resolve(); publicFinish.resolve(); unsubscribe(); client.clear() }
 })
 
-test('public search uses /api once, a cancellation signal and normalized params without reissue opt-in', async () => {
+test('public search uses /api once, a cancellation signal and normalized params with public recovery instead of requiresAuth', async () => {
   let calls = 0
   const controller = new AbortController()
   apiClient.defaults.adapter = async (config) => {
@@ -216,6 +217,7 @@ test('public search uses /api once, a cancellation signal and normalized params 
     assert.equal(config.url, '/opportunities')
     assert.equal(config.baseURL, '/api')
     assert.equal(config.requiresAuth, undefined)
+    assert.equal(config.recoverAuth, true)
     assert.equal(config.signal, controller.signal)
     assert.equal(config.headers.get('X-XSRF-TOKEN'), undefined)
     assert.equal(config.params.get('deadlineFrom'), null)
@@ -226,12 +228,12 @@ test('public search uses /api once, a cancellation signal and normalized params 
   assert.equal(calls, 1)
 })
 
-test('public search 401 terminates without automatic reissue; errors never become empty results', async () => {
+test('public search 401 that is not a token failure terminates without reissue; errors never become empty results', async () => {
   let calls = 0
   apiClient.defaults.adapter = async (config) => {
     calls++
     throw new AxiosError('test failure', 'ERR_BAD_RESPONSE', config, {}, {
-      ...response(config, { code: 'AUTH_006', message: 'test only', fieldErrors: {} }), status: 401,
+      ...response(config, { code: 'TEST', message: 'test only', fieldErrors: {} }), status: 401,
     })
   }
   await assert.rejects(searchOpportunities(defaultSearchParams()), (error) => error instanceof ApiError && error.status === 401)

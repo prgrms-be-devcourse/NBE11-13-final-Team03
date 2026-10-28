@@ -3,6 +3,7 @@
 > 8단계 탈퇴 연동의 Tombstone·410 계약과 추가 DDL은 [notification-withdrawal.md](notification-withdrawal.md)를 따른다.
 > 이 문서의 "Tombstone 미구현" 등 제외 범위는 7단계 시점의 이력이다.
 > 8단계 푸시 전용 알림의 인앱 비노출과 FCM/Delivery 설정은 [notification-delivery.md](notification-delivery.md)를 따른다.
+> Endpoint의 로그인 세션 바인딩과 로그아웃 시 비활성화(USER_SESSION_ENDED)는 [notification-session-end.md](notification-session-end.md)를 따른다.
 
 ## 경계
 
@@ -67,8 +68,10 @@ PUSH 동의 저장만으로 FCM·Delivery 또는 메시지 전달 기능이 활�
 ### Endpoint
 
 POST 본문 `{fcmToken: string}`. 토큰은 비어 있지 않은 공백·제어문자 없는 ASCII, 최대 2048자다.
+facade는 내부 요청에 인증된 로그인 세션 ID(`sessionId`, 최대 36자)를 붙인다. 브라우저가 보낸 sessionId는 받지 않는다.
 응답은 `{id, active: true}`이며 토큰을 응답·예외·로그에 포함하지 않는다.
-같은 사용자의 같은 토큰 등록은 동일 ID를 반환하고 재활성화한다. 등록 자체가 푸시 동의를 뜻하지 않는다.
+같은 사용자의 같은 토큰 등록은 동일 ID를 반환하고 재활성화하며 현재 세션에 묶는다. 등록 자체가 푸시 동의를 뜻하지 않는다.
+로그아웃은 그 세션이 등록한 Endpoint만 비활성화한다([notification-session-end.md](notification-session-end.md)).
 전역 UNIQUE(fcm_token)와 PostgreSQL UPSERT로 동시 등록 중복을 막는다.
 다른 사용자의 토큰은 소유권을 임의로 바꾸지 않고 409로 거부한다.
 공용 브라우저의 계정 전환 시 토큰 이전/재발급 UX는 별도 합의가 필요하며 이번 단계에서 자동 이전하지 않는다.

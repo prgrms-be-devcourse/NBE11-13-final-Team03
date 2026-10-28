@@ -1,7 +1,9 @@
+import { useContext } from 'react'
 import type { ReactNode } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError } from '../../api/ApiError'
+import { AuthContext } from '../../auth/AuthContext'
 import { isOpportunityId, opportunityDetailQuery } from '../../api/opportunityDetail'
 import type { ConditionType, RequirementType } from '../../api/opportunityDetail'
 import Card from '../../components/ui/Card'
@@ -40,7 +42,10 @@ function detailError(error: Error): { title: string; description: string } {
 function OpportunityDetailPage() {
   const { id } = useParams()
   const location = useLocation()
-  const query = useQuery(opportunityDetailQuery(id))
+  const auth = useContext(AuthContext)
+  const detailOptions = opportunityDetailQuery(id)
+  // 인증 확인이 끝난 뒤 조회해 로그인 사용자의 찜 여부가 첫 응답부터 반영되게 한다.
+  const query = useQuery({ ...detailOptions, enabled: detailOptions.enabled && auth?.status !== 'checking' })
   const data = query.data
   const backLink = <ArrowLink direction="back" className={styles.backLink} to={searchReturnPath(location.state)} aria-label="검색 목록으로 돌아가기">검색 목록</ArrowLink>
   if (!isOpportunityId(id)) return <div className={styles.page}>{backLink}<h1>기회 상세</h1><AsyncState status="error" title="공고 번호를 확인해 주세요" description="유효한 공고 주소가 아니에요. 검색 목록에서 공고를 다시 선택해 주세요." /></div>

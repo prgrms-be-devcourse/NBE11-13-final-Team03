@@ -11,7 +11,8 @@ import styles from './HomePage.module.css'
 
 function HomePage() {
   const auth = useAuth()
-  const latest = useQuery(homeLatestQuery())
+  // 인증 확인이 끝난 뒤 조회해 로그인 사용자의 찜 여부가 첫 응답부터 반영되게 한다.
+  const latest = useQuery({ ...homeLatestQuery(), enabled: auth.status !== 'checking' })
   const authenticated = auth.status === 'authenticated' && !!auth.user
   const profile = useQuery({ ...profileQuery(auth.user?.id ?? 0), enabled: authenticated })
   const profileConfirmed = authenticated && profile.isSuccess && profile.fetchStatus === 'idle'

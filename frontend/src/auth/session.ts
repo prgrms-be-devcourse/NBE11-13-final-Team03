@@ -1,7 +1,7 @@
 import type { QueryClient, Query } from '@tanstack/react-query'
 import { deleteCurrentUser, getCurrentUser, postLogout, verifyOAuthUser } from '../api/auth.ts'
 import type { AuthUser } from '../api/auth.ts'
-import { endAuthSession, resetAuthRecovery } from '../api/client.ts'
+import { endAuthSession, onAuthLost, resetAuthRecovery } from '../api/client.ts'
 import { ApiError } from '../api/ApiError.ts'
 import type { AuthStatus } from './AuthContext.ts'
 import { changePushIdentity, releasePushSession } from '../push/lifecycle.ts'
@@ -41,6 +41,18 @@ export function authQueryOptions(client: QueryClient) {
     },
     staleTime: 30_000,
   }
+}
+
+/**
+ * recoverAuth 공개 조회의 재발급이 401로 확정 실패하면 인증 Query를 서버에서 다시 확인한다.
+ * 확인 결과 null이면 기존 queryFn이 푸시 소유 정리와 개인화 캐시 초기화를 그대로 수행한다.
+ * 이미 확인 중이면 그 확인이 같은 재발급 실패를 공유하므로 중복 요청을 만들지 않는다.
+ */
+export function observeAuthLoss(client: QueryClient): () => void {
+  return onAuthLost(() => {
+    if (client.isFetching({ queryKey: authQueryKey })) return
+    void client.invalidateQueries({ queryKey: authQueryKey }).catch(() => { /* Query의 error 상태가 보호 기능을 중단한다. */ })
+  })
 }
 
 export type AuthTransitionKind = 'oauth' | 'logout' | 'withdraw'

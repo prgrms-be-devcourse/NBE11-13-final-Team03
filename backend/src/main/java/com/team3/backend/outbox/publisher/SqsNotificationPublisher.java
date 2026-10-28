@@ -36,7 +36,8 @@ public class SqsNotificationPublisher implements NotificationMessagePublisher {
         try {
             var envelope = mapper.readTree(publication.json());
             if (!publication.messageId().toString().equals(envelope.path("messageId").asText())
-                    || !Set.of("NOTIFICATION_REQUESTED", "USER_WITHDRAWN").contains(envelope.path("eventType").asText())) {
+                    || !Set.of("NOTIFICATION_REQUESTED", "USER_WITHDRAWN", "USER_SESSION_ENDED")
+                            .contains(envelope.path("eventType").asText())) {
                 throw new IllegalArgumentException("Invalid envelope");
             }
             correlation = UUID.fromString(envelope.path("correlationId").asText()).toString();

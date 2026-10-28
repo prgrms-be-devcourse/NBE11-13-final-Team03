@@ -9,7 +9,7 @@
 | 메인 서버 | `backend`, `notification-service` (컨테이너만 나눠 한 서버) | `deploy/main` | 자동 (`Publish backend image`·`Notification service` 성공 시 그 서비스만) |
 | 데이터 서버 | `data-service` (수집·원본 저장·정규화·조건 묶음, **1개만**) | `deploy/data` | 자동 (`Data service` 성공 시) |
 
-- 프론트(React)는 S3 + CloudFront로 따로 배포한다 (이 폴더 범위 밖).
+- 프론트(React)는 S3 + CloudFront로 따로 배포한다 (`frontend.yml`, 아래 "프론트 배포").
 - 서버끼리는 **같은 VPC의 사설 IP**로 통신한다.
   - 메인·데이터 → DB: `DB_URL=jdbc:postgresql://<DB 사설 IP>:5432/yon`
   - 메인 → 데이터: `DATA_SERVICE_GRPC_ADDRESS=static://<데이터 사설 IP>:9092` (내부 키 `DATA_SERVICE_INTERNAL_API_KEY`)
@@ -58,6 +58,7 @@ main에는 `team03-main-sqs`, data에는 `team03-data-sqs` 인스턴스 역할�
 | `data-service.yml` (Data service) | main push 중 `data-service/**`·`database/**` 변경 시 → 테스트 → `ghcr.io/<저장소>/data-service:sha-<커밋>` 게시 |
 | `notification-service.yml` (Notification service) | main push 중 `notification-service/**` 등 변경 시 → 테스트 → `ghcr.io/<저장소>/notification-service:sha-<커밋>` 게시 |
 | `deploy.yml` (Deploy) | 위 셋 중 하나가 **성공하면** 그 서비스를 그 서버에 배포 |
+| `frontend.yml` (Frontend) | PR·main push 중 `frontend/**` 변경 시 lint·테스트·빌드, main이면 S3 업로드 + CloudFront 무효화 |
 
 배포 순서 (`deploy.yml`)
 1. 서비스의 서버 변수(`EC2_MAIN_HOST` / `EC2_DATA_HOST`)가 비어 있으면 건너뜀
@@ -68,6 +69,47 @@ main에는 `team03-main-sqs`, data에는 `team03-data-sqs` 인스턴스 역할�
 
 - 수동 실행: Actions → Deploy → Run workflow → `service`(backend/data-service/notification-service), `image_tag`(비우면 최신 커밋, 롤백은 `sha-<40자리 커밋 SHA>`)
 - 배포는 한 번에 하나씩 (`concurrency: deploy-production`)
+
+### 프론트 배포 (`frontend.yml`)
+
+CloudFront 한 배포가 기본 경로는 S3(프론트), `/api/*`·`/oauth2/*`·`/login/oauth2/*`는 메인 서버 backend로 보낸다.
+AWS 인증은 OIDC 역할로 한다 (계정에서 IAM 사용자·액세스 키를 만들 수 없음).
+
+| 준비 | 내용 |
+|---|---|
+| OIDC 공급자 | IAM → 자격 증명 공급자 `token.actions.githubusercontent.com` (대상 `sts.amazonaws.com`) |
+| IAM 역할 | 신뢰 정책: 위 공급자, `aud`=`sts.amazonaws.com`, `sub`=`repo:<조직>/<저장소>:ref:refs/heads/main`<br>권한: 프론트 버킷 `s3:ListBucket`(버킷)·`s3:PutObject`·`s3:DeleteObject`(버킷/*), 그 배포 `cloudfront:CreateInvalidation`만 |
+| Actions 변수 | `FRONTEND_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`, `FRONTEND_DEPLOY_ROLE_ARN` (키가 아니라 secret 불필요). 선택 `VITE_FIREBASE_*` (공개 설정) |
+
+- 업로드: `assets/`(해시 파일명)는 1년 캐시·삭제 안 함, 나머지는 `no-cache` + 빌드에서 사라진 파일 삭제 → CloudFront `/*` 무효화
+- 옛 `assets/`는 지우지 않아 배포마다 조금씩 쌓인다 (한 번에 수백 KB). 나이 기준 S3 수명 주기는 배포가 오래 없으면 현재 파일까지 지우므로 쓰지 않고, 필요할 때 현재 빌드에 없는 파일만 수동 정리한다
+- `FRONTEND_BUCKET`이 비어 있으면 배포만 건너뛴다
+
+CloudFront 설정 (콘솔에서 한 번, 워크플로가 바꾸지 않음)
+
+| behavior | 원본 | 설정 |
+|---|---|---|
+| 기본 (`*`) | S3 프론트 버킷 (OAC) | 기본 루트 객체 `index.html`, viewer-request 함수 `yon-spa-rewrite` (캐시는 파일별 Cache-Control을 따름) |
+| `/api/*`, `/oauth2/*`, `/login/oauth2/*` | 메인 서버 backend (HTTP 8080, 사용자 지정 헤더 `X-Forwarded-Proto: https`) | CachingDisabled + 원본 요청 정책 `AllViewer` (쿠키·쿼리·헤더 전체, Host 포함) |
+
+- SPA 딥링크: `BrowserRouter`라 `/mypage` 같은 경로를 새로고침하면 S3에 그 파일이 없다. 기본 behavior에만 붙인 `yon-spa-rewrite`가 확장자 없는 경로를 `/index.html`로 바꾼다 (`login-success.html`, `assets/*.js`처럼 확장자가 있으면 그대로)
+
+  ```js
+  function handler(event) {
+    var request = event.request;
+    if (request.uri.indexOf('.') === -1) {
+      request.uri = '/index.html';
+    }
+    return request;
+  }
+  ```
+
+- **배포 단위 사용자 지정 오류 응답(403/404 → `/index.html`)은 쓰지 않는다.** 같은 배포의 `/api/*` 응답까지 바뀌어 backend의 403/404 JSON이 `index.html`이 된다
+- 인증: `/api/*`에 쿠키가 전달돼야 로그인·`XSRF-TOKEN`이 동작한다 (`AllViewer`)
+- 소셜 로그인: Spring이 `redirect_uri`를 요청 Host·`X-Forwarded-Proto`로 만든다. `AllViewer`가 Host(CloudFront 도메인)를, 원본 사용자 지정 헤더가 `https`를 넘기고, backend는 `SERVER_FORWARD_HEADERS_STRATEGY=framework`로 이를 쓴다 → `https://<CloudFront 도메인>/login/oauth2/code/kakao`가 카카오 콘솔 등록 주소와 같아야 한다
+  - framework 전략은 헤더를 그대로 믿으므로 8080은 CloudFront에서만 접근하게 막아야 한다 (보안 그룹 CloudFront 접두사 목록)
+- 수동 재배포: Actions → Frontend → Run workflow (main)
+- 수동 배포(워크플로를 쓸 수 없을 때): `frontend`에서 `npm ci && npm run build` → `dist` 내용물을 버킷에 업로드 → CloudFront 무효화 `/*`
 
 ### 서버 준비 순서: DB → 데이터 → 메인
 
@@ -290,12 +332,12 @@ backend와 같은 서버에서 컨테이너만 나눠 돈다. 호스트 포트�
 1. DB 서버에서 알림 테이블 생성 (처음 한 번, `notification_user`로. 순서는 `database/local/03-apply-notification-ddl.sh`와 같다)
 
 ```bash
-scp database/scripts/notification-{inbox,user-api,withdrawal,delivery,admin}.sql ubuntu@<DB 서버>:~/yon-db/sql/
+scp database/scripts/notification-{inbox,user-api,session-end,withdrawal,delivery,admin}.sql ubuntu@<DB 서버>:~/yon-db/sql/
 ```
 DB 서버에서:
 ```bash
 cd ~/yon-db
-for f in inbox user-api withdrawal delivery admin; do
+for f in inbox user-api session-end withdrawal delivery admin; do
   { echo 'SET ROLE notification_user;'; echo 'SET search_path TO notification, pg_catalog;'; cat sql/notification-$f.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1 || break
 done
 ```
@@ -308,6 +350,7 @@ done
 기능을 켜기 전에 추가로 적용할 SQL (위 1번과 같은 방식, `notification_user`, 알림 서버를 멈춘 상태에서)
 - 푸시 슬롯 모드(`NOTIFICATION_PUSH_SLOTS_ENABLED`): `notification-push-slots.sql`. 푸시 만료 분리 이전의 delivery SQL을 적용했던 기존 DB는 그 전에 `notification-push-expiry.sql` (새 DB는 delivery SQL에 포함)
 - 새 적합 알림 우선순위(#80 머지 후): `notification-new-match-priority.sql`
+- 로그아웃 시 푸시 Endpoint 정리(세션 바인딩, `docs/notification-session-end.md`): `notification-session-end.sql`. 알림 서버를 먼저 올리고 backend를 배포한다
 - 그 밖에 알림 SQL이 추가되면 파일 머리말의 적용 시점을 따르고 이 목록에 더한다
 
 ## 운영 중 자주 쓰는 명령 (메인·데이터 서버의 배포 폴더)

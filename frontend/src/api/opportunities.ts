@@ -32,7 +32,8 @@ export async function searchOpportunities(params: SearchParams, signal?: AbortSi
   requestParams.set('size', String(safe.size))
   const response = await apiClient.get<unknown>('/opportunities', {
     params: requestParams, signal,
-    ...(safe.eligibilityStatuses.length > 0 ? { requiresAuth: true } : {}),
+    // 자격 필터는 로그인 전용이라 재발급 실패를 오류로 유지한다. 그 밖의 검색은 재발급 실패 시 비회원 결과로 대체한다.
+    ...(safe.eligibilityStatuses.length > 0 ? { requiresAuth: true } : { recoverAuth: true }),
   })
   if (!isSearchResponse(response.data)) throw new ApiError('unknown', '검색 응답 형식을 확인할 수 없어요. 잠시 후 다시 시도해 주세요.')
   return response.data

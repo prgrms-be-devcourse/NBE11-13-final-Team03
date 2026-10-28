@@ -1,9 +1,11 @@
 package com.team3.backend.auth.controller;
 
 import com.team3.backend.auth.cookie.TokenCookieManager;
+import com.team3.backend.auth.exception.AuthErrorCode;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.auth.service.AuthService;
 import com.team3.backend.auth.service.TokenService;
+import com.team3.backend.global.exception.BusinessException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -37,6 +39,7 @@ public class AuthController {
                     
                     서버에 저장된 Refresh Token을 삭제하고,
                     Access Token과 Refresh Token 쿠키를 제거합니다.
+                    이 세션이 등록한 푸시 Endpoint는 알림 서버가 USER_SESSION_ENDED 메시지로 비활성화합니다.
                     """
     )
     @ApiResponses({
@@ -65,6 +68,42 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
+    @Operation(
+            summary = "모든 기기 로그아웃",
+            description = """
+                    로그인한 사용자의 모든 세션을 로그아웃합니다.
+
+                    서버에 저장된 사용자의 Refresh Token을 모두 삭제하고,
+                    현재 브라우저의 Access Token과 Refresh Token 쿠키를 제거합니다.
+                    다른 기기는 Access Token 만료 후 재발급이 거부됩니다.
+                    모든 세션이 등록한 푸시 Endpoint는 알림 서버가 USER_SESSION_ENDED 메시지로 비활성화합니다.
+                    """
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "204",
+                    description = "모든 기기 로그아웃 성공"
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "인증되지 않은 사용자 또는 유효하지 않은 Access Token"
+            )
+    })
+    @SecurityRequirement(name = "cookieAuth")
+    @PostMapping("/logout-all")
+    public ResponseEntity<Void> logoutAll(
+            @AuthenticationPrincipal CustomUserDetails user,
+            HttpServletResponse response
+    ) {
+        authService.logoutAll(
+                user.getUserId(),
+                user.getSessionId()
+        );
+
+        tokenCookieManager.deleteTokenCookies(response);
+
+        return ResponseEntity.noContent().build();
+    }
 
     @Operation(
             summary = "Access Token 재발급",
@@ -89,6 +128,8 @@ public class AuthController {
                             - Refresh Token이 유효하지 않음
                             - Refresh Token이 만료됨
                             - 저장된 Refresh Token과 일치하지 않음
+                            
+                            일치하지 않는 경우를 제외하면 Access Token·Refresh Token 쿠키를 함께 제거합니다.
                             """
             )
     })
@@ -99,8 +140,18 @@ public class AuthController {
             HttpServletResponse response
     ) {
 
-        TokenService.TokenPair tokenPair =
-                tokenService.reissueToken(refreshToken);
+        TokenService.TokenPair tokenPair;
+        try {
+            tokenPair = tokenService.reissueToken(refreshToken);
+        } catch (BusinessException failure) {
+            // A refresh cookie that can never succeed again must not keep public requests
+            // bouncing on 401. On a hash mismatch the browser may already hold cookies rotated
+            // by a concurrent request, so those are left untouched.
+            if (failure.getErrorCode() != AuthErrorCode.REFRESH_TOKEN_MISMATCH) {
+                tokenCookieManager.deleteTokenCookies(response);
+            }
+            throw failure;
+        }
 
         tokenCookieManager.addTokenCookies(response, tokenPair);
 

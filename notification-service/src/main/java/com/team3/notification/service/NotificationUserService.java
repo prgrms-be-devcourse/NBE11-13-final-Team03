@@ -96,15 +96,31 @@ public class NotificationUserService {
     public Endpoint registerEndpoint(long userId, EndpointRequest request) {
         guard.lockActive(userId);
         var now = Timestamp.from(clock.instant());
+        // Re-registration moves the token to the current session; a request without a session keeps the known one.
         var result = jdbc.query("""
-                INSERT INTO notification_endpoints AS endpoint_row (user_id, fcm_token, active, created_at, updated_at)
-                VALUES (?, ?, true, ?, ?)
-                ON CONFLICT (fcm_token) DO UPDATE SET active = true, updated_at = EXCLUDED.updated_at
+                INSERT INTO notification_endpoints AS endpoint_row (user_id, fcm_token, session_id, active, created_at, updated_at)
+                VALUES (?, ?, ?, true, ?, ?)
+                ON CONFLICT (fcm_token) DO UPDATE SET active = true,
+                  session_id = COALESCE(EXCLUDED.session_id, endpoint_row.session_id), updated_at = EXCLUDED.updated_at
                 WHERE endpoint_row.user_id = EXCLUDED.user_id
                 RETURNING id, active
-                """, (rs, row) -> new Endpoint(rs.getLong(1), rs.getBoolean(2)), userId, request.fcmToken(), now, now);
+                """, (rs, row) -> new Endpoint(rs.getLong(1), rs.getBoolean(2)),
+                userId, request.fcmToken(), request.sessionId(), now, now);
         if (result.isEmpty()) throw new NotificationUserApiException(409, "NOTIFICATION_ENDPOINT_CONFLICT");
         return result.getFirst();
+    }
+
+    /**
+     * Logout path (USER_SESSION_ENDED): no Tombstone check, since a withdrawn user's rows are already gone.
+     * Rows registered before session binding (session_id NULL) cannot be attributed to a session, so this user's
+     * logout deactivates them too; the next registration from any device binds them to a session.
+     */
+    @Transactional
+    public int deactivateSessionEndpoints(long userId, String sessionId) {
+        return jdbc.update("""
+                UPDATE notification_endpoints SET active = false, updated_at = ?
+                WHERE user_id = ? AND (session_id = ? OR session_id IS NULL) AND active
+                """, Timestamp.from(clock.instant()), userId, sessionId);
     }
 
     @Transactional

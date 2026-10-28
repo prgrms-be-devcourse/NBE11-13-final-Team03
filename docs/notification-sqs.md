@@ -12,7 +12,7 @@ Application Outbox의 SQS Publisher와 Notification Consumer·DLQ 연결 검증 
 - `NOTIFICATION_PUBLISHER_TRANSPORT=http`(기본) 또는 `sqs` 중 하나만 선택한다.
 - HTTP는 기존 Feign Client·URL·내부 키를 사용한다. SQS는 AWS SDK for Java 2.x를 사용하며 HTTP 키를 요구하지 않는다.
 - Outbox의 커밋·점유·lease CAS·재시도·설정 오류 시 시도 횟수 보존은 기존 Worker/Store를 재사용한다.
-- 일반 알림과 USER_WITHDRAWN 모두 같은 JSON/messageId/correlationId를 그대로 전송한다. 재시도 시 식별자를 다시 생성하지 않는다.
+- 일반 알림과 제어 메시지(USER_WITHDRAWN, USER_SESSION_ENDED) 모두 같은 JSON/messageId/correlationId를 그대로 전송한다. 재시도 시 식별자를 다시 생성하지 않는다.
 - SQS 응답의 messageId와 본문 MD5를 확인한 뒤에만 성공으로 반환한다.
 - **SQS 모드의 PUBLISHED는 큐 수락**이다. HTTP 모드의 수신 DB 커밋 영수증과 의미가 다르며 Notification 처리 완료를 뜻하지 않는다.
 - SQS 수락 후 응답 유실/Outbox 완료 저장 실패는 재발행될 수 있다. 소비 기록을 통한 중복 처리가 필요하다.
