@@ -11,6 +11,7 @@ let adapter
 axios.defaults.adapter = (config) => adapter(config)
 const { endAuthSession, onAuthLost, resetAuthRecovery } = await import('../src/api/client.ts')
 const { searchOpportunities } = await import('../src/api/opportunities.ts')
+const { getCurrentUser } = await import('../src/api/auth.ts')
 const { getOpportunityDetail } = await import('../src/api/opportunityDetail.ts')
 const { getRegions } = await import('../src/api/regions.ts')
 const { authQueryKey, authQueryOptions, observeAuthLoss } = await import('../src/auth/session.ts')
@@ -113,6 +114,42 @@ test('auth loss re-verifies the cached user through the auth query and clears pe
     assert.equal(paths.filter((path) => path === '/auth/reissue').length, 1, '인증 재확인은 고정된 재발급 실패를 공유한다')
     assert.deepEqual(paths.filter((path) => path === '/users/me'), ['/users/me'])
   } finally { stop(); unsubscribe(); client.clear() }
+})
+
+test('reissue lost to another tab (AUTH_004): resend with that tab\'s cookies, no auth loss, and the next expiry can reissue again', async () => {
+  cookie()
+  const paths = []
+  let expired = true, conflicts = 0, otherTabRotates = true, otherTabCookie = false
+  adapter = async (config) => {
+    paths.push(config.url)
+    if (config.url === '/auth/reissue') {
+      // 다른 탭이 먼저 회전시켜 이 탭의 재발급은 불일치로 실패하지만 브라우저에는 그 탭의 새 쿠키가 있다.
+      if (otherTabRotates) { otherTabRotates = false; conflicts++; otherTabCookie = true; return http(config, 401, 'AUTH_004') }
+      expired = false; return response(config, '')
+    }
+    const authenticated = !expired || otherTabCookie
+    if (otherTabCookie) { otherTabCookie = false; expired = false }
+    if (!authenticated) return http(config, 401, 'AUTH_007')
+    return config.url === '/users/me' ? response(config, user) : response(config, page(true))
+  }
+  let lost = 0
+  const off = onAuthLost(() => { lost++ })
+  try {
+    assert.equal((await searchOpportunities(defaultSearchParams())).content[0].saved, true)
+    assert.deepEqual(paths, ['/opportunities', '/auth/reissue', '/opportunities'])
+    assert.equal(lost, 0)
+    // 다른 탭의 Access Token 쿠키가 나중에 만료되면 이전 충돌 실패를 재사용하지 않고 다시 재발급한다.
+    expired = true; paths.length = 0
+    assert.equal((await searchOpportunities(defaultSearchParams())).content[0].saved, true)
+    assert.deepEqual(paths, ['/opportunities', '/auth/reissue', '/opportunities'])
+    assert.equal(conflicts, 1)
+    // 인증 API(requiresAuth)도 충돌 뒤 그 탭의 새 쿠키로 재전송해 사용자를 비회원으로 오판하지 않는다.
+    expired = true; otherTabRotates = true; paths.length = 0
+    assert.deepEqual(await getCurrentUser(), user)
+    assert.deepEqual(paths, ['/users/me', '/auth/reissue', '/users/me'])
+    assert.equal(conflicts, 2)
+    assert.equal(lost, 0)
+  } finally { off() }
 })
 
 for (const [label, failure] of [['network', (config) => { throw new AxiosError('offline', 'ERR_NETWORK', config, {}) }],

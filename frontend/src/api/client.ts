@@ -15,6 +15,7 @@ declare module 'axios' {
      * 만료·잘못된 Access Token의 401 + AUTH_006/AUTH_007이면 requiresAuth와 같은 재발급 가드로 1회 재발급한다.
      * 재발급 성공이면 같은 요청을 재전송하고, 재발급이 401로 확정 실패하면 인증 손실을 알린 뒤 같은 요청을 익명으로 1회 재전송한다.
      * 재발급이 네트워크·타임아웃·5xx 등으로 불확실하면 익명으로 바꾸지 않고 그 오류를 그대로 낸다.
+     * 다른 탭과의 재발급 충돌(AUTH_004)은 두 옵션 모두 그 탭의 새 쿠키로 같은 요청을 1회 재전송하고 실패로 고정하지 않는다.
      * requiresAuth가 함께 지정되면 requiresAuth의 규칙이 우선한다.
      */
     recoverAuth?: boolean
@@ -67,6 +68,14 @@ function assertCurrentSession(session: number): void {
   if (session !== authSession) {
     throw new ApiError('cancelled', '인증 상태가 변경되어 요청을 취소했습니다.')
   }
+}
+
+/**
+ * 재발급 401 중 세션 상실로 확정된 실패. 저장 토큰 불일치(AUTH_004)는 다른 탭의 동시 재발급에 진 경우라
+ * 브라우저가 이미 그 탭의 새 쿠키를 갖고 있을 수 있어 확정 실패로 보지 않는다.
+ */
+function isTerminalReissueFailure(error: ApiError): boolean {
+  return error.status === 401 && error.code !== 'AUTH_004'
 }
 
 function isRecoverable401(config: RequestConfig, error: ApiError): boolean {
@@ -139,9 +148,9 @@ function reissue(attempt: ReissueAttempt): Promise<void> {
         reissueAttempt = { generation: authGeneration, session: authSession }
       } catch (error: unknown) {
         const normalized = toApiError(error)
-        // 401은 리프레시 토큰 무효로 확정된 실패라 재로그인 확인 전까지 유지한다.
-        // 그 밖의 실패(네트워크·5xx·CSRF 403 등)는 고정하지 않는다.
-        if (attempt === reissueAttempt && normalized.status !== 401) {
+        // 세션 상실로 확정된 401은 재로그인 확인 전까지 유지한다.
+        // 그 밖의 실패(네트워크·5xx·CSRF 403·다른 탭과의 재발급 충돌 등)는 고정하지 않는다.
+        if (attempt === reissueAttempt && !isTerminalReissueFailure(normalized)) {
           // 기존 요청은 실패 Promise를 계속 공유한다. 실패 이후 시작한 새 요청만 복구를 시도한다.
           reissueAttempt = { generation: authGeneration, session: authSession }
         }
@@ -179,17 +188,17 @@ apiClient.interceptors.response.use(
     const attempt = config._reissueAttempt
     if (!attempt) throw normalized
     assertCurrentSession(attempt.session)
-    if (config.requiresAuth) {
-      if (attempt.generation === authGeneration) await reissue(attempt)
-      assertCurrentSession(attempt.session)
-      return apiClient.request(config)
-    }
     try {
       if (attempt.generation === authGeneration) await reissue(attempt)
     } catch (failure: unknown) {
       const reissueError = toApiError(failure)
-      // 401만 리프레시 토큰 무효로 확정된 실패다. 네트워크·타임아웃·5xx·취소는 익명으로 바꾸지 않고 그대로 낸다.
-      if (reissueError.status !== 401) throw reissueError
+      // 다른 탭과의 재발급 충돌(AUTH_004)은 그 탭의 새 쿠키로 같은 요청을 다시 보낸다. 세션 상실이 아니므로 알리지 않는다.
+      if (reissueError.status === 401 && reissueError.code === 'AUTH_004') {
+        assertCurrentSession(attempt.session)
+        return apiClient.request(config)
+      }
+      // 세션 상실로 확정된 401만 익명으로 대체한다. 네트워크·타임아웃·5xx·취소는 오류를 그대로 낸다.
+      if (config.requiresAuth || reissueError.status !== 401) throw reissueError
       assertCurrentSession(attempt.session)
       if (!attempt.lossNotified) {
         attempt.lossNotified = true
@@ -197,7 +206,7 @@ apiClient.interceptors.response.use(
       }
     }
     assertCurrentSession(attempt.session)
-    // 재발급 성공이면 새 쿠키로, 확정 실패면 비회원으로 같은 요청을 1회 재전송한다.
+    // 재발급 성공이면 새 쿠키로, 확정 실패(recoverAuth)면 비회원으로 같은 요청을 1회 재전송한다.
     return apiClient.request(config)
   },
 )
