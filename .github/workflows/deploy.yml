@@ -239,6 +239,25 @@ jobs:
 
           echo "기동 확인 성공: $SERVICE ← $IMAGE"
           docker image prune -f
+
+          # Image retention: keep the last 3 successfully deployed images per service.
+          # deploy-history/<서비스>에 기동 확인까지 성공한 이미지만 기록한다 (롤백된 이미지는 기록되지 않음).
+          # 이 서비스 저장소의 이미지 중 이력에 없는 것만 지운다. 실행 중인 이미지는 이력의 마지막 줄이다.
+          # 다른 서비스(같은 서버의 backend·알림 서버)의 이미지는 건드리지 않는다. 정리 실패는 배포 실패로 보지 않는다.
+          # 더 오래된 이미지로 롤백하면 GHCR에서 다시 받는다 (Deploy 수동 실행 image_tag).
+          KEEP_IMAGES=3
+          mkdir -p deploy-history
+          history="deploy-history/$SERVICE"
+          { grep -vxF "$IMAGE" "$history" 2>/dev/null || true; echo "$IMAGE"; } | tail -n "$KEEP_IMAGES" > "$history.tmp"
+          mv "$history.tmp" "$history"
+          repo="${IMAGE%:*}"
+          removed=0
+          for old in $(docker images --format '{{.Repository}}:{{.Tag}}' "$repo"); do
+            if ! grep -qxF "$old" "$history"; then
+              docker rmi "$old" > /dev/null 2>&1 && removed=$((removed + 1)) || echo "::warning::이미지 정리 실패(사용 중일 수 있음): $old"
+            fi
+          done
+          echo "이미지 보관: $SERVICE 최근 성공 $(wc -l < "$history")개 유지, $removed개 삭제"
           REMOTE
 
       - name: Clean up SSH key
