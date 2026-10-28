@@ -1,0 +1,44 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadNetworkInventoryInSeoul",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeInstances",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSecurityGroupRules",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeInternetGateways",
+        "ec2:DescribeAddresses",
+        "ec2:DescribeManagedPrefixLists",
+        "ec2:GetEbsEncryptionByDefault"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadAttributesOfYonInstances",
+      "Effect": "Allow",
+      "Action": ["ec2:DescribeInstanceAttribute"],
+      "Resource": [
+        "arn:aws:ec2:ap-northeast-2:174170816230:instance/i-05f26052a70059c73",
+        "arn:aws:ec2:ap-northeast-2:174170816230:instance/i-0b48442522e0c3400",
+        "arn:aws:ec2:ap-northeast-2:174170816230:instance/i-08a92649f4f51f8a5",
+        "arn:aws:ec2:ap-northeast-2:174170816230:instance/i-0f45b533faf285beb"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        }
+      }
+    }
+  ]
+}
