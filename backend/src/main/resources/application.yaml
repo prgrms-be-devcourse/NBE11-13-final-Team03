@@ -83,6 +83,16 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [traceId=%X{traceId:-no-trace}] %logger{36} - %msg%n"
 
 yon:
+  # DB 읽기 복제본. DB_REPLICA_URL 환경변수가 있을 때만 켜진다 (ReadReplicaDataSourceConfig). 없으면 primary 하나만 쓴다.
+  # 읽기 전용 트랜잭션 중 transaction-prefixes(클래스.메서드 전체 이름 접두사)에 맞는 조회만 복제본으로 보낸다.
+  # 비워 두면 검색·상세·추천(OpportunitySearchService, OpportunityDetailService, RecommendationService).
+  datasource:
+    replica:
+      # 복제본 연결을 이 시간 안에 못 얻으면 primary로 대신 연결한다
+      connection-timeout-ms: 2000
+      # 복제본 연결에 실패하면 이 시간 동안은 복제본을 건너뛰고 바로 primary를 쓴다 (장애 중 요청마다 대기 시간이 붙지 않게)
+      failure-cooldown-ms: 30000
+      transaction-prefixes:
   eligibility:
     # 판정 결과 제공 방식. local: 같은 애플리케이션 안에서 직접 호출 (MSA 전환 시 원격 구현을 추가하고 값을 바꾼다)
     provider: ${YON_ELIGIBILITY_PROVIDER:local}
