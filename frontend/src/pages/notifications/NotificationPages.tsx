@@ -60,8 +60,10 @@ function NotificationList({ owner }: { owner: AuthUser }) {
   if (result.isError && !result.data) return <RequestError error={result.error} retry={retry} path="/notifications" />
   const items = result.data?.pages.flatMap(page => page.items) ?? []
   const busy = pending || result.isFetching
+  const pushedItem = click && items.find(item => item.id === click.notificationId)
+  const pushedTarget = click && (pushedItem ? notificationTarget(pushedItem) : `/opportunities/${click.opportunityId}`)
   return <>
-    {click && <Card className={styles.card}><p>푸시 알림으로 받은 공고를 확인해 보세요.</p><Button disabled={busy} onClick={() => open(click.notificationId, `/opportunities/${click.opportunityId}`)}>공고 보기</Button></Card>}
+    {click && <Card className={styles.card}><p>푸시 알림으로 받은 내용을 확인해 보세요.</p><Button disabled={busy || !pushedTarget} onClick={() => { if (pushedTarget) open(click.notificationId, pushedTarget) }}>알림 확인하기</Button></Card>}
     <div className={styles.toolbar}><ArrowLink to="/settings/notifications">알림 설정</ArrowLink>
       <div className={styles.actions}><Button variant="ghost" disabled={busy} onClick={retry}>새로고침</Button><Button variant="secondary" disabled={busy || !items.length} loading={pending} onClick={() => { void run({ kind: 'read-all' }) }}>전체 읽음 처리</Button></div></div>
     {mutation.isSuccess && <p role="status">알림 처리를 완료했어요.</p>}
@@ -80,10 +82,10 @@ function NotificationList({ owner }: { owner: AuthUser }) {
           <div className={styles.actions}>
             {unread && <Button variant="secondary" disabled={busy} aria-label={`${item.title} 읽음 처리`} onClick={() => { void run({ kind: 'read', id: item.id }) }}>읽음 처리</Button>}
             {/* 클릭 기록 후 이동해야 하므로 링크가 아닌 버튼이다. 모양은 다른 화면의 이동 링크와 맞춘다. */}
-            <Button variant="ghost" className={styles.openButton} disabled={busy || !target} aria-label={`${item.title} 공고 보기`} onClick={() => {
+            <Button variant="ghost" className={styles.openButton} disabled={busy || !target} aria-label={`${item.title} ${item.type === 'NEW_MATCH' ? '추천 보기' : '공고 보기'}`} onClick={() => {
               if (!target) return
               open(item.id, target)
-            }}>공고 보기<ArrowRight size={16} aria-hidden="true" /></Button>
+            }}>{item.type === 'NEW_MATCH' ? '추천 보기' : '공고 보기'}<ArrowRight size={16} aria-hidden="true" /></Button>
           </div>
           {!target && <p className={styles.note}>연결된 공고가 없어요.</p>}
         </div>

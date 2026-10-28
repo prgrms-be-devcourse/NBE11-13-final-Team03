@@ -64,6 +64,14 @@ test('notification cards follow the shared card pattern: badges on top, time and
   assert.doesNotMatch(css, /\.page > \.toolbar/)
 })
 
+test('NEW_MATCH summary is labeled as a recommendation and offers a recommendation action', () => {
+  const html = render({ items: [{ ...item, type: 'NEW_MATCH', title: '가능성 있는 정책 2건', link: '/' }] })
+  assert.match(html, /새로운 추천/)
+  assert.match(html, /가능성 있는 정책 2건 추천 보기/)
+  assert.match(html, /추천 보기<svg/)
+  assert.doesNotMatch(html, /가능성 있는 정책 2건 공고 보기/)
+})
+
 test('notification settings split in-app and web push into separate cards with the save action aligned right', () => {
   const html = render({ view: 'settings' })
   assert.match(html, /<form class="form" aria-labelledby="in-app-title"><h2 id="in-app-title">알림 받기<\/h2>/)
