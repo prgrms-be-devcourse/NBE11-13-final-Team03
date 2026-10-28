@@ -23,11 +23,14 @@ public class CollectionScheduler {
     private final ManualSyncService sync;
     private final SyncHistoryRepository histories;
 
+    @Scheduled(cron = "0 45 9 * * *", zone = "Asia/Seoul")
+    public void collectYouthPolicy() {
+        start(CollectionSource.YOUTH_POLICY);
+    }
+
     @Scheduled(cron = "0 30 9 * * *", zone = "Asia/Seoul")
-    public void collect() {
-        for (var source : CollectionSource.values()) {
-            start(source);
-        }
+    public void collectEmployment24() {
+        start(CollectionSource.EMPLOYMENT24);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -37,12 +40,13 @@ public class CollectionScheduler {
     }
 
     void recoverMissedSchedule(ZonedDateTime now) {
-        if (now.toLocalTime().isBefore(LocalTime.of(9, 30))) {
-            return;
-        }
         var from = now.toLocalDate().atStartOfDay(now.getZone()).toOffsetDateTime();
         var until = now.toLocalDate().plusDays(1).atStartOfDay(now.getZone()).toOffsetDateTime();
         for (var source : CollectionSource.values()) {
+            var scheduledTime = source == CollectionSource.YOUTH_POLICY ? LocalTime.of(9, 45) : LocalTime.of(9, 30);
+            if (now.toLocalTime().isBefore(scheduledTime)) {
+                continue;
+            }
             try {
                 if (!histories.existsBySourceSourceCodeAndStatusAndStartedAtGreaterThanEqualAndStartedAtLessThan(
                         source.name(), SyncJobStatus.SUCCESS, from, until)

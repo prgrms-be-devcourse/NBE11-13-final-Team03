@@ -11,6 +11,7 @@ import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityCondition;
 import com.team3.backend.opportunity.domain.entity.OpportunityRegion;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
+import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
@@ -24,13 +25,17 @@ import com.team3.backend.search.domain.repository.OpportunitySearchRepository;
 import com.team3.backend.search.dto.OpportunitySearchItemDto;
 import com.team3.backend.search.dto.OpportunitySearchResponseDto;
 import com.team3.backend.search.dto.OpportunitySearchSort;
+import jakarta.persistence.EntityManager;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.Nulls;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
 import lombok.RequiredArgsConstructor;
+import org.hibernate.dialect.PostgreSQLDialect;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -59,6 +64,10 @@ public class OpportunitySearchService {
     private final RegionDirectory regionDirectory;
     private final EligibilityProvider eligibilityProvider;
     private final PreferenceService preferenceService;
+    private final EntityManager entityManager;
+
+    /** PostgreSQL 여부는 한 번만 확인하고 재사용한다. */
+    private volatile Boolean postgres;
 
     /** 공고를 DB에서 페이지 조회한 뒤 인증 사용자에게 현재 페이지의 개인화 상태를 덧붙인다. */
     @Transactional(readOnly = true)
@@ -121,7 +130,7 @@ public class OpportunitySearchService {
                 predicates.add(criteriaBuilder.equal(root.get("detailCategory"), detailCategory.trim()));
             }
             if (matchingRegionCodes != null) {
-                predicates.add(regionMatches(root, query, criteriaBuilder, matchingRegionCodes));
+                predicates.add(regionMatches(root, query, criteriaBuilder, matchingRegionCodes, type));
             }
             return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
         };
@@ -176,6 +185,7 @@ public class OpportunitySearchService {
                 return criteriaBuilder.conjunction();
             });
         }
+        disableJitForCurrentTransaction();
         // DB에서 대표 날짜를 정렬한 뒤 페이지를 잘라야 결과 순서와 전체 건수가 유지된다.
         Page<Opportunity> results = searchRepository.findAll(
                 filters, PageRequest.of(page, size, pageSort));
@@ -198,6 +208,34 @@ public class OpportunitySearchService {
                 items, results.getNumber(), results.getSize(),
                 results.getTotalElements(), results.getTotalPages(), results.hasNext()
         );
+    }
+
+    /**
+     * 이 검색 트랜잭션에서만 PostgreSQL JIT를 끈다.
+     *
+     * 검색 술어는 조건을 EXISTS 서브쿼리로 펼쳐 플래너 비용 추정치가 수백만까지 올라간다.
+     * 그러면 jit_optimize/inline_above_cost(기본 500,000)를 넘겨 LLVM 컴파일이 켜지는데,
+     * 실제 데이터는 작아 컴파일 비용이 실행 비용을 크게 웃돈다 (실험 DB 측정: 실행 시간의 90% 이상).
+     *
+     * SET LOCAL이라 이 트랜잭션이 끝나면 커넥션 설정이 원래대로 돌아가고, 다른 DB 작업에는 영향이 없다.
+     * 서버 전역 설정은 건드리지 않는다. PostgreSQL이 아닌 환경(H2 테스트 등)에서는 아무것도 하지 않는다.
+     */
+    private void disableJitForCurrentTransaction() {
+        if (!isPostgres()) {
+            return;
+        }
+        entityManager.createNativeQuery("SET LOCAL jit = off").executeUpdate();
+    }
+
+    private boolean isPostgres() {
+        Boolean cached = postgres;
+        if (cached == null) {
+            cached = entityManager.getEntityManagerFactory()
+                    .unwrap(SessionFactoryImplementor.class)
+                    .getJdbcServices().getDialect() instanceof PostgreSQLDialect;
+            postgres = cached;
+        }
+        return cached;
     }
 
     private static void addDescendants(RegionIndex index, String code, Set<String> codes) {
@@ -267,19 +305,19 @@ public class OpportunitySearchService {
         Subquery<LocalDate> closedDeadline = deadlineForStatus(root, query, criteriaBuilder, today, ApplicationStatus.CLOSED);
         Expression<Integer> priority = criteriaBuilder.<Integer>selectCase()
                 .when(open, 0).when(upcoming, 1).when(alwaysOpen, 2).when(closed, 3).otherwise(4);
-        Expression<LocalDate> date = criteriaBuilder.<LocalDate>selectCase()
-                .when(open, openDeadline).when(upcoming, upcomingDeadline)
-                .when(closed, closedDeadline).otherwise(criteriaBuilder.nullLiteral(LocalDate.class));
+        // 같은 Criteria 식을 여러 정렬 항목에 다시 쓰면 그 횟수만큼 서브쿼리가 다시 펼쳐진다.
+        // 그래서 하나의 대표 날짜를 공유하지 않고, 오름차순 묶음과 내림차순 묶음의 날짜를 각각 한 번씩만 만든다.
+        // 상태(priority)가 첫 정렬 키라 각 식은 자기 상태 묶음 안에서만 값을 가지고 나머지 묶음에서는 NULL이다.
         Expression<LocalDate> ascendingDate = criteriaBuilder.<LocalDate>selectCase()
-                .when(closed, criteriaBuilder.nullLiteral(LocalDate.class)).otherwise(date);
+                .when(open, openDeadline).when(upcoming, upcomingDeadline)
+                .otherwise(criteriaBuilder.nullLiteral(LocalDate.class));
         Expression<LocalDate> descendingDate = criteriaBuilder.<LocalDate>selectCase()
-                .when(closed, date).otherwise(criteriaBuilder.nullLiteral(LocalDate.class));
+                .when(closed, closedDeadline).otherwise(criteriaBuilder.nullLiteral(LocalDate.class));
+        // 날짜 미확인 공고는 상태 묶음 뒤로 보낸다. 내림차순은 NULL이 앞서는 것이 기본이라 명시한다.
         query.orderBy(
                 criteriaBuilder.asc(priority),
-                criteriaBuilder.asc(criteriaBuilder.<Integer>selectCase()
-                        .when(criteriaBuilder.isNull(date), 1).otherwise(0)),
-                criteriaBuilder.asc(ascendingDate),
-                criteriaBuilder.desc(descendingDate),
+                criteriaBuilder.asc(ascendingDate, Nulls.LAST),
+                criteriaBuilder.desc(descendingDate, Nulls.LAST),
                 criteriaBuilder.desc(root.get("id"))
         );
     }
@@ -344,33 +382,93 @@ public class OpportunitySearchService {
 
     private static Predicate regionMatches(
             Root<Opportunity> root, CriteriaQuery<?> query,
-            CriteriaBuilder criteriaBuilder, Set<String> regionCodes
+            CriteriaBuilder criteriaBuilder, Set<String> regionCodes, OpportunityType type
     ) {
+        // 정책의 거주지 조건과 훈련의 실제 시행 지역은 서로 다른 역할로 조회한다.
+        // 유형이 정해진 검색에서는 반대 유형의 판정이 결과를 바꾸지 않는다. 그 가지를 SQL에 남기면
+        // 실행되지 않더라도 플래너 비용 추정치에는 그대로 더해지므로, 필요한 쪽만 만든다.
+        if (type == OpportunityType.VOCATIONAL_TRAINING) {
+            return criteriaBuilder.exists(
+                    regionExists(root, query, criteriaBuilder, regionCodes, RegionRole.IMPLEMENTATION));
+        }
+        if (type == OpportunityType.YOUTH_POLICY) {
+            return policyVersionInRegion(root, query, criteriaBuilder, regionCodes);
+        }
+        // 유형을 지정하지 않은 검색만 두 판정을 모두 둔다.
+        // EXISTS로 복수 지역 행의 중복을 막고, NATIONAL은 정책에만 적용한다.
         Predicate youthPolicy = criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.YOUTH_POLICY);
         Predicate training = criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.VOCATIONAL_TRAINING);
-        // 정책의 거주지 조건과 훈련의 실제 시행 지역은 서로 다른 역할로 조회한다.
-        Subquery<Long> residence = regionExists(root, query, criteriaBuilder, regionCodes, RegionRole.RESIDENCE);
-        Subquery<Long> implementation = regionExists(root, query, criteriaBuilder, regionCodes, RegionRole.IMPLEMENTATION);
+        return criteriaBuilder.or(
+                criteriaBuilder.and(youthPolicy,
+                        residenceOrNational(root, query, criteriaBuilder, regionCodes)),
+                criteriaBuilder.and(training, criteriaBuilder.exists(
+                        regionExists(root, query, criteriaBuilder, regionCodes, RegionRole.IMPLEMENTATION)))
+        );
+    }
 
-        Subquery<Long> national = query.subquery(Long.class);
+    /**
+     * 청년정책 전용 지역 판정. 두 조건을 OR로 묶는 위치만 버전 서브쿼리 안으로 옮긴 것이고 규칙은 같다.
+     *
+     * 바깥 술어가 OR이면 PostgreSQL이 EXISTS를 세미조인으로 승격하지 못해 공고 전수 스캔으로 고정된다.
+     * OR을 서브쿼리 안에 두면 바깥은 단일 IN이 되어 버전 기본키와 version_id 인덱스를 타는 중첩 루프가 된다.
+     * (전국 대상 판정은 그대로 유지한다. 빼면 결과가 줄어든다.)
+     */
+    private static Predicate policyVersionInRegion(
+            Root<Opportunity> root, CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder, Set<String> regionCodes
+    ) {
+        Subquery<Long> versions = query.subquery(Long.class);
+        Root<OpportunityVersion> version = versions.from(OpportunityVersion.class);
+
+        Subquery<Long> residence = versions.subquery(Long.class);
+        Root<OpportunityRegion> region = residence.from(OpportunityRegion.class);
+        residence.select(region.get("id")).where(
+                criteriaBuilder.equal(region.get("version"), version),
+                criteriaBuilder.equal(region.get("regionRole"), RegionRole.RESIDENCE),
+                region.get("region").get("regionCode").in(regionCodes)
+        );
+
+        Subquery<Long> national = versions.subquery(Long.class);
         Root<OpportunityCondition> condition = national.from(OpportunityCondition.class);
-        // 전국 거주 가능 여부는 현재 버전의 REGION 조건 JSON에만 기록된다.
+        national.select(condition.get("id")).where(
+                criteriaBuilder.equal(condition.get("version"), version),
+                nationalResidence(criteriaBuilder, condition)
+        );
+
+        versions.select(version.get("id")).where(
+                criteriaBuilder.or(criteriaBuilder.exists(residence), criteriaBuilder.exists(national)));
+        return root.get("currentVersion").get("id").in(versions);
+    }
+
+    /** 전국 거주 가능 여부는 현재 버전의 REGION 조건 JSON에만 기록된다. */
+    private static Predicate nationalResidence(
+            CriteriaBuilder criteriaBuilder, Root<OpportunityCondition> condition
+    ) {
         Expression<String> status = criteriaBuilder.function(
                 "jsonb_extract_path_text", String.class,
                 condition.get("expression"), criteriaBuilder.literal("status"));
-        national.select(condition.get("id")).where(
-                criteriaBuilder.equal(condition.get("version"), root.get("currentVersion")),
+        return criteriaBuilder.and(
                 criteriaBuilder.equal(condition.get("conditionType"), ConditionType.REGION),
                 criteriaBuilder.equal(condition.get("conditionField"), "residenceRegion"),
                 criteriaBuilder.equal(status, "NATIONAL")
         );
+    }
 
-        // EXISTS로 복수 지역 행의 중복을 막고, NATIONAL은 정책에만 적용한다.
-        return criteriaBuilder.or(
-                criteriaBuilder.and(youthPolicy, criteriaBuilder.or(
-                        criteriaBuilder.exists(residence), criteriaBuilder.exists(national))),
-                criteriaBuilder.and(training, criteriaBuilder.exists(implementation))
+    /** 청년정책의 지역 판정: 거주 자격 지역에 포함되거나 전국 대상이면 선택 지역에 해당한다. */
+    private static Predicate residenceOrNational(
+            Root<Opportunity> root, CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder, Set<String> regionCodes
+    ) {
+        Subquery<Long> residence = regionExists(root, query, criteriaBuilder, regionCodes, RegionRole.RESIDENCE);
+
+        Subquery<Long> national = query.subquery(Long.class);
+        Root<OpportunityCondition> condition = national.from(OpportunityCondition.class);
+        national.select(condition.get("id")).where(
+                criteriaBuilder.equal(condition.get("version"), root.get("currentVersion")),
+                nationalResidence(criteriaBuilder, condition)
         );
+
+        return criteriaBuilder.or(criteriaBuilder.exists(residence), criteriaBuilder.exists(national));
     }
 
     private static Subquery<Long> regionExists(

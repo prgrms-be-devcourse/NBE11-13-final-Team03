@@ -43,7 +43,10 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -96,6 +99,9 @@ class OpportunitySearchPostgresTest {
 
     @Autowired
     private EntityManagerFactory entityManagerFactory;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Autowired
     private RegionDirectory regionDirectory;
@@ -559,7 +565,9 @@ class OpportunitySearchPostgresTest {
                     .andExpect(jsonPath("$.totalElements").value(9))
                     .andExpect(jsonPath("$.content.length()").value(9))
                     .andReturn();
-            assertEquals(3, statistics.getPrepareStatementCount() - beforeLargePage);
+            // 목록 1 + COUNT 1 + 판정·저장 조회 1에 더해, 검색 트랜잭션마다 SET LOCAL jit = off 1문장이 붙는다.
+            // 결과 건수와 무관한 고정 1회라 항목별 추가 질의(N+1)가 없다는 검증 의도는 그대로다.
+            assertEquals(4, statistics.getPrepareStatementCount() - beforeLargePage);
             Map<Long, Map<String, Object>> items = searchItems(largePage);
             assertEquals("ELIGIBLE", items.get(eligible.getId()).get("eligibilityStatus"));
             assertEquals(true, items.get(eligible.getId()).get("saved"));
@@ -1278,5 +1286,36 @@ class OpportunitySearchPostgresTest {
                 .version(opportunity.getCurrentVersion())
                 .courseId("PG-date-" + opportunity.getId()).courseRound(1)
                 .trainingStartDate(startDate).build());
+    }
+
+    @Test
+    void searchTurnsOffJitInsideItsOwnTransaction() throws Exception {
+        // 트랜잭션 시작 시점에는 서버 기본값이다.
+        assertEquals("on", showJit());
+
+        mockMvc.perform(get("/api/opportunities").param("size", "1"))
+                .andExpect(status().isOk());
+
+        // 검색 질의와 같은 트랜잭션·커넥션에서 꺼져 있어야 한다.
+        assertEquals("off", showJit());
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void jitSettingDoesNotLeakOutOfTheSearchTransaction() throws Exception {
+        // 검색은 자기 트랜잭션에서 jit을 끈다.
+        mockMvc.perform(get("/api/opportunities").param("size", "1"))
+                .andExpect(status().isOk());
+
+        // SET LOCAL이라 트랜잭션이 끝나면 복원된다.
+        // 풀에서 같은 커넥션을 다시 받더라도 새 트랜잭션은 기본값으로 시작해야 한다.
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        for (int attempt = 0; attempt < 5; attempt++) {
+            assertEquals("on", template.execute(status -> showJit()));
+        }
+    }
+
+    private String showJit() {
+        return (String) entityManager.createNativeQuery("SHOW jit").getSingleResult();
     }
 }

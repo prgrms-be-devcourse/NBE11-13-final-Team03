@@ -78,7 +78,7 @@ AWS 인증은 OIDC 역할로 한다 (계정에서 IAM 사용자·액세스 키�
 | 준비 | 내용 |
 |---|---|
 | OIDC 공급자 | IAM → 자격 증명 공급자 `token.actions.githubusercontent.com` (대상 `sts.amazonaws.com`) |
-| IAM 역할 | 신뢰 정책: 위 공급자, `aud`=`sts.amazonaws.com`, `sub`=`repo:<조직>/<저장소>:ref:refs/heads/main`<br>권한: 프론트 버킷 `s3:ListBucket`(버킷)·`s3:PutObject`·`s3:DeleteObject`(버킷/*), 그 배포 `cloudfront:CreateInvalidation`만 |
+| IAM 역할 | 신뢰 정책: 위 공급자, `aud`=`sts.amazonaws.com`, `sub`=`repo:<조직>@<조직 ID>/<저장소>@<저장소 ID>:ref:refs/heads/main` (이 조직은 ID 포함 형식. 실제 값은 Actions → "OIDC claims check" 수동 실행(`oidc-claims.yml`) 출력으로 확인, 현재 `repo:prgrms-be-devcourse@88020948/NBE11-13-final-Team03@1406626385:ref:refs/heads/main`)<br>권한: 프론트 버킷 `s3:ListBucket`(버킷)·`s3:PutObject`·`s3:DeleteObject`(버킷/*), 그 배포 `cloudfront:CreateInvalidation`만 |
 | Actions 변수 | `FRONTEND_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`, `FRONTEND_DEPLOY_ROLE_ARN` (키가 아니라 secret 불필요). 선택 `VITE_FIREBASE_*` (공개 설정) |
 
 - 업로드: `assets/`(해시 파일명)는 1년 캐시·삭제 안 함, 나머지는 `no-cache` + 빌드에서 사라진 파일 삭제 → CloudFront `/*` 무효화

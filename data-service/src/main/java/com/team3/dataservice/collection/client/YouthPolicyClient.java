@@ -73,7 +73,7 @@ public class YouthPolicyClient {
                     .onStatus(status -> !status.is2xxSuccessful(), (request, result) -> {
                         int status = result.getStatusCode().value();
                         throw new YouthPolicyClientException("HTTP_" + status,
-                                status == 429 || status >= 500);
+                                status == 403 || status == 429 || status >= 500);
                     })
                     .body(JsonNode.class);
         } catch (ResourceAccessException exception) {
