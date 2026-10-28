@@ -34,6 +34,7 @@ test('home latest query reuses public search, requests six latest items, forward
     assert.equal(config.params.get('sort'), null) // 기존 직렬화는 서버 기본값 LATEST를 생략한다.
     assert.equal(config.params.get('page'), null) // 기본 page=0
     assert.equal(config.requiresAuth, undefined)
+    assert.equal(config.recoverAuth, true)
     assert.equal(config.signal, controller.signal)
     return response(config, latestResponse)
   }

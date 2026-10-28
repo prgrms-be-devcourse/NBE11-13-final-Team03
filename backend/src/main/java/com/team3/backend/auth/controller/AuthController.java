@@ -1,9 +1,11 @@
 package com.team3.backend.auth.controller;
 
 import com.team3.backend.auth.cookie.TokenCookieManager;
+import com.team3.backend.auth.exception.AuthErrorCode;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.auth.service.AuthService;
 import com.team3.backend.auth.service.TokenService;
+import com.team3.backend.global.exception.BusinessException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -126,6 +128,8 @@ public class AuthController {
                             - Refresh Token이 유효하지 않음
                             - Refresh Token이 만료됨
                             - 저장된 Refresh Token과 일치하지 않음
+                            
+                            일치하지 않는 경우를 제외하면 Access Token·Refresh Token 쿠키를 함께 제거합니다.
                             """
             )
     })
@@ -136,8 +140,18 @@ public class AuthController {
             HttpServletResponse response
     ) {
 
-        TokenService.TokenPair tokenPair =
-                tokenService.reissueToken(refreshToken);
+        TokenService.TokenPair tokenPair;
+        try {
+            tokenPair = tokenService.reissueToken(refreshToken);
+        } catch (BusinessException failure) {
+            // A refresh cookie that can never succeed again must not keep public requests
+            // bouncing on 401. On a hash mismatch the browser may already hold cookies rotated
+            // by a concurrent request, so those are left untouched.
+            if (failure.getErrorCode() != AuthErrorCode.REFRESH_TOKEN_MISMATCH) {
+                tokenCookieManager.deleteTokenCookies(response);
+            }
+            throw failure;
+        }
 
         tokenCookieManager.addTokenCookies(response, tokenPair);
 

@@ -64,11 +64,11 @@ test('duplicates, orphan parents, cycles, self-links and contradictory leaf flag
 const originalAdapter = apiClient.defaults.adapter
 afterEach(() => { apiClient.defaults.adapter = originalAdapter })
 const response = (config, data, status = 200) => ({ config, data, status, statusText: '', headers: {} })
-test('public region request validates its wrapper, forwards cancellation and never opts into auth recovery', async () => {
+test('public region request validates its wrapper, forwards cancellation and uses public recovery instead of requiresAuth', async () => {
   const controller = new AbortController()
   apiClient.defaults.adapter = async (config) => {
     assert.equal(config.url, '/regions'); assert.equal(config.baseURL, '/api')
-    assert.equal(config.requiresAuth, undefined); assert.equal(config.signal, controller.signal)
+    assert.equal(config.requiresAuth, undefined); assert.equal(config.recoverAuth, true); assert.equal(config.signal, controller.signal)
     return response(config, { regions: regionRows })
   }
   assert.deepEqual(await getRegions(controller.signal), options)

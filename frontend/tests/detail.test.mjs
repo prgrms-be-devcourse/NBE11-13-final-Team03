@@ -25,12 +25,13 @@ test('detail ID validation blocks invalid, unsafe and non-canonical numbers befo
   assert.equal(isOpportunityId('9007199254740991'), true)
 })
 
-test('public detail uses relative path once, a signal and per-ID query keys without forcing auth recovery', async () => {
+test('public detail uses relative path once, a signal and per-ID query keys with public recovery instead of requiresAuth', async () => {
   const controller = new AbortController()
   apiClient.defaults.adapter = async (config) => {
     assert.equal(config.url, '/opportunities/42')
     assert.equal(config.baseURL, '/api')
     assert.equal(config.requiresAuth, undefined)
+    assert.equal(config.recoverAuth, true)
     assert.equal(config.signal, controller.signal)
     assert.equal(config.headers.get('X-XSRF-TOKEN'), undefined)
     return response(config, policy)
@@ -60,7 +61,7 @@ test('policy and training DTOs accept nullable or omitted detail fields; malform
   await assert.rejects(getOpportunityDetail('42'), (error) => error.kind === 'unknown')
 })
 
-test('public 401 never reissues; 404, 5xx, network and timeout remain distinct errors instead of fake content', async () => {
+test('public 401 without a token failure code never reissues; 404, 5xx, network and timeout remain distinct errors instead of fake content', async () => {
   let calls = 0
   for (const status of [401, 403, 404, 500]) {
     apiClient.defaults.adapter = async (config) => {

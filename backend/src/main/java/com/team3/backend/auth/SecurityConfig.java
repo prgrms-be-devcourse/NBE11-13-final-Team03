@@ -63,7 +63,7 @@ public class SecurityConfig {
                                 "/login-failure.html",
                                 "/oauth2/**",
                                 "/login/**",
-                                "/api/auth/reissue"
+                                TokenAuthenticationFilter.REISSUE_PATH
 
                         ).permitAll()
 
@@ -72,13 +72,13 @@ public class SecurityConfig {
                                 HttpMethod.GET,
                                 "/api/opportunities",
                                 "/api/opportunities/{opportunityId}",
-                                "/api/interests/options",
+                                TokenAuthenticationFilter.INTEREST_OPTIONS_PATH,
                                 "/api/regions"
                         )
                         .permitAll()
 
                         // 내부 자동화 API
-                        .requestMatchers("/api/internal/**")
+                        .requestMatchers(TokenAuthenticationFilter.INTERNAL_API_PREFIX + "**")
                         .permitAll()
 
                         // 그 외 API

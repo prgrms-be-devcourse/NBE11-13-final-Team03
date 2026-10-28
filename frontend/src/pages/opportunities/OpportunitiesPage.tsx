@@ -58,7 +58,8 @@ function OpportunitiesPage() {
     }
   }, [filtersOpen])
 
-  const results = useQuery(searchQueryOptions(params, userId, !params.eligibilityStatuses.length || userId !== null))
+  // 인증 확인(/users/me)이 끝난 뒤 검색한다. Access Token 쿠키 없이 Refresh Token만 남은 경우 인증 확인이 먼저 재발급을 끌어낸다.
+  const results = useQuery(searchQueryOptions(params, userId, auth?.status !== 'checking' && (!params.eligibilityStatuses.length || userId !== null)))
   const options = useQuery({
     queryKey: ['interest-options'], queryFn: ({ signal }) => getInterestOptions(signal), staleTime: 5 * 60_000,
   })
