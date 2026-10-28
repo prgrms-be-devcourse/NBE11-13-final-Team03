@@ -66,7 +66,35 @@ python3 infra/scripts/collect_inventory.py --output "$INVENTORY_DIR"
 EC2는 연결된 역할이 인프라 조회 권한을 갖는지 먼저 확인한다. 기존 main/data의 SQS 역할만으로 모든 조회가 가능하다고 가정하지 않는다.
 SSH 호스트 키가 달라지면 검증 없이 known_hosts를 지우거나 확인을 끄지 않고, AWS 담당자가 신뢰할 수 있는 경로에서 현재 서버 키를 확인한다.
 
-### 결과 전달
+### EC2에서 네트워크 조회 권한만 임시로 준비하는 경우
+
+사용자 제공 실행 결과(2026-10-28)에서 main의 AWS CLI 2.35.21과 `team03-main-sqs` 역할 인증은 정상이며,
+`ec2:DescribeVpcs`는 identity policy에 허용이 없어 UnauthorizedOperation으로 거부됐다.
+SSH 연결이나 다른 로그인 방법으로 해당 권한 제한을 해소할 수는 없다.
+
+전체 IAM/S3/CloudFront 권한을 앱 역할에 추가하는 대신, 다음 네트워크 단계에 필요한 EC2 조회만 임시 허용하는 선택지를 제공한다.
+실제 역할 정책 변경은 IAM 권한을 가진 담당자가 검토·적용한다. 코드/PR만으로 권한을 추가하지 않는다.
+
+1. AWS 콘솔 → IAM → 역할 → **team03-main-sqs** → 권한 → 권한 추가 → 인라인 정책 생성 → JSON.
+2. [network-inventory-read.json](iam/network-inventory-read.json)을 붙여 넣고 `YONNetworkInventoryReadTemporary`라는 이름으로 추가한다.
+   기존 SQS 정책·역할 신뢰 관계·EC2 인스턴스 프로파일은 교체하지 않는다.
+3. 권한 반영 후 EC2에서 이전 DescribeVpcs 명령이 성공하는지 확인한다. 앱/DB 재시작은 필요하지 않다.
+4. 전달본을 푼 루트에서 다음을 실행한다. EC2 역할 인증을 사용하므로 `aws login`이 필요하지 않다.
+
+```bash
+umask 077
+INVENTORY_DIR="$HOME/yon-network-inventory-$(date -u +%Y%m%dT%H%M%SZ)"
+python3 infra/scripts/collect_inventory.py --scope network --output "$INVENTORY_DIR"
+```
+
+`scope=network`의 `complete=true`는 지정한 EC2 조회가 성공했다는 뜻이다. 전체 AWS 구성 수집 완료가 아니다.
+이 모드는 STS 계정 확인과 서울 리전 EC2 조회만 수행하며 IAM·S3·CloudFront·SQS 등은 호출하지 않는다.
+정책은 읽기 작업 12개만 허용하며 생성·변경·삭제 권한은 없다. 목록 조회에는 Resource `*`와 서울 리전 조건을 사용한다.
+인스턴스 속성 조회는 대상 4대의 ARN으로 제한한다. 목록 조회의 특정 VPC 제한은 수집기 필터다. 이 범위가 허용되지 않으면 콘솔에서 필요한 ID만 제공한다.
+조회 후 결과를 비공개로 전달하고 담당자가 **추가한 임시 인라인 정책만** 제거한다. 기존 SQS 정책은 유지한다.
+정책 추가 후에도 거부되면 권한 경계·조직 정책 등은 관리자에게 확인한다. 전체 서비스 조회와 원격 상태 준비는 별도 조건이다.
+
+### 수집 결과 확인
 
 기존 디렉터리는 덮어쓰지 않는다. `inventory.json` 하나에 조회별 `status`, 성공 `data` 또는 실패 `error_code`를 저장한다.
 CloudFront LIVE Function 코드는 같은 디렉터리의 `cf-function-*.js`로 따로 받는다.
@@ -162,3 +190,4 @@ Terraform으로 인프라를 가져와도 DB 데이터·.env·Compose·비밀값
 - [Spring 전달 헤더 처리](https://docs.spring.io/spring/reference/web/webmvc/filters.html#filters-forwarded-headers)
 - [ACM 내보내기 지원 인증서](https://docs.aws.amazon.com/acm/latest/userguide/acm-exportable-certificates.html): EC2 origin TLS에 ACM을 전혀 쓸 수 없다는 기존 계획의 단정은 제외한다. 비용·갱신·배포 방식은 별도 결정한다.
 - [웹 콘솔 계정으로 AWS CLI 로그인](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html)
+- [EC2 작업별 권한·자원 범위](https://docs.aws.amazon.com/service-authorization/latest/reference/list_ec2.html)

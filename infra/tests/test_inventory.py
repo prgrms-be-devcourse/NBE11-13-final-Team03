@@ -62,6 +62,48 @@ class InventoryTests(unittest.TestCase):
             policy_calls = [c for c in run.call_args_list if c.args[0][2] == "get-policy"]
             self.assertEqual(len(policy_calls), 1)
 
+    def test_network_scope_uses_only_actions_in_the_regional_read_policy(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(inventory.subprocess, "run", side_effect=self.response) as run:
+            output = Path(directory) / "new"
+            self.assertTrue(inventory.Collector().collect(output, "network"))
+            manifest = json.loads((output / "inventory.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["scope"], "network")
+            self.assertTrue(manifest["complete"])
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual({args[1] for args in commands}, {"sts", "ec2"})
+            actions = {"ec2:" + "".join(part.title() for part in args[2].split("-"))
+                       for args in commands if args[1] == "ec2"}
+            policy = json.loads((Path(__file__).parents[1] / "iam/network-inventory-read.json").read_text())
+            self.assertEqual({a for s in policy["Statement"] for a in s["Action"]}, actions)
+            for statement in policy["Statement"]:
+                self.assertEqual(statement["Effect"], "Allow")
+                self.assertEqual(statement["Condition"], {"StringEquals": {"aws:RequestedRegion": inventory.REGION}})
+            self.assertEqual(policy["Statement"][0]["Resource"], "*")
+            attributes = policy["Statement"][1]
+            self.assertEqual(attributes["Action"], ["ec2:DescribeInstanceAttribute"])
+            self.assertEqual(set(attributes["Resource"]), {
+                f"arn:aws:ec2:{inventory.REGION}:{inventory.ACCOUNT}:instance/{i}" for i in inventory.INSTANCES})
+            self.assertFalse(list(output.glob("*.js")))
+
+    def test_network_denial_is_recorded_without_querying_other_services(self):
+        def response(args, **kwargs):
+            if args[2] == "describe-vpcs":
+                return subprocess.CompletedProcess(args, 254, "", "An error occurred (UnauthorizedOperation) not authorized")
+            return self.response(args, **kwargs)
+        with tempfile.TemporaryDirectory() as directory, patch.object(inventory.subprocess, "run", side_effect=response) as run:
+            output = Path(directory) / "new"
+            self.assertFalse(inventory.Collector().collect(output, "network"))
+            manifest = json.loads((output / "inventory.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["results"]["vpc"]["error_code"], "UnauthorizedOperation")
+            self.assertIn("termination/" + inventory.INSTANCES[-1], manifest["results"])
+            self.assertEqual({call.args[0][1] for call in run.call_args_list}, {"sts", "ec2"})
+
+    def test_invalid_scope_stops_before_any_aws_call(self):
+        with patch.object(inventory.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "scope"):
+                inventory.Collector().collect(Path("unused"), "unknown")
+            run.assert_not_called()
+
     def test_wrong_account_stops_before_resource_queries_or_output_creation(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(inventory.subprocess, "run", return_value=
                 subprocess.CompletedProcess([], 0, '{"Account":"000000000000"}', "")) as run:

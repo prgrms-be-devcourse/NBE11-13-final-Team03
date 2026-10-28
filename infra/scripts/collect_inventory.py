@@ -42,16 +42,21 @@ class Collector:
         self.results[key] = {"status": "ok", "data": data}
         return data
 
-    def collect(self, output):
+    def collect(self, output, scope="all"):
+        if scope not in {"all", "network"}:
+            raise ValueError("Unknown inventory scope")
         identity = self.query("identity", "sts", "get-caller-identity")
         if identity.get("Account") != ACCOUNT:
             raise ValueError("AWS account verification failed; no inventory directory was created")
         output.mkdir(mode=0o700, parents=True, exist_ok=False)
         manifest = {"schema_version": 1, "account_id": ACCOUNT, "region": REGION,
-                    "started_at": datetime.now(timezone.utc).isoformat(), "complete": False,
+                    "started_at": datetime.now(timezone.utc).isoformat(), "scope": scope, "complete": False,
                     "results": self.results}
         try:
-            self.collect_resources(output)
+            if scope == "network":
+                self.collect_network()
+            else:
+                self.collect_resources(output)
             manifest["complete"] = all(item["status"] == "ok" for item in self.results.values())
         finally:
             manifest["finished_at"] = datetime.now(timezone.utc).isoformat()
@@ -60,7 +65,7 @@ class Collector:
             path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest["complete"]
 
-    def collect_resources(self, output):
+    def collect_network(self):
         q = self.query
         q("vpc", "ec2", "describe-vpcs", "--vpc-ids", VPC)
         q("subnets", "ec2", "describe-subnets", "--filters", f"Name=vpc-id,Values={VPC}")
@@ -77,6 +82,10 @@ class Collector:
         for instance in INSTANCES:
             q(f"termination/{instance}", "ec2", "describe-instance-attribute", "--instance-id", instance,
               "--attribute", "disableApiTermination")
+
+    def collect_resources(self, output):
+        self.collect_network()
+        q = self.query
         for role in ROLES:
             q(f"roles/{role}", "iam", "get-role", "--role-name", role)
             q(f"profiles/{role}", "iam", "list-instance-profiles-for-role", "--role-name", role)
@@ -139,9 +148,11 @@ class Collector:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path, help="New private directory; never commit raw output")
+    parser.add_argument("--scope", choices=("all", "network"), default="all",
+                        help="network uses only STS identity and EC2 read operations; default: all")
     args = parser.parse_args()
     try:
-        complete = Collector().collect(args.output)
+        complete = Collector().collect(args.output, args.scope)
     except (OSError, ValueError) as error:
         parser.exit(1, f"{type(error).__name__}: inventory could not start; check account and new output directory\n")
     print(f"Inventory saved; complete={complete}. Review inventory.json errors before sharing.")
