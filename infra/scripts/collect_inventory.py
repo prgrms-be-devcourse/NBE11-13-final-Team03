@@ -14,13 +14,15 @@ BUCKET = "yon-frontend-team03-174170816230-ap-northeast-2-an"
 INSTANCES = ("i-05f26052a70059c73", "i-0b48442522e0c3400", "i-08a92649f4f51f8a5", "i-0f45b533faf285beb")
 GROUPS = ("sg-0fbaf2496d1edd1ed", "sg-042c6f59681a7b1bd", "sg-03c341b41a4087a48", "sg-04b53d2630b9a7ea9")
 ROLES = ("team03-main-sqs", "team03-data-sqs", "team03-github-actions-deploy", "team03-frontend-deploy", "team03-ec2-ecr-read")
+IMPORT_ROLES = ROLES[:4]
+TEMPORARY_POLICIES = {"YONNetworkInventoryReadTemporary", "YONNetworkImportReadTemporary", "YONTerraformImportReadTemporary"}
 
 
 class Collector:
     def __init__(self):
         self.results = {}
 
-    def query(self, key, *args):
+    def query(self, key, *args, absent_codes=()):
         if args[1].split("-")[0] not in {"get", "list", "describe"}:
             raise ValueError("Only read-only AWS operations are permitted")
         command = ["aws", *args, "--region", REGION, "--output", "json", "--no-cli-pager"]
@@ -29,7 +31,8 @@ class Collector:
                                     errors="replace", timeout=120, env={**os.environ, "AWS_PAGER": ""})
             if result.returncode:
                 match = re.search(r"An error occurred \(([A-Za-z0-9_.-]+)\)", result.stderr)
-                self.results[key] = {"status": "error", "error_code": match[1] if match else "CLI_ERROR",
+                code = match[1] if match else "CLI_ERROR"
+                self.results[key] = {"status": "absent" if code in absent_codes else "error", "error_code": code,
                                      "exit_code": result.returncode}
                 return {}
             data = json.loads(result.stdout)
@@ -43,7 +46,7 @@ class Collector:
         return data
 
     def collect(self, output, scope="all"):
-        if scope not in {"all", "network"}:
+        if scope not in {"all", "network", "import"}:
             raise ValueError("Unknown inventory scope")
         identity = self.query("identity", "sts", "get-caller-identity")
         if identity.get("Account") != ACCOUNT:
@@ -56,8 +59,8 @@ class Collector:
             if scope == "network":
                 self.collect_network()
             else:
-                self.collect_resources(output)
-            manifest["complete"] = all(item["status"] == "ok" for item in self.results.values())
+                self.collect_resources(output, import_only=scope == "import")
+            manifest["complete"] = all(item["status"] in {"ok", "absent"} for item in self.results.values())
         finally:
             manifest["finished_at"] = datetime.now(timezone.utc).isoformat()
             path = output / "inventory.json"
@@ -83,15 +86,17 @@ class Collector:
             q(f"termination/{instance}", "ec2", "describe-instance-attribute", "--instance-id", instance,
               "--attribute", "disableApiTermination")
 
-    def collect_resources(self, output):
+    def collect_resources(self, output, import_only=False):
         self.collect_network()
         q = self.query
-        for role in ROLES:
+        for role in IMPORT_ROLES if import_only else ROLES:
             q(f"roles/{role}", "iam", "get-role", "--role-name", role)
-            q(f"profiles/{role}", "iam", "list-instance-profiles-for-role", "--role-name", role)
+            profiles = q(f"profiles/{role}", "iam", "list-instance-profiles-for-role", "--role-name", role)
             attached = q(f"attached/{role}", "iam", "list-attached-role-policies", "--role-name", role)
             for policy in attached.get("AttachedPolicies", []):
                 arn = policy["PolicyArn"]
+                if arn.rsplit("/", 1)[-1] in TEMPORARY_POLICIES:
+                    continue
                 if f"policy/{arn}" in self.results:
                     continue
                 version = q(f"policy/{arn}", "iam", "get-policy", "--policy-arn", arn).get("Policy", {}).get("DefaultVersionId")
@@ -99,12 +104,24 @@ class Collector:
                     q(f"policy-version/{arn}", "iam", "get-policy-version", "--policy-arn", arn, "--version-id", version)
             inline = q(f"inline/{role}", "iam", "list-role-policies", "--role-name", role)
             for name in inline.get("PolicyNames", []):
+                if name in TEMPORARY_POLICIES:
+                    continue
                 q(f"inline/{role}/{name}", "iam", "get-role-policy", "--role-name", role, "--policy-name", name)
+            if import_only:
+                for profile in profiles.get("InstanceProfiles", []):
+                    name = profile["InstanceProfileName"]
+                    q(f"profile/{name}", "iam", "get-instance-profile", "--instance-profile-name", name)
         q("oidc", "iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn",
           f"arn:aws:iam::{ACCOUNT}:oidc-provider/token.actions.githubusercontent.com")
         for operation in ("get-bucket-policy", "get-public-access-block", "get-bucket-versioning",
                           "get-bucket-encryption", "get-bucket-ownership-controls"):
-            q(f"s3/{operation}", "s3api", operation, "--bucket", BUCKET)
+            absent = {"get-bucket-policy": ("NoSuchBucketPolicy",), "get-public-access-block": ("NoSuchPublicAccessBlockConfiguration",),
+                      "get-bucket-ownership-controls": ("OwnershipControlsNotFoundError",),
+                      "get-bucket-encryption": ("ServerSideEncryptionConfigurationNotFoundError",)}
+            q(f"s3/{operation}", "s3api", operation, "--bucket", BUCKET, absent_codes=absent.get(operation, ()))
+        if import_only:
+            q("key-pair", "ec2", "describe-key-pairs", "--key-names", "team03_key", "--include-public-key")
+            q("s3/tags", "s3api", "get-bucket-tagging", "--bucket", BUCKET, absent_codes=("NoSuchTagSet",))
         distributions = q("cf-distributions", "cloudfront", "list-distributions")
         targets = [d for d in distributions.get("DistributionList", {}).get("Items", [])
                    if any(o.get("Id") == "yon-backend" for o in d.get("Origins", {}).get("Items", []))]
@@ -114,6 +131,8 @@ class Collector:
         for distribution in targets:
             key = "cloudfront/" + distribution["Id"]
             config = q(key, "cloudfront", "get-distribution", "--id", distribution["Id"]).get("Distribution", {}).get("DistributionConfig", {})
+            if import_only:
+                q(key + "/tags", "cloudfront", "list-tags-for-resource", "--resource", distribution["ARN"])
             behaviors = [config.get("DefaultCacheBehavior", {}), *config.get("CacheBehaviors", {}).get("Items", [])]
             for behavior in behaviors:
                 for function in behavior.get("FunctionAssociations", {}).get("Items", []):
@@ -122,8 +141,16 @@ class Collector:
         for index, name in enumerate(sorted(functions)):
             q(f"cf-function/{name}/config", "cloudfront", "describe-function", "--name", name, "--stage", "LIVE")
             path = output / f"cf-function-{index}.js"
+            path.touch(mode=0o600, exist_ok=False)
             path.touch(mode=0o600)
             q(f"cf-function/{name}/code", "cloudfront", "get-function", "--name", name, "--stage", "LIVE", str(path.resolve()))
+            if import_only:
+                (output / f"cf-function-{index}-development.js").touch(mode=0o600, exist_ok=False)
+                q(f"cf-function/{name}/development", "cloudfront", "describe-function", "--name", name, "--stage", "DEVELOPMENT")
+                q(f"cf-function/{name}/development-code", "cloudfront", "get-function", "--name", name, "--stage", "DEVELOPMENT", str((output / f"cf-function-{index}-development.js").resolve()))
+                q(f"cf-function/{name}/tags", "cloudfront", "list-tags-for-resource", "--resource", f"arn:aws:cloudfront::{ACCOUNT}:function/{name}")
+        if import_only:
+            return
         for queue in ("team03-user-notifications", "team03-user-notifications-dlq", "team03-admin-collection", "team03-admin-collection-dlq"):
             q(f"sqs/{queue}", "sqs", "get-queue-attributes", "--queue-url",
               f"https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/{queue}", "--attribute-names", "All")
@@ -148,8 +175,8 @@ class Collector:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path, help="New private directory; never commit raw output")
-    parser.add_argument("--scope", choices=("all", "network"), default="all",
-                        help="network uses only STS identity and EC2 read operations; default: all")
+    parser.add_argument("--scope", choices=("all", "network", "import"), default="all",
+                        help="import collects all adopted resources; network is EC2-only; all also audits deferred resources")
     args = parser.parse_args()
     try:
         complete = Collector().collect(args.output, args.scope)

@@ -1,0 +1,440 @@
+{
+  "adoption": {
+    "account_id": "174170816230",
+    "region": "ap-northeast-2",
+    "roles": {
+      "team03-main-sqs": {
+        "path": "/",
+        "description": "",
+        "max_session_duration": 3600,
+        "assume_role_policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}",
+        "permissions_boundary": null,
+        "tags": {}
+      },
+      "team03-data-sqs": {
+        "path": "/",
+        "description": "",
+        "max_session_duration": 3600,
+        "assume_role_policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}",
+        "permissions_boundary": null,
+        "tags": {}
+      },
+      "team03-github-actions-deploy": {
+        "path": "/",
+        "description": "",
+        "max_session_duration": 3600,
+        "assume_role_policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}",
+        "permissions_boundary": null,
+        "tags": {}
+      },
+      "team03-frontend-deploy": {
+        "path": "/",
+        "description": "",
+        "max_session_duration": 3600,
+        "assume_role_policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}",
+        "permissions_boundary": null,
+        "tags": {}
+      }
+    },
+    "profiles": {
+      "team03-main-sqs": {
+        "path": "/",
+        "role": "team03-main-sqs",
+        "tags": {}
+      },
+      "team03-data-sqs": {
+        "path": "/",
+        "role": "team03-data-sqs",
+        "tags": {}
+      }
+    },
+    "policies": {
+      "arn:aws:iam::174170816230:policy/fixture-app": {
+        "name": "fixture-app",
+        "path": "/",
+        "description": "",
+        "tags": {},
+        "policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}"
+      }
+    },
+    "inline_policies": {
+      "team03-main-sqs/fixture-app": {
+        "role": "team03-main-sqs",
+        "name": "fixture-app",
+        "policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}"
+      },
+      "team03-data-sqs/fixture-app": {
+        "role": "team03-data-sqs",
+        "name": "fixture-app",
+        "policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}"
+      },
+      "team03-github-actions-deploy/fixture-app": {
+        "role": "team03-github-actions-deploy",
+        "name": "fixture-app",
+        "policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}"
+      },
+      "team03-frontend-deploy/fixture-app": {
+        "role": "team03-frontend-deploy",
+        "name": "fixture-app",
+        "policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}"
+      }
+    },
+    "attachments": {
+      "team03-main-sqs/arn:aws:iam::174170816230:policy/fixture-app": {
+        "role": "team03-main-sqs",
+        "policy_arn": "arn:aws:iam::174170816230:policy/fixture-app"
+      },
+      "team03-data-sqs/arn:aws:iam::174170816230:policy/fixture-app": {
+        "role": "team03-data-sqs",
+        "policy_arn": "arn:aws:iam::174170816230:policy/fixture-app"
+      },
+      "team03-github-actions-deploy/arn:aws:iam::174170816230:policy/fixture-app": {
+        "role": "team03-github-actions-deploy",
+        "policy_arn": "arn:aws:iam::174170816230:policy/fixture-app"
+      },
+      "team03-frontend-deploy/arn:aws:iam::174170816230:policy/fixture-app": {
+        "role": "team03-frontend-deploy",
+        "policy_arn": "arn:aws:iam::174170816230:policy/fixture-app"
+      }
+    },
+    "instances": {
+      "main": {
+        "id": "i-05f26052a70059c73",
+        "ami": "ami-0e1eeb87102d64f40",
+        "instance_type": "t3.small",
+        "subnet_id": "subnet-084d01b4bc4420dc4",
+        "private_ip": "10.0.0.226",
+        "key_name": "team03_key",
+        "vpc_security_group_ids": [
+          "sg-0fbaf2496d1edd1ed"
+        ],
+        "iam_instance_profile": "team03-main-sqs",
+        "monitoring": false,
+        "disable_api_termination": false,
+        "associate_public_ip_address": true,
+        "ebs_optimized": true,
+        "tags": {},
+        "metadata_options": {
+          "http_endpoint": "enabled",
+          "http_tokens": "required",
+          "http_put_response_hop_limit": 2,
+          "http_protocol_ipv6": "disabled",
+          "instance_metadata_tags": "disabled"
+        },
+        "root_block_device": {
+          "delete_on_termination": true,
+          "encrypted": false,
+          "volume_size": 30,
+          "volume_type": "gp3",
+          "iops": 3000,
+          "throughput": 125,
+          "tags": {}
+        }
+      },
+      "data": {
+        "id": "i-0b48442522e0c3400",
+        "ami": "ami-0e1eeb87102d64f40",
+        "instance_type": "t3.small",
+        "subnet_id": "subnet-084d01b4bc4420dc4",
+        "private_ip": "10.0.5.57",
+        "key_name": "team03_key",
+        "vpc_security_group_ids": [
+          "sg-042c6f59681a7b1bd"
+        ],
+        "iam_instance_profile": "team03-data-sqs",
+        "monitoring": false,
+        "disable_api_termination": false,
+        "associate_public_ip_address": true,
+        "ebs_optimized": true,
+        "tags": {},
+        "metadata_options": {
+          "http_endpoint": "enabled",
+          "http_tokens": "required",
+          "http_put_response_hop_limit": 2,
+          "http_protocol_ipv6": "disabled",
+          "instance_metadata_tags": "disabled"
+        },
+        "root_block_device": {
+          "delete_on_termination": true,
+          "encrypted": false,
+          "volume_size": 30,
+          "volume_type": "gp3",
+          "iops": 3000,
+          "throughput": 125,
+          "tags": {}
+        }
+      },
+      "db": {
+        "id": "i-08a92649f4f51f8a5",
+        "ami": "ami-0e1eeb87102d64f40",
+        "instance_type": "t3.small",
+        "subnet_id": "subnet-084d01b4bc4420dc4",
+        "private_ip": "10.0.0.37",
+        "key_name": "team03_key",
+        "vpc_security_group_ids": [
+          "sg-03c341b41a4087a48"
+        ],
+        "iam_instance_profile": null,
+        "monitoring": false,
+        "disable_api_termination": false,
+        "associate_public_ip_address": true,
+        "ebs_optimized": true,
+        "tags": {},
+        "metadata_options": {
+          "http_endpoint": "enabled",
+          "http_tokens": "required",
+          "http_put_response_hop_limit": 2,
+          "http_protocol_ipv6": "disabled",
+          "instance_metadata_tags": "disabled"
+        },
+        "root_block_device": {
+          "delete_on_termination": true,
+          "encrypted": false,
+          "volume_size": 30,
+          "volume_type": "gp3",
+          "iops": 3000,
+          "throughput": 125,
+          "tags": {}
+        }
+      },
+      "replica": {
+        "id": "i-0f45b533faf285beb",
+        "ami": "ami-0e1eeb87102d64f40",
+        "instance_type": "t3.small",
+        "subnet_id": "subnet-084d01b4bc4420dc4",
+        "private_ip": "10.0.2.203",
+        "key_name": "team03_key",
+        "vpc_security_group_ids": [
+          "sg-04b53d2630b9a7ea9"
+        ],
+        "iam_instance_profile": null,
+        "monitoring": false,
+        "disable_api_termination": false,
+        "associate_public_ip_address": true,
+        "ebs_optimized": true,
+        "tags": {},
+        "metadata_options": {
+          "http_endpoint": "enabled",
+          "http_tokens": "required",
+          "http_put_response_hop_limit": 2,
+          "http_protocol_ipv6": "disabled",
+          "instance_metadata_tags": "disabled"
+        },
+        "root_block_device": {
+          "delete_on_termination": true,
+          "encrypted": false,
+          "volume_size": 30,
+          "volume_type": "gp3",
+          "iops": 3000,
+          "throughput": 125,
+          "tags": {}
+        }
+      }
+    },
+    "functions": {
+      "yon-spa-rewrite": {
+        "runtime": "cloudfront-js-2.0",
+        "comment": "fixture only",
+        "code": "function handler(event) { return event.request; }\n",
+        "key_value_store_associations": [],
+        "tags": {}
+      }
+    },
+    "oidc": {
+      "id": "arn:aws:iam::174170816230:oidc-provider/token.actions.githubusercontent.com",
+      "url": "https://token.actions.githubusercontent.com",
+      "client_id_list": [
+        "sts.amazonaws.com"
+      ],
+      "thumbprint_list": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "tags": {}
+    },
+    "key_pair": {
+      "key_name": "team03_key",
+      "public_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ fixture-only",
+      "tags": {}
+    },
+    "eip": {
+      "id": "eipalloc-0357ffe1c7d9998ca",
+      "association_id": "eipassoc-00f0fea3b7e580d0c",
+      "tags": {},
+      "network_interface_id": "eni-fixture",
+      "private_ip_address": "10.0.0.226"
+    },
+    "bucket": {
+      "name": "yon-frontend-team03-174170816230-ap-northeast-2-an",
+      "tags": {},
+      "versioning_status": "Disabled",
+      "mfa_delete": null
+    },
+    "bucket_controls": {
+      "policy": {
+        "frontend": {
+          "policy": "{\"Statement\":[{\"Action\":\"sqs:GetQueueAttributes\",\"Effect\":\"Allow\",\"Resource\":\"*\"}],\"Version\":\"2012-10-17\"}"
+        }
+      },
+      "public_access": {
+        "frontend": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        }
+      },
+      "ownership": {
+        "frontend": {
+          "object_ownership": "BucketOwnerEnforced"
+        }
+      },
+      "encryption": {
+        "frontend": {
+          "rules": [
+            {
+              "bucket_key_enabled": false,
+              "blocked_encryption_types": [],
+              "sse_algorithm": "AES256",
+              "kms_master_key_id": null
+            }
+          ]
+        }
+      }
+    },
+    "distribution": {
+      "id": "EIMPORTFIXTURE",
+      "enabled": true,
+      "is_ipv6_enabled": true,
+      "aliases": [],
+      "comment": "fixture only",
+      "default_root_object": "index.html",
+      "http_version": "http2",
+      "price_class": "PriceClass_All",
+      "web_acl_id": "",
+      "continuous_deployment_policy_id": "",
+      "staging": false,
+      "tags": {},
+      "origins": [
+        {
+          "origin_id": "yon-backend",
+          "domain_name": "fixture.example.com",
+          "origin_path": "",
+          "origin_access_control_id": null,
+          "connection_attempts": 3,
+          "connection_timeout": 10,
+          "response_completion_timeout": null,
+          "custom_headers": [
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            }
+          ],
+          "custom_origin_config": [
+            {
+              "http_port": 8080,
+              "https_port": 443,
+              "ip_address_type": "ipv4",
+              "origin_protocol_policy": "http-only",
+              "origin_ssl_protocols": [
+                "TLSv1.2"
+              ],
+              "origin_read_timeout": 30,
+              "origin_keepalive_timeout": 5
+            }
+          ],
+          "s3_origin_config": [],
+          "origin_shield": []
+        }
+      ],
+      "default_cache_behavior": {
+        "target_origin_id": "yon-backend",
+        "path_pattern": null,
+        "allowed_methods": [
+          "GET",
+          "HEAD"
+        ],
+        "cached_methods": [
+          "GET",
+          "HEAD"
+        ],
+        "viewer_protocol_policy": "redirect-to-https",
+        "cache_policy_id": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+        "origin_request_policy_id": null,
+        "response_headers_policy_id": null,
+        "realtime_log_config_arn": null,
+        "field_level_encryption_id": "",
+        "compress": true,
+        "smooth_streaming": false,
+        "trusted_key_groups": [],
+        "trusted_signers": [],
+        "min_ttl": 0,
+        "default_ttl": 0,
+        "max_ttl": 0,
+        "grpc_enabled": false,
+        "functions": [
+          {
+            "event_type": "viewer-request",
+            "function_arn": "arn:aws:cloudfront::174170816230:function/yon-spa-rewrite"
+          }
+        ],
+        "lambdas": []
+      },
+      "ordered_cache_behaviors": [
+        {
+          "target_origin_id": "yon-backend",
+          "path_pattern": "/api/*",
+          "allowed_methods": [
+            "GET",
+            "HEAD"
+          ],
+          "cached_methods": [
+            "GET",
+            "HEAD"
+          ],
+          "viewer_protocol_policy": "redirect-to-https",
+          "cache_policy_id": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+          "origin_request_policy_id": null,
+          "response_headers_policy_id": null,
+          "realtime_log_config_arn": null,
+          "field_level_encryption_id": "",
+          "compress": true,
+          "smooth_streaming": false,
+          "trusted_key_groups": [],
+          "trusted_signers": [],
+          "min_ttl": 0,
+          "default_ttl": 0,
+          "max_ttl": 0,
+          "grpc_enabled": false,
+          "functions": [
+            {
+              "event_type": "viewer-request",
+              "function_arn": "arn:aws:cloudfront::174170816230:function/yon-spa-rewrite"
+            }
+          ],
+          "lambdas": []
+        }
+      ],
+      "geo_restriction": {
+        "restriction_type": "none",
+        "locations": []
+      },
+      "viewer_certificate": {
+        "cloudfront_default_certificate": true,
+        "acm_certificate_arn": null,
+        "iam_certificate_id": null,
+        "minimum_protocol_version": "TLSv1",
+        "ssl_support_method": "vip"
+      },
+      "custom_error_responses": [],
+      "logging": []
+    },
+    "oac": {
+      "id": "E2JJZ8SZNVRWDC",
+      "name": "fixture-oac",
+      "description": "fixture only",
+      "origin_type": "s3",
+      "signing_behavior": "always",
+      "signing_protocol": "sigv4"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-"""Reject any network plan other than exact imports or a complete no-change plan."""
+"""Reject any plan other than exact approved imports or a complete no-change plan."""
 import argparse
 import json
 from pathlib import Path
@@ -47,22 +47,25 @@ def expected_targets():
     return targets
 
 
-def check(plan, phase):
+def check(plan, phase, targets=None):
     if phase not in {"import", "after"}:
         raise ValueError("Unknown phase")
     if plan.get("errored") or plan.get("complete") is not True or plan.get("deferred_changes"):
         raise ValueError("Plan is errored, incomplete or deferred")
     if plan.get("resource_drift"):
         raise ValueError("Resource drift requires review")
-    expected = expected_targets()
+    expected = expected_targets() if targets is None else targets
+    if not expected or not isinstance(expected, dict):
+        raise ValueError("Exact target manifest is required")
     changes = plan.get("resource_changes", [])
     addresses = [c.get("address") for c in changes]
     if len(addresses) != len(set(addresses)) or set(addresses) != set(expected):
-        raise ValueError("Plan must contain exactly the 27 network addresses")
+        raise ValueError(f"Plan must contain exactly the {len(expected)} approved addresses")
     planned = plan.get("planned_values", {}).get("root_module", {}).get("resources", [])
     values = {r["address"]: r.get("values", {}) for r in planned}
     if len(planned) != len(values) or set(values) != set(expected):
-        raise ValueError("Planned resources differ from the 27 network targets")
+        raise ValueError("Planned resources differ from the approved targets")
+    prior = {r["address"]: r for r in plan.get("prior_state", {}).get("values", {}).get("root_module", {}).get("resources", [])}
     for resource in changes:
         address = resource["address"]
         change = resource["change"]
@@ -74,7 +77,9 @@ def check(plan, phase):
             raise ValueError(f"AWS create/update/delete/read is forbidden: {address}")
         importing = change.get("importing")
         if phase == "import":
-            if not importing or importing.get("id") != expected[address]["import_id"]:
+            if importing and importing.get("id") != expected[address]["import_id"]:
+                raise ValueError(f"Missing or incorrect import ID: {address}")
+            if not importing and (address not in prior or prior[address].get("values", {}).get("id") != values[address].get("id")):
                 raise ValueError(f"Missing or incorrect import ID: {address}")
         elif importing:
             raise ValueError(f"Import still pending: {address}")
@@ -91,12 +96,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("plan_json", type=Path, help="Private terraform show -json output")
     parser.add_argument("--phase", choices=("import", "after"), required=True)
+    parser.add_argument("--targets", type=Path, help="Private targets.json produced by prepare_import.py")
     args = parser.parse_args()
     try:
-        count = check(json.loads(args.plan_json.read_text(encoding="utf-8-sig")), args.phase)
+        targets = json.loads(args.targets.read_text(encoding="utf-8")) if args.targets else None
+        count = check(json.loads(args.plan_json.read_text(encoding="utf-8-sig")), args.phase, targets)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         parser.exit(1, f"STOP: {error}\n")
-    print(f"PASS: {count} exact network targets, phase={args.phase}, no AWS resource changes")
+    print(f"PASS: {count} exact targets, phase={args.phase}, no AWS resource changes")
 
 
 if __name__ == "__main__":
