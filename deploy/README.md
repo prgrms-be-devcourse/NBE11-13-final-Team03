@@ -1,6 +1,6 @@
 # 배포 (GitHub Actions → GHCR → EC2 docker compose)
 
-## 구성: EC2 3대 (모두 t3.small)
+## 구성: EC2 4대 (모두 t3.small)
 
 | 서버 | 컨테이너 | 폴더 | 배포 |
 |---|---|---|---|
@@ -20,23 +20,35 @@
 
 | 보안 그룹 | 인바운드 |
 |---|---|
-| `yon-db` | 5432 ← `yon-main`, `yon-data` 보안 그룹만 / 22 |
-| `yon-main` | `BACKEND_PORT`(8080) ← 공개 / 22 |
+| `yon-db` | 5432 ← `yon-main`, `yon-data`, `yon-db-replica` 보안 그룹 / 22 ← `yon-main` |
+| `yon-main` | `BACKEND_PORT`(8080)·22 ← 0.0.0.0/0 (제공 인벤토리 기준, 접근 제한 개선 예정) |
 | `yon-data` | 9092 ← `yon-main` 보안 그룹만 / 22 ← `yon-main` 보안 그룹만 (배포·관리 SSH 모두 메인 서버 경유) |
+| `yon-db-replica` | 5432·22 ← `yon-main` 보안 그룹 |
+
+2026-10-28 제공 인벤토리 기준이다. [Terraform 도입 준비와 AWS 담당자 조회 절차](../infra/README.md)에 자원 ID·미확인 항목·후속 PR 순서를 정리했다.
 
 탄력적 IP는 계정당 1개라 메인 서버에만 둔다. 데이터·DB 서버의 공개 IP는 재시작마다 바뀌므로 접속·배포 모두 메인 서버를 거쳐 사설 IP로 한다.
 
 **5432·9092는 0.0.0.0/0으로 열지 않는다.** data-service는 Spring Security가 없다.
 한 겹 더: DB 서버 `.env`의 `DB_BIND_IP`, 데이터 서버 `.env`의 `DATA_SERVICE_BIND_IP`에 각 서버의 사설 IP를 넣으면 포트가 사설 IP에만 바인딩된다 (보안 그룹 실수 대비).
 
-### 운영 진입점 (TLS): 미정
+### 운영 진입점: CloudFront HTTPS → EC2 HTTP
 
-지금 메인 서버는 TLS 없이 8080(HTTP)을 바로 연다. 이 상태로는 실제 사용자 접속을 받지 않는다.
-- `AUTH_COOKIE_SECURE=true`(Secure 쿠키)는 HTTP 응답에서 브라우저가 저장·전송하지 않아 로그인·토큰 갱신이 안 된다 → TLS 전에는 `false`
-- 프론트가 S3+CloudFront(HTTPS)면 `http://<IP>:8080` API 호출은 mixed content로 차단된다
-- 카카오 redirect-uri가 `{baseUrl}` 기반이라, TLS를 붙이면 카카오 콘솔 등록 주소도 바꿔야 한다
+제공된 구성은 프론트 S3와 backend를 같은 CloudFront 진입점으로 라우팅한다.
+`/api/*`·`/oauth2/*`·`/login/oauth2/*`는 backend HTTP 8080 origin으로 가며, viewer HTTP는 HTTPS로 전환한다.
+backend origin에는 이미 `X-Forwarded-Proto: https`가 있다. 운영 backend의 전달 헤더 처리 설정·카카오 리다이렉트와 Secure 쿠키는 추가 확인한다.
+운영 브라우저의 HTTPS 접속에는 `AUTH_COOKIE_SECURE=true`를 사용한다. `.env.example`의 개발용 false를 그대로 적용하지 않는다.
 
-EC2 재구축 전에 TLS 종단(nginx+certbot 또는 ALB/CloudFront)을 정하고, 그에 맞춰 `deploy/main/.env.example`(`AUTH_COOKIE_SECURE=true`)과 보안 그룹(443)을 바꾼다.
+CloudFront↔origin은 평문 HTTP이며 main의 직접 8080 접근도 현재 허용된 상태다.
+접두사 목록을 통한 8080 제한과 추가 origin 보호·origin TLS는 후속 변경으로 검토한다.
+22 제한은 기존 GitHub SSH 배포 경로를 대체/검증한 뒤 진행한다.
+사용자 HTTPS 진입점과 별도로 main→data gRPC의 TLS 정책은 아래 팀 논의 사항을 따른다.
+
+### SQS·역할 현황
+
+제공 인벤토리에서 사용자/관리자 큐와 DLQ 4개는 `team03-sqs-user`·`team03-sqs-admin` CloudFormation 스택으로 생성됐다.
+main에는 `team03-main-sqs`, data에는 `team03-data-sqs` 인스턴스 역할이 연결되어 있다.
+정책 본문·큐 속성·애플리케이션 활성화 여부는 2차 조회로 확인한다. Terraform으로 큐를 새로 만들거나 소유권을 이전하지 않는다.
 
 ## 워크플로
 
@@ -67,7 +79,7 @@ backend를 배포할 때 `EC2_DATA_HOST`가 비어 있으면 경고를 남긴다
 ### 1. GHCR
 - [ ] 저장소 → Packages → `backend`, `data-service` 각각 Package settings → "Manage Actions access"에 이 저장소가 Read로 있는지 (data-service 패키지는 첫 게시 후 생김)
 
-### 2. EC2 3대 공통
+### 2. EC2 4대 공통
 - [ ] Ubuntu, t3.small, x86_64 (이미지 플랫폼 기본값 `linux/amd64`), 같은 VPC·서브넷
 - [ ] 공개 IP: 메인 서버는 탄력적 IP(사용자 접속). 데이터 서버는 배포 SSH용, DB 서버는 관리 SSH용 공개 IP가 필요하다 (서버끼리는 사설 IP)
 - [ ] 보안 그룹 (위 표)
@@ -192,7 +204,7 @@ DB 서버(primary)의 WAL을 물리 스트리밍으로 받아 재생하는 읽�
 backend의 읽기 전용 트랜잭션만 이쪽을 쓰고, 쓰기·data-service·notification-service는 primary만 쓴다 (라우팅은 backend 설정).
 물리 복제라 파티션 생성·분리 같은 DDL과 계정도 그대로 따라온다. 파티션 관리는 primary에서만 한다.
 
-- EC2: `yon-db-replica` (t3.small, DB 서버와 같은 서브넷), 공통 준비는 위 "EC2 3대 공통"과 같다
+- EC2: `yon-db-replica` (t3.small, DB 서버와 같은 서브넷), 공통 준비는 위 서버 준비 절차를 따른다
 - 보안 그룹 `yon-db-replica`: 5432 ← `yon-main` 보안 그룹, 22 ← `yon-main` 보안 그룹 (노트북에서는 ProxyJump로 접속)
 - `yon-db` 보안 그룹에 5432 ← `yon-db-replica` 보안 그룹 추가
 

@@ -1,0 +1,4 @@
+# Copy to backend.tf only after the team approves the remote state location.
+terraform {
+  backend "s3" {}
+}
