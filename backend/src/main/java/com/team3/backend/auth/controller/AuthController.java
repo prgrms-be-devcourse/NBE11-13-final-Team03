@@ -37,6 +37,7 @@ public class AuthController {
                     
                     서버에 저장된 Refresh Token을 삭제하고,
                     Access Token과 Refresh Token 쿠키를 제거합니다.
+                    이 세션이 등록한 푸시 Endpoint는 알림 서버가 USER_SESSION_ENDED 메시지로 비활성화합니다.
                     """
     )
     @ApiResponses({

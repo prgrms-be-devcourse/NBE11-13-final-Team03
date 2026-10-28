@@ -8,12 +8,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 public class HttpNotificationPublisher implements NotificationMessagePublisher {
     private static final Logger log = LoggerFactory.getLogger(HttpNotificationPublisher.class);
-    private static final Set<String> RECEIPTS = Set.of("CREATED", "DUPLICATE_EVENT", "EXPIRED", "CHANNEL_DISABLED", "WITHDRAWN");
+    /** Receipts a notification request may get; WITHDRAWN is its normal suppression by a Tombstone. */
+    private static final Set<String> NOTIFICATION_RECEIPTS = Set.of("CREATED", "DUPLICATE_EVENT", "EXPIRED", "CHANNEL_DISABLED", "WITHDRAWN");
+    private static final Set<String> EVENT_TYPES = Set.of("NOTIFICATION_REQUESTED", "USER_WITHDRAWN", "USER_SESSION_ENDED");
+    /** A control message is published only when Notification acknowledged it with its own receipt status. */
+    private static final Map<String, String> CONTROL_RECEIPTS = Map.of("USER_WITHDRAWN", "WITHDRAWN",
+            "USER_SESSION_ENDED", "SESSION_ENDED");
     private final NotificationClient client;
     private final NotificationPublisherProperties properties;
     private final ObjectMapper mapper;
@@ -35,7 +41,7 @@ public class HttpNotificationPublisher implements NotificationMessagePublisher {
             }
             correlationId = UUID.fromString(envelope.path("correlationId").asText()).toString();
             eventType = envelope.path("eventType").asText();
-            if (!Set.of("NOTIFICATION_REQUESTED", "USER_WITHDRAWN").contains(eventType)) {
+            if (!EVENT_TYPES.contains(eventType)) {
                 throw new IllegalArgumentException("unsupported event type");
             }
         } catch (RuntimeException failure) {
@@ -50,9 +56,10 @@ public class HttpNotificationPublisher implements NotificationMessagePublisher {
             try {
                 var receipt = mapper.readTree(bytes);
                 String result = receipt.path("status").asText();
+                String control = CONTROL_RECEIPTS.get(eventType);
+                boolean accepted = control != null ? control.equals(result) : NOTIFICATION_RECEIPTS.contains(result);
                 if (!publication.messageId().toString().equals(receipt.path("messageId").asText())
-                        || !RECEIPTS.contains(result) || ("USER_WITHDRAWN".equals(eventType) && !"WITHDRAWN".equals(result))
-                        || !receipt.path("duplicateMessage").isBoolean()) {
+                        || !accepted || !receipt.path("duplicateMessage").isBoolean()) {
                     throw new IllegalArgumentException("receipt mismatch");
                 }
                 log.info("Notification HTTP receipt: correlationId={}, messageId={}, result={}",

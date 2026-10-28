@@ -97,6 +97,25 @@ class HttpNotificationPublisherTest {
     }
 
     @Test
+    void sessionEndRequiresItsOwnDurableReceipt() throws Exception {
+        String control = resource("user-session-ended-v1.json");
+        var id = UUID.fromString("11111111-1111-4111-8111-111111111113");
+        var controlPublication = new OutboxPublication(3L, id, UUID.randomUUID(), control);
+        String logoutReceiptForNotification = resource("notification-receipt-v1.json").replace("CREATED", "SESSION_ENDED");
+        withPublisher(publisher -> {
+            for (String wrong : new String[]{"CREATED", "WITHDRAWN"}) {
+                response.set("{\"messageId\":\"" + id + "\",\"status\":\"" + wrong + "\",\"duplicateMessage\":false}");
+                assertThatThrownBy(() -> publisher.publish(controlPublication)).isInstanceOf(NotificationPublicationException.class);
+            }
+            response.set("{\"messageId\":\"" + id + "\",\"status\":\"SESSION_ENDED\",\"duplicateMessage\":true}");
+            assertThatCode(() -> publisher.publish(controlPublication)).doesNotThrowAnyException();
+            // A notification request is never acknowledged by a logout receipt.
+            response.set(logoutReceiptForNotification);
+            assertThatThrownBy(() -> publisher.publish(publication())).isInstanceOf(NotificationPublicationException.class);
+        });
+    }
+
+    @Test
     void rejectsEmptyWrongOrMalformedSuccessReceipts() {
         withPublisher(publisher -> {
             for (String invalid : new String[]{"", "{}", "<html>OK</html>",

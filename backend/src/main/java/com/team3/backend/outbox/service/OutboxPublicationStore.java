@@ -27,7 +27,8 @@ public class OutboxPublicationStore {
         var publications = jdbc.query("""
                 WITH candidate AS (
                     SELECT id FROM outbox_events
-                    WHERE status = 'PENDING' AND next_retry_at <= ? AND event_type IN ('NOTIFICATION_REQUESTED', 'USER_WITHDRAWN')
+                    WHERE status = 'PENDING' AND next_retry_at <= ?
+                        AND event_type IN ('NOTIFICATION_REQUESTED', 'USER_WITHDRAWN', 'USER_SESSION_ENDED')
                     ORDER BY next_retry_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
                 )
                 UPDATE outbox_events o SET status = 'PUBLISHING', processing_started_at = ?, lease_token = ?
@@ -76,7 +77,8 @@ public class OutboxPublicationStore {
         return jdbc.update("""
                 WITH stale AS (
                     SELECT id FROM outbox_events WHERE status = 'PUBLISHING'
-                        AND event_type IN ('NOTIFICATION_REQUESTED', 'USER_WITHDRAWN') AND processing_started_at < ?
+                        AND event_type IN ('NOTIFICATION_REQUESTED', 'USER_WITHDRAWN', 'USER_SESSION_ENDED')
+                        AND processing_started_at < ?
                     ORDER BY processing_started_at, id LIMIT ? FOR UPDATE SKIP LOCKED
                 )
                 UPDATE outbox_events o SET retry_count = o.retry_count + 1,
