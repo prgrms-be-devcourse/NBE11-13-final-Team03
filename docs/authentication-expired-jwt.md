@@ -1,12 +1,53 @@
-# 공개 API의 만료 JWT 처리
+# 로그인 사용자의 공개 조회 개인화 복구
 
-## 변경 목적
+## 문제
 
-만료되거나 잘못된 Access Token을 익명 요청으로 처리하면, 로그인 중인 사용자의 검색·상세 응답에서
-찜 여부나 개인화 정보가 조용히 사라진다. Access Token을 보낸 API 요청은 인증 실패를 명시해
-프론트가 재발급 후 원래 요청을 다시 보낼 수 있도록 한다.
+로그인 중인 사용자가 검색·상세·지역 목록 같은 공개 API를 호출했는데 찜 여부 등 개인화 정보가 조용히 빠지는 경우가 있다.
+원인은 두 가지로 나뉜다.
 
-## 응답 계약
+| 경우 | 원인 | 담당 |
+| --- | --- | --- |
+| (a) 만료·잘못된 Access Token 쿠키가 전달된다 | 서버가 익명으로 통과시켜 비회원 응답을 준다 | 백엔드 안전망(401) |
+| (b) Access Token 쿠키가 아예 없고 Refresh Token만 남아 있다 | 서버는 비회원 요청과 구분할 수 없다 | 프론트 복원·재발급 |
+
+Access Token 쿠키의 Max-Age는 JWT 유효기간과 같으므로 (a)는 쿠키 만료와 토큰 만료 사이의 짧은 창(시계 차이·전송 지연)에서만 생긴다.
+실제로 보고된 증상의 주 원인은 (b)다. **주 수정은 프론트의 인증 복원·재발급·익명 대체이고, 백엔드 401은 (a)의 창을 막는 안전망이다.**
+
+## 프론트: 인증 복원 순서와 공개 조회 복구
+
+프론트 담당자가 설계한 기존 인증 복구 흐름(`requiresAuth`, `reissueAttempt`·`authGeneration`·`authSession` 가드,
+`/users/me` 인증 Query, `resetPersonalizedQueries`)을 그대로 재사용한다. 새 재시도 체계는 추가하지 않는다.
+
+### 순서 보장 (경우 b)
+
+검색(`OpportunitiesPage`), 홈 최신 목록(`HomePage`), 상세(`OpportunityDetailPage`)의 공개 조회 Query는
+인증 상태가 `checking`인 동안 비활성이다. 인증 Query(`GET /users/me`, `requiresAuth: true`)가 먼저 나가
+Access Token 쿠키가 없으면 401 → 재발급 → 새 쿠키를 받은 뒤에야 공개 조회가 시작된다.
+인증 확인이 `error`로 끝나면 공개 조회는 비회원으로 진행한다.
+
+### `recoverAuth` 옵션 (경우 a와 창 밖의 만료)
+
+`frontend/src/api/client.ts`의 공개 조회용 옵션이다. 기존 `requiresAuth`의 의미는 바꾸지 않는다.
+
+| 상황 | `requiresAuth: true` (기존) | `recoverAuth: true` (추가) |
+| --- | --- | --- |
+| 401 + `AUTH_006`/`AUTH_007` | 재발급 후 같은 요청 1회 재전송 | 같음 |
+| 재발급 401 (Refresh Token 무효) | 실패 유지, 재로그인 확인 전까지 재발급 고정 | 인증 손실을 한 번 알린 뒤 같은 요청을 **익명으로 1회 재전송**. 재발급 고정은 같음 |
+| 재발급 네트워크·타임아웃·5xx·취소 | 오류 그대로 | 오류 그대로(익명으로 바꾸지 않는다) |
+| 동시 401 여러 개 | 재발급 1회 공유 | 같음 |
+| 재발급 중 로그아웃·계정 전환 | 늦은 응답 `cancelled` | 같음 |
+
+적용 대상: `GET /opportunities`(자격 필터가 있으면 기존대로 `requiresAuth`), `GET /opportunities/{id}`, `GET /regions`.
+`GET /interests/options`는 서버가 토큰 검사에서 제외하므로 옵션을 붙이지 않는다.
+
+인증 손실 알림(`onAuthLost`)은 `AuthProvider`가 `observeAuthLoss`로 구독한다. 알림을 받으면 인증 Query를 다시 확인하고,
+그 결과가 비회원이면 기존 `queryFn`이 푸시 소유 정리와 개인화 캐시 초기화(`resetPersonalizedQueries`)를 수행한다.
+인증 Query가 이미 확인 중이면 같은 재발급 실패를 공유하므로 추가 요청을 만들지 않는다.
+
+## 백엔드: 만료 JWT 안전망
+
+`TokenAuthenticationFilter`는 Access Token 쿠키가 있는 `/api/**` 요청에서 토큰이 만료·잘못됐으면 익명으로 통과시키지 않고
+401 / `AUTH_007`로 응답한다. 토큰 없는 공개 조회는 기존대로 비회원 응답을 준다.
 
 | 요청 | 처리 |
 | --- | --- |
@@ -19,52 +60,36 @@
 | `/api/internal/**` | 기존 내부 API Key 인증 유지 |
 | OAuth·로그인·정적 리소스 등 `/api/` 밖의 경로 | 이 필터의 JWT 검사 제외. 기존 SecurityConfig 권한 규칙은 유지 |
 
-`TokenAuthenticationFilter`는 기존 `CustomAuthenticationEntryPoint`를 사용해 에러 JSON 형식을 유지한다.
-Access Token 검증과 인증 객체 생성 사이에 만료되거나 JWT claim 해석이 실패한 경우도 401로 처리한다.
-CSRF 검사는 완화하지 않는다. CSRF가 먼저 거부하는 상태 변경 요청은 기존처럼 403일 수 있다.
-기존 Spring Security 7.1.1의 `csrf.spa()`는 프론트가 읽을 수 있는 `XSRF-TOKEN` 쿠키를 발급한다.
-프론트는 상태 변경 요청에서 그 값을 `X-XSRF-TOKEN` 헤더로 보낸다. 이 설정은 변경하지 않는다.
-회귀 테스트는 `csrf()` 테스트 도우미의 저장소 교체에 의존하지 않고 실제 공개 GET의 쿠키·헤더를 사용한다.
+필터의 예외 경로(`REISSUE_PATH`, `INTEREST_OPTIONS_PATH`, `INTERNAL_API_PREFIX`)는 `TokenAuthenticationFilter`의 상수이고
+`SecurityConfig`의 permitAll·CSRF 예외 목록이 같은 상수를 참조한다. context path가 있어도 같은 기준으로 판정한다.
 
-## 프론트 연동 조건
+`CustomAuthenticationEntryPoint`를 사용해 에러 JSON 형식을 유지한다. 검증과 인증 객체 생성 사이에 만료되거나
+claim 해석이 실패한 경우도 401로 처리한다. CSRF 검사는 완화하지 않는다.
+Spring Security의 `csrf.spa()`가 발급하는 `XSRF-TOKEN` 쿠키와 `X-XSRF-TOKEN` 헤더 흐름은 변경하지 않는다.
 
-- 기존 클라이언트는 `requiresAuth: true`인 요청의 `AUTH_006`·`AUTH_007`에만 재발급 후 1회 재시도한다.
-  공개 검색·상세도 로그인 사용자의 개인화가 필요하면 해당 요청에서 이 옵션을 적용해야 한다.
-  이 PR은 프론트 코드를 수정하지 않는다.
-- 재발급 요청 자체는 재발급 인터셉터를 적용하지 않아 무한 반복을 막는다.
-- CSRF 쿠키가 없을 때 기존 클라이언트는 `GET /api/interests/options`로 쿠키를 받은 뒤 재발급한다.
-  이 경로는 만료 Access Token이 있어도 접근할 수 있어야 한다.
-- Access Token 쿠키의 수명은 JWT 유효기간과 같으므로 만료 후 쿠키가 아예 전달되지 않을 수 있다.
-  이 경우 공개 API의 비회원 요청과 서버가 구분하지 않는다. 기존 `/api/users/me` 기반 로그인 복원 및
-  프론트의 인증 상태·재발급 흐름으로 처리한다. Refresh Token 존재만으로 공개 요청을 일괄 거부하지 않는다.
-- 로그아웃·FCM Endpoint 정리, 쿠키 수명·Secure/SameSite 설정은 이 변경 범위가 아니다.
+재발급 실패(401) 응답은 쿠키를 지우지 않는다. (a)의 창 안에서 재발급까지 실패하면 익명 재전송도 같은 만료 쿠키를 보내
+401로 끝날 수 있는데, 창이 지나면 쿠키가 사라져 다음 조회는 비회원으로 성공한다. 재발급 실패 시 쿠키 삭제는 별도 검토 대상이다.
 
 ## 검증
 
-2026-10-27 로컬에서 아래 범위 14개 클래스 85개 테스트가 통과했다. 실패·오류·건너뜀은 모두 0이고
-`bootJar`도 성공했다. 전체 backend 회귀 테스트는 실행하지 않았다.
+2026-10-28 로컬에서 실행했다.
 
-| 범위 | 테스트 수 |
-| --- | ---: |
-| SecurityIntegrationTest | 25 |
-| TokenAuthenticationFilterTest | 9 |
-| 기존 인증·쿠키·OAuth·재발급 동시성 테스트 | 28 |
-| 아키텍처 경계 테스트 | 15 |
-| 알림 사용자 API Facade·회원 탈퇴 통합 테스트 | 8 |
+| 범위 | 결과 |
+| --- | --- |
+| `frontend`: `npm run lint`, `npm test`, `npm run build` | 통과. 테스트 296개 중 291 통과, 5개는 Chrome 미설치로 건너뜀 |
+| `backend`: `com.team3.backend.auth.*`, `com.team3.backend.architecture.*` | 통과. 12개 클래스 77개 테스트, 실패·오류·건너뜀 0 |
+| `backend` 전체 `bash gradlew test --no-daemon -q` | 통과(148개 클래스 1020개 테스트, 실패·오류 0, 건너뜀 98) |
 
-저장소의 `backend/`에서 재현한다.
+프론트 회귀 테스트는 `frontend/tests/public-auth-recovery.test.mjs`에 있다. 검색 401→재발급 200→재전송(찜 유지),
+재발급 401→익명 재전송(찜 없음·인증 재확인·개인화 캐시 정리), 재발급 네트워크·타임아웃·5xx→오류 유지,
+동시 요청 3개→재발급 1회, 재발급 중 로그아웃→늦은 응답 무시를 다룬다.
+
+백엔드 회귀 테스트는 `SecurityIntegrationTest`·`TokenAuthenticationFilterTest`에 있다. 만료·잘못된 토큰의 401,
+비회원 공개 조회, 실제 CSRF 쿠키 bootstrap→Refresh Token 회전→새 Access Token의 사용자 식별, Refresh Token 오류 응답,
+CSRF 거부, OAuth 진입·내부 키 인증 유지, context path 처리를 다룬다. Postgres 통합 테스트에는 Docker가 필요하다.
 
 ```bash
-./gradlew --offline test \
-  --tests 'com.team3.backend.auth.*' \
-  --tests 'com.team3.backend.user.controller.UserNotificationFacadeControllerTest' \
-  --tests 'com.team3.backend.user.service.UserWithdrawalIntegrationTest' \
-  --tests 'com.team3.backend.architecture.*' \
-  bootJar
+cd backend && bash gradlew test --no-daemon -q --tests 'com.team3.backend.auth.*' --tests 'com.team3.backend.architecture.*'
 ```
-
-Postgres 통합 테스트에는 Docker가 필요하다. Gradle 의존성이 없는 환경에서는 `--offline`을 제외한다.
-검증에는 만료·잘못된 토큰의 401, 비회원 공개 조회, 실제 CSRF 쿠키 bootstrap→Refresh Token 회전→
-새 Access Token의 사용자 식별, Refresh Token 오류 응답, CSRF 거부, OAuth 진입·내부 키 인증 유지가 포함된다.
 
 배포 환경의 실제 Kakao 로그인·CloudFront 쿠키 전달·검색/상세의 개인화 응답 복원은 별도 검증 대상이다.
