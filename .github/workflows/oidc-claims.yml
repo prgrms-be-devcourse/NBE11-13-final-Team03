@@ -1,0 +1,34 @@
+name: OIDC claims check
+
+# GitHub Actions OIDC 토큰의 aud·sub만 출력한다 (AWS를 호출하지 않는다).
+# AWS 역할 신뢰 정책의 sub 조건을 정하거나 "Not authorized to perform sts:AssumeRoleWithWebIdentity"를 진단할 때 수동 실행한다.
+# 이 조직은 sub에 조직·저장소 ID가 붙는다: repo:<조직>@<조직 ID>/<저장소>@<저장소 ID>:ref:refs/heads/<브랜치>
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  claims:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Print OIDC aud and sub
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, urllib.request
+          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=sts.amazonaws.com"
+          request = urllib.request.Request(url, headers={"Authorization": "Bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]})
+          token = json.load(urllib.request.urlopen(request))["value"]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          print("aud:", claims.get("aud"))
+          print("sub:", claims.get("sub"))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"- aud: `{claims.get('aud')}`\n- sub: `{claims.get('sub')}`\n")
+          PY
