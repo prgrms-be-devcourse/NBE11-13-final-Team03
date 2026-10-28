@@ -5,6 +5,7 @@
 #   .env              backend 환경변수 (deploy/main/.env.example 참고, 직접 만든다. git에 올리지 않는다)
 #   notification.env  알림 서버 환경변수 (deploy/main/notification.env.example 참고, 직접 만든다. git에 올리지 않는다)
 #   deploy.env        BACKEND_IMAGE·NOTIFICATION_IMAGE=<GHCR 이미지> (Actions가 서비스별로 한 줄씩 쓴다)
+#   secrets/firebase-admin.json  알림 서버 FCM 인증 파일 (EC2에 별도 배치, Git에 올리지 않는다)
 #
 # 실행: docker compose -f docker-compose.yml --env-file .env --env-file deploy.env up -d <backend|notification-service>
 # 서비스끼리 의존(depends_on)을 두지 않는다: 한쪽 배포가 다른 쪽을 재시작하지 않게.
@@ -44,6 +45,12 @@ services:
       JAVA_TOOL_OPTIONS: ${NOTIFICATION_JAVA_OPTS:--XX:MaxRAMPercentage=25.0}
       PORT: "8081"
       TZ: Asia/Seoul
+    volumes:
+      # EC2 호스트에 별도로 보관하며 Git에는 포함하지 않는다.
+      - type: bind
+        source: /home/ubuntu/yon/secrets/firebase-admin.json
+        target: /run/secrets/firebase-admin.json
+        read_only: true
     # 호스트에 공개하지 않는다. backend만 compose 네트워크 안에서 http://notification-service:8081로 부른다
     restart: unless-stopped
     logging:
