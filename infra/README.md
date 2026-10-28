@@ -1,7 +1,9 @@
 # AWS 인벤토리와 Terraform 도입 준비
 
 이번 단계는 기존 구성 확인·2차 조회 도구·Terraform 검증 환경을 준비한다.
-AWS 자원 생성·변경·import·삭제를 실행하지 않는다. 준비 PR 병합으로 운영 설정이 바뀌지 않는다.
+이번 Terraform 구성으로 AWS 자원 생성·변경·import·삭제를 실행하지 않는다.
+다만 기존 `backend-image.yml`은 main의 모든 push에 실행되고, 성공하면 `deploy.yml`이 backend를 배포한다.
+따라서 이 준비 PR도 병합 시 기존 backend 빌드·재배포가 이어질 수 있다. 병합 시점은 운영 가동 시간과 맞춘다.
 
 ## 확인 기준
 
