@@ -1,9 +1,9 @@
-# AWS 인벤토리와 Terraform 도입 준비
+# AWS 인벤토리와 Terraform 네트워크 관리
 
-이번 단계는 기존 구성 확인·2차 조회 도구·Terraform 검증 환경을 준비한다.
-이번 Terraform 구성으로 AWS 자원 생성·변경·import·삭제를 실행하지 않는다.
+1단계 조회 도구에 이어 2단계 기존 네트워크 27개 항목의 import 구성을 제공한다.
+코드·CI만으로 운영 import나 AWS 자원 변경을 실행하지 않는다. 지정 담당자가 [네트워크 import 실행 지침](network-import.md)에 따라 실제 계획을 확인하고 상태 등록을 진행한다.
 다만 기존 `backend-image.yml`은 main의 모든 push에 실행되고, 성공하면 `deploy.yml`이 backend를 배포한다.
-따라서 이 준비 PR도 병합 시 기존 backend 빌드·재배포가 이어질 수 있다. 병합 시점은 운영 가동 시간과 맞춘다.
+따라서 인프라 PR도 병합 시 기존 backend 빌드·재배포가 이어질 수 있다. 병합 시점은 운영 가동 시간과 맞춘다.
 
 ## 확인 기준
 
@@ -15,7 +15,9 @@
 - CloudFront의 backend origin은 HTTP 8080이며 **이미 `X-Forwarded-Proto: https`를 추가한다.**
   요청 정책 변경부터 할 필요는 없다. 운영의 `SERVER_FORWARD_HEADERS_STRATEGY`, OAuth 리다이렉트 및 `AUTH_COOKIE_SECURE`는 별도 확인한다.
 - 관리 후보 보안 그룹 4개의 인바운드 소스 규칙은 **10개**, 아웃바운드는 4개다.
-  default 그룹의 자기 참조 인바운드 1개와 아웃바운드 1개는 가져오지 않는다. 실제 규칙 ID는 2차 조회가 필요하다.
+  default 그룹의 자기 참조 인바운드 1개와 아웃바운드 1개는 가져오지 않는다.
+- 2026-10-28 03:48 UTC의 network 범위 2차 조회는 `complete=true`로 제공됐다.
+  [network-2026-10-28.json](inventory/network-2026-10-28.json)에 라우팅·연결·규칙 ID와 원본 SHA256을 정리했다. 원본 파일은 커밋하지 않는다.
 - main의 8080·22가 전체 공개이고, EBS 4개는 미암호화 상태로 제공됐다.
 - 서버 09:00~18:00 KST 가동은 사용자 전달값이다. 스케줄 소유자·정의·시간대는 미확인이다.
 
@@ -126,17 +128,19 @@ AWS 담당자는 원본을 승인된 비공개 경로로 전달하고, `complete
 ## 코드 담당자: Terraform 검증
 
 Terraform **1.17.0**, AWS provider는 `.terraform.lock.hcl`의 검증된 버전을 사용한다.
-현재 `.tf`에는 버전/공급자 선언과 local backend만 있다. 관리 자원·data·import·provider 인증 설정은 다음 단계에서 추가한다.
+VPC·서브넷·IGW·라우팅·그룹/규칙을 실제 ID로 가져오며 계정·리전을 고정한다.
+8080/22의 현재 접근 정책을 유지한다. CloudFront 소스 제한은 별도 PR이다.
 
 ```bash
 python3 -m unittest discover -s infra/tests -v
-terraform -chdir=infra/terraform fmt -check
+terraform -chdir=infra/terraform fmt -check -recursive
 terraform -chdir=infra/terraform init -input=false -lockfile=readonly
 terraform -chdir=infra/terraform validate
-terraform -chdir=infra/terraform plan -input=false -refresh=false -detailed-exitcode
+terraform -chdir=infra/terraform test -no-color
 ```
 
-CI도 같은 검사를 AWS 자격증명/OIDC 없이 실행한다. 빈 계획의 종료 코드 0은 **AWS 접근·실제 구성 일치·복구 가능성 검증이 아니다.**
+CI도 같은 검사를 AWS 자격증명/OIDC 없이 실행한다. Terraform 테스트는 mock provider와 명시된 import 응답을 사용한다.
+이 결과는 **실제 AWS 조회·무변경 계획·운영 상태 등록 완료를 의미하지 않는다.**
 공급자를 내려받을 네트워크는 필요하다. Terraform 파일과 provider lock 파일은 커밋하되 `.terraform/`·state·plan·실제 backend 설정은 제외한다.
 
 ## 상태 파일 — 추가 S3 없이 로컬 보관
@@ -168,8 +172,8 @@ state와 plan은 민감한 값을 포함할 수 있으므로 Git·공개 PR·CI 
 다른 실행자로 인계할 때는 마지막 state·백업과 코드 커밋을 함께 전달하고 이전 실행은 중단한다.
 잠금 파일을 임의 삭제하거나 `-lock=false`로 동시 실행하지 않는다.
 
-CI는 AWS 인증 없이 문법 검증과 **현재 자원이 없는 구성의 빈 계획**만 실행한다.
-자원/import를 추가하는 다음 PR부터 CI의 빈 plan 단계를 제외하고, 실제 운영 state를 가진 지정 실행자가 plan을 검토한다.
+CI는 AWS 인증 없이 문법·mock import 계획·계획 차단 검사를 실행한다.
+실제 운영 state를 가진 지정 실행자가 정상 refresh를 수행한 계획을 검토한다.
 운영 state를 복사하지 않은 CI plan을 실제 운영 변경 계획으로 쓰지 않는다. S3 상태 버킷·PR용 AWS OIDC 역할은 현재 단계의 필수 조건이 아니다.
 기존 배포 역할의 권한을 넓히지 않으며, 조회 정책은 별도 지침대로 필요한 범위만 임시 적용한다.
 수집기의 조회 정책이 Terraform provider의 모든 조회나 운영 변경 권한까지 보장하지는 않으므로 후속 단계에서 필요한 작업을 확인한다.
@@ -178,9 +182,9 @@ CI는 AWS 인증 없이 문법 검증과 **현재 자원이 없는 구성의 빈
 
 | 단계 | 작업 | 완료 기준 |
 | --- | --- | --- |
-| 이번 준비 PR | 기준 인벤토리·읽기 수집기·Terraform 골격·검증 CI·담당자 지침 | 모의 테스트, fmt/init/validate/빈 plan 통과 |
+| 1단계 준비 PR | 기준 인벤토리·읽기 수집기·Terraform 골격·검증 CI·담당자 지침 | 준비 구성의 모의 테스트, fmt/init/validate/빈 plan 통과 |
 | 조회·실행 준비 | 조회 권한·2차 조회, 단일 실행자와 로컬 state 경로 지정 | 필요한 네트워크 ID 확보, 조회 오류 분류, 상태 경로·백업 담당 확인 |
-| 네트워크 가져오기 | VPC·서브넷·IGW·라우팅/연결·그룹 4개·인바운드 10/아웃바운드 4 규칙 | import 계획의 생성·변경·삭제 0 → state에 import 적용 → 다시 plan 변경 0 |
+| 2단계 네트워크 가져오기 | VPC·서브넷·IGW·라우팅/연결·그룹 4개·인바운드 10/아웃바운드 4 규칙, 총 27개 | [실행 지침](network-import.md): import 계획의 생성·변경·삭제 0 → state에 import 적용 → 다시 plan 변경 0 |
 | 첫 운영 변경 | 8080의 소스를 CloudFront origin-facing 접두사 목록으로 제한 | CloudFront 경유 API/OAuth 정상, 직접 접속 차단, 롤백 방법 확인 |
 | 관리 범위 확대 | IAM·프론트·EC2/EIP/키 페어를 묶음별 import | 묶음별 실제 변경 0, 삭제/교체 방지 검토 |
 | 선택 개선 | SSM/22 제한, EBS 암호화, 스케줄·모니터링, 도메인/origin TLS | 항목별 별도 PR·운영 검증 |

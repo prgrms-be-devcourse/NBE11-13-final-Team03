@@ -1,4 +1,4 @@
-name: Infrastructure preparation
+name: Infrastructure validation
 
 on:
   pull_request:
@@ -23,17 +23,17 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Test read-only collector without AWS credentials
+      - name: Test inventory collector and import plan guard
         run: python3 -m unittest discover -s infra/tests -v
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: '1.17.0'
           terraform_wrapper: false
-      - name: Validate preparation configuration
+      - name: Validate network configuration without AWS credentials
         working-directory: infra/terraform
         run: |
-          terraform fmt -check
+          terraform fmt -check -recursive
           terraform init -input=false -lockfile=readonly
           terraform validate
-          # Preparation has no resources/imports. This does not verify AWS access.
-          terraform plan -input=false -refresh=false -detailed-exitcode
+          # Mock provider and explicit imported values; no real AWS plan/apply.
+          terraform test -no-color
