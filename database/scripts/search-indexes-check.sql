@@ -12,7 +12,7 @@
 --
 -- primary 점검 (1~3, 5번 확인용) — 노트북 저장소 루트에서:
 --   { echo 'SET ROLE application_user;'; cat database/scripts/search-indexes-check.sql; } \
---     | ssh ubuntu@<DB 서버> 'cd ~/yon-db && docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1'
+--     | ssh yon-db 'cd ~/yon-db && docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1'
 --
 -- 복제본 점검 (4, 6번 확인용) — 노트북 저장소 루트에서:
 --   { echo 'SET ROLE application_user;'; cat database/scripts/search-indexes-check.sql; } \
@@ -100,6 +100,13 @@ ORDER BY tablename, indexname;
 \echo '          idx_opportunities_type_latest 가 Index Scan 또는 Index Only Scan 으로 나타난다'
 \echo '    주의: 원본 SQL의 날짜 리터럴만 CURRENT_DATE로 바꿨다. 애플리케이션은 KST 기준 오늘을 넘긴다'
 \echo ''
+
+-- 검색 API는 질의 트랜잭션마다 SET LOCAL jit = off 를 걸고 실행한다.
+-- 같은 조건에서 계획을 보려면 여기서도 꺼야 한다. 켜 두면 JIT 컴파일 시간이 섞여
+-- 인덱스가 쓰였는지와 무관하게 Execution Time이 커진다.
+-- 세션 설정이며 이 파일의 마지막 구간이라 위 1~5번 점검에는 영향이 없다.
+SET jit = off;
+
 -- S9: 지역(서울) + 모집상태 OPEN, 유형 미지정
 EXPLAIN (ANALYZE, BUFFERS)
 select o1_0.id,o1_0.category,o1_0.created_at,o1_0.current_version_id,o1_0.detail_category,o1_0.detail_url,o1_0.opportunity_type,o1_0.sub_category,o1_0.title,o1_0.updated_at from opportunities o1_0 where o1_0.current_version_id is not null and (o1_0.opportunity_type='YOUTH_POLICY' and (exists(select or1_0.id from opportunity_regions or1_0 where or1_0.version_id=o1_0.current_version_id and or1_0.region_role='RESIDENCE' and or1_0.region_code in ('1100000000','1111000000','1114000000','1117000000','1120000000','1121500000','1123000000','1126000000','1129000000','1130500000','1132000000','1135000000','1138000000','1141000000','1144000000','1147000000','1150000000','1153000000','1154500000','1156000000','1159000000','1162000000','1165000000','1168000000','1171000000','1174000000')) or exists(select oc1_0.id from opportunity_conditions oc1_0 where oc1_0.version_id=o1_0.current_version_id and oc1_0.condition_type='REGION' and oc1_0.condition_field='residenceRegion' and jsonb_extract_path_text(oc1_0.expression,'status')='NATIONAL')) or o1_0.opportunity_type='VOCATIONAL_TRAINING' and exists(select or2_0.id from opportunity_regions or2_0 where or2_0.version_id=o1_0.current_version_id and or2_0.region_role='IMPLEMENTATION' and or2_0.region_code in ('1100000000','1111000000','1114000000','1117000000','1120000000','1121500000','1123000000','1126000000','1129000000','1130500000','1132000000','1135000000','1138000000','1141000000','1144000000','1147000000','1150000000','1153000000','1154500000','1156000000','1159000000','1162000000','1165000000','1168000000','1171000000','1174000000'))) and (o1_0.opportunity_type='YOUTH_POLICY' and exists(select aw1_0.id from application_windows aw1_0 where aw1_0.version_id=o1_0.current_version_id and aw1_0.validation_status='VALID' and aw1_0.period_type='FIXED' and (aw1_0.start_date is not null or aw1_0.end_date is not null) and (aw1_0.start_date is null or aw1_0.start_date<=CURRENT_DATE) and (aw1_0.end_date is null or aw1_0.end_date>=CURRENT_DATE)) or o1_0.opportunity_type='VOCATIONAL_TRAINING' and exists(select tcd1_0.id from training_course_details tcd1_0 where tcd1_0.version_id=o1_0.current_version_id and tcd1_0.training_start_date is not null and tcd1_0.training_start_date>=CURRENT_DATE)) order by o1_0.created_at desc,o1_0.id desc offset 0 rows fetch first 20 rows only;
