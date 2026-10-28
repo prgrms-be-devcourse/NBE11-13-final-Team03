@@ -11,3 +11,6 @@ VPC DNS 속성은 미수집으로 남겼으며 IAM·CloudFront 등 다른 범위
 원본 출력은 `raw/` 또는 저장소 밖의 비공개 폴더에 보관한다. `.gitignore`가 모든 임의 경로의 원본을 막는 것은 아니므로 stage 목록을 검토한다.
 원본 정책·Function 코드·origin 사용자 지정 헤더·계정 내 다른 자원 정보는 통째로 커밋하지 않는다.
 추가 기준본에도 관측 일시·출처와 미확인 항목을 구분해 남긴다.
+
+전체 import의 운영 입력은 `--scope import`로 실행 시 수집하고 저장소 밖의 private tfvars로 변환한다.
+실제 IAM 정책·origin 헤더·Function 소스는 합성 테스트 자료와 구분하며 커밋하지 않는다.

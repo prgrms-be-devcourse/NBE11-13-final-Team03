@@ -1,7 +1,8 @@
-# AWS 인벤토리와 Terraform 네트워크 관리
+# AWS 인벤토리와 Terraform 기존 인프라 관리
 
-1단계 조회 도구에 이어 2단계 기존 네트워크 27개 항목의 import 구성을 제공한다.
-코드·CI만으로 운영 import나 AWS 자원 변경을 실행하지 않는다. 지정 담당자가 [네트워크 import 실행 지침](network-import.md)에 따라 실제 계획을 확인하고 상태 등록을 진행한다.
+PR #103에서 네트워크·IAM·프론트·EC2의 기존 자원 import를 한 묶음으로 제공한다.
+담당자는 [전체 import 실행 지침](adoption.md)의 통합 조회 정책과 일괄 실행 명령을 사용한다.
+코드·CI만으로 운영 import나 AWS 자원 변경을 실행하지 않는다. 실행 시 운영값을 비공개로 수집해 계획을 검증하고 상태에 등록한다.
 다만 기존 `backend-image.yml`은 main의 모든 push에 실행되고, 성공하면 `deploy.yml`이 backend를 배포한다.
 따라서 인프라 PR도 병합 시 기존 backend 빌드·재배포가 이어질 수 있다. 병합 시점은 운영 가동 시간과 맞춘다.
 
@@ -22,6 +23,9 @@
 - 서버 09:00~18:00 KST 가동은 사용자 전달값이다. 스케줄 소유자·정의·시간대는 미확인이다.
 
 ## AWS 담당자: 2차 조회
+
+**전체 import는 [adoption.md](adoption.md)를 사용한다.** 아래 기존 조회 방법은 사전 확인·후속 감사용이며 단계마다 담당자에게 따로 실행을 요청할 필요가 없다.
+새 `--scope import`는 채택 대상 전체만 수집하고, 기존 `--scope all`은 후속 감사 범위까지 수집한다.
 
 CloudShell은 필수가 아니다. AWS CLI 2와 Python 3.9 이상이 있는 로컬 PC나 권한이 준비된 EC2에서도 같은 수집기를 실행한다.
 전달받은 `infra/` 폴더를 푼 루트에서 실행한다.
@@ -128,7 +132,7 @@ AWS 담당자는 원본을 승인된 비공개 경로로 전달하고, `complete
 ## 코드 담당자: Terraform 검증
 
 Terraform **1.17.0**, AWS provider는 `.terraform.lock.hcl`의 검증된 버전을 사용한다.
-VPC·서브넷·IGW·라우팅·그룹/규칙을 실제 ID로 가져오며 계정·리전을 고정한다.
+VPC·IAM·서버·S3/CloudFront를 실제 ID/이름으로 가져오며 계정·리전을 고정한다.
 8080/22의 현재 접근 정책을 유지한다. CloudFront 소스 제한은 별도 PR이다.
 
 ```bash
@@ -139,7 +143,8 @@ terraform -chdir=infra/terraform validate
 terraform -chdir=infra/terraform test -no-color
 ```
 
-CI도 같은 검사를 AWS 자격증명/OIDC 없이 실행한다. Terraform 테스트는 mock provider와 명시된 import 응답을 사용한다.
+CI도 같은 검사를 AWS 자격증명/OIDC 없이 실행한다. 테스트는 합성 입력과 mock provider import 응답을 사용한다.
+추가 검사에서 합성 대상 59개 전부의 import ID와 AWS 변경 0을 대조한다. 운영 총 개수는 실제 IAM 정책/버킷 설정에 따라 정해진다.
 이 결과는 **실제 AWS 조회·무변경 계획·운영 상태 등록 완료를 의미하지 않는다.**
 공급자를 내려받을 네트워크는 필요하다. Terraform 파일과 provider lock 파일은 커밋하되 `.terraform/`·state·plan·실제 backend 설정은 제외한다.
 
@@ -178,15 +183,15 @@ CI는 AWS 인증 없이 문법·mock import 계획·계획 차단 검사를 실�
 기존 배포 역할의 권한을 넓히지 않으며, 조회 정책은 별도 지침대로 필요한 범위만 임시 적용한다.
 수집기의 조회 정책이 Terraform provider의 모든 조회나 운영 변경 권한까지 보장하지는 않으므로 후속 단계에서 필요한 작업을 확인한다.
 
-## 후속 PR 순서와 완료 기준
+## #103 통합 범위와 후속 변경
 
 | 단계 | 작업 | 완료 기준 |
 | --- | --- | --- |
 | 1단계 준비 PR | 기준 인벤토리·읽기 수집기·Terraform 골격·검증 CI·담당자 지침 | 준비 구성의 모의 테스트, fmt/init/validate/빈 plan 통과 |
 | 조회·실행 준비 | 조회 권한·2차 조회, 단일 실행자와 로컬 state 경로 지정 | 필요한 네트워크 ID 확보, 조회 오류 분류, 상태 경로·백업 담당 확인 |
-| 2단계 네트워크 가져오기 | VPC·서브넷·IGW·라우팅/연결·그룹 4개·인바운드 10/아웃바운드 4 규칙, 총 27개 | [실행 지침](network-import.md): import 계획의 생성·변경·삭제 0 → state에 import 적용 → 다시 plan 변경 0 |
+| #103 전체 가져오기 | 네트워크 27개·IAM 역할/정책/프로파일/OIDC·프론트 S3/CloudFront·EC2/EIP/공개 키 | [통합 지침](adoption.md): 전체 조회 → 정확한 대상·변경 0 검증 → state import → 사후 변경 0 |
 | 첫 운영 변경 | 8080의 소스를 CloudFront origin-facing 접두사 목록으로 제한 | CloudFront 경유 API/OAuth 정상, 직접 접속 차단, 롤백 방법 확인 |
-| 관리 범위 확대 | IAM·프론트·EC2/EIP/키 페어를 묶음별 import | 묶음별 실제 변경 0, 삭제/교체 방지 검토 |
+| 담당자 전달 | 필요한 코드·조회 권한·검증·실행 지침을 한 묶음으로 준비 | PR마다 AWS 작업을 끼워 넣지 않고 한 작업 시간에 순차 실행 |
 | 선택 개선 | SSM/22 제한, EBS 암호화, 스케줄·모니터링, 도메인/origin TLS | 항목별 별도 PR·운영 검증 |
 
 CloudFront 접두사 목록은 SG 규칙 55개 분량을 사용하며 특정 팀 배포만 식별하지 않는다. 한도와 추가 origin 식별 방식을 검토한다.
