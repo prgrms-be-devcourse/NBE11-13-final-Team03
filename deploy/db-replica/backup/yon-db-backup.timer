@@ -1,8 +1,8 @@
 [Unit]
-Description=YON replica local backup at 11:00 KST (confirm server uptime)
+Description=YON replica local backup at 15:30 KST
 
 [Timer]
-OnCalendar=*-*-* 11:00:00 Asia/Seoul
+OnCalendar=*-*-* 15:30:00 Asia/Seoul
 # Do not catch up before collection finishes when the server boots.
 Persistent=false
 Unit=yon-db-backup@scheduled.service

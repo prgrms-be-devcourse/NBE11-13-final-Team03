@@ -11,8 +11,8 @@
 | 대상 | 실제 replica EC2, pg_is_in_recovery()=true |
 | 복제 | receiver=streaming, 마지막 재생 시각·경과 시간 확인 |
 | 용량 | 제공값 DB 1.2GB / 디스크 29GB 중 22GB 여유, 적용 때 다시 측정 |
-| 서버 가동 | 기동·정지 시각, 09:30 수집의 실제 종료, 일요일 가동 여부 |
-| 백업 시각 | **11:00 KST 임시**. 실제 가동·수집 종료 확인 후 확정 |
+| 서버 가동 | 09:00~18:00 KST. 09:30 수집의 실제 종료·일요일 가동 여부 확인 |
+| 백업 시각 | 매일 **15:30 KST(오후 3시 30분)**. 18:00 정지 전 백업 완료 확인 |
 | 도구 | Docker Compose 플러그인, Python 3.9 이상, tzdata |
 
 스크립트의 기본 DB명은 yon, 사용자 postgres다. 실제 값이 다르면 ini에서 바꾼다.
@@ -42,7 +42,7 @@ release_reference와 실제 경로·프로젝트·서비스·DB명을 맞춘다.
 ```bash
 sudo install -m 644 backup/yon-db-backup@.service backup/yon-db-backup*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-systemd-analyze calendar '*-*-* 11:00:00 Asia/Seoul'
+systemd-analyze calendar '*-*-* 15:30:00 Asia/Seoul'
 sudo systemctl start yon-db-backup@daily.service
 sudo systemctl start yon-db-backup@weekly.service
 sudo systemctl start yon-db-backup@monitor.service
@@ -58,15 +58,30 @@ sudo journalctl -u yon-db-backup@daily.service -u yon-db-backup@monitor.service 
 1. docs/db-backup.md의 절차로 로컬 세트 SHA256을 검증한다.
 2. **다른 빈 볼륨·네트워크 없는 임시 DB**에 복원한다. 운영 DB에 직접 복원하지 않는다.
 3. 파티션·주요 데이터·소유자·권한과 소요 시간을 코드 담당자와 확인한다.
-4. 서버 가동/수집 종료에 맞는 시각을 확정하고 타이머를 활성화한다.
+4. 15:30 KST 일정과 서버 가동·수집 종료를 확인하고 타이머를 활성화한다.
 
 ```bash
 sudo systemctl enable --now yon-db-backup.timer yon-db-backup-monitor.timer
 systemctl list-timers 'yon-db-backup*'
 ```
 
-Persistent=false라 꺼진 시간의 예약을 부팅 즉시 보충하지 않는다. 11:00을 놓쳤다면 수집 종료 후 수동 실행한다.
+Persistent=false라 꺼진 시간의 예약을 부팅 즉시 보충하지 않는다. 15:30을 놓쳤다면 수집 종료 후 수동 실행한다.
 다음 실제 예약 daily와 일요일 weekly, 보관 개수 7/4개·남은 공간·monitor를 확인해 완료로 기록한다.
+
+### 기존 설치의 백업 시간만 변경
+
+변경된 yon-db-backup.timer를 ~/yon-db-replica/backup/에 받은 뒤 복제본 서버에서 실행한다.
+새 파일을 저장소에 병합하거나 서버 폴더에 복사하는 것만으로 설치된 타이머가 갱신되지는 않는다.
+
+```bash
+cd ~/yon-db-replica
+sudo install -m 644 backup/yon-db-backup.timer /etc/systemd/system/yon-db-backup.timer
+sudo systemctl daemon-reload
+sudo systemctl restart yon-db-backup.timer
+systemctl list-timers yon-db-backup.timer
+```
+
+다음 실행 시각이 15:30 KST(06:30 UTC)인지 확인한다. DB나 실행 중인 백업 서비스를 재시작할 필요는 없다.
 
 ## 5. 운영 정책
 
@@ -87,7 +102,7 @@ primary와 replica가 동시에 유실되거나 백업을 보관한 디스크가
 | --- | --- |
 | 작업 일시/담당자/파일 커밋 | |
 | replica EC2/경로/프로젝트/서비스/DB명 | |
-| 실제 기동·정지/일요일 가동/수집 종료/확정 백업 시각 | |
+| 실제 기동·정지/일요일 가동/수집 종료/확정 백업 시각 | 09:00~18:00 KST 가동, 백업 15:30 KST. 일요일 가동·수집 종료 확인 |
 | daily·weekly 경로/완료 manifest/재생 시각/streaming | |
 | 덤프 크기/보관 개수/디스크 여유 | |
 | SHA256·별도 DB 복원·데이터·권한·소요 시간 | |

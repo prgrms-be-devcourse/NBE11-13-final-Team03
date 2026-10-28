@@ -27,15 +27,16 @@ primary에 백업용 쿼리는 보내지 않지만, 기존 hot_standby_feedback=
 
 | 작업 | 기준 |
 | --- | --- |
-| 매일 | 11:00 KST daily 전체 논리 덤프 |
+| 매일 | 15:30 KST daily 전체 논리 덤프 |
 | 일요일 | 같은 덤프를 weekly에 검증·복사. DB 덤프를 두 번 실행하지 않음 |
 | daily 보관 | manifest가 유효하고 필수 파일·크기가 일치하는 최근 완료 세트 7개 |
 | weekly 보관 | 같은 기준의 최근 완료 세트 4개 |
 | 점검 | 부팅 10분 뒤부터 5분마다, journal·monitor.json·종료 코드로 확인 |
 
-11:00은 09:30 수집 이후의 **임시 실행 시각**이다. 실제 수집 종료·서버 기동/정지·일요일 가동 시간을 AWS 담당자가 확인해야 한다.
+서버 가동 시간은 09:00~18:00 KST이며, 백업은 매일 **15:30 KST(오후 3시 30분)**에 실행한다.
+AWS 담당자는 실제 수집 종료·백업 완료가 18:00 정지 전인지, 일요일에도 서버가 가동하는지 확인한다.
 Persistent=false로, 서버 부팅 때 밀린 백업을 수집 종료 전 즉시 실행하지 않는다.
-11:00에 꺼져 있으면 그날 예약을 놓친다. 운영자가 수집 종료 뒤 수동 실행하거나 일정을 조정한다.
+15:30에 꺼져 있으면 그날 예약을 놓친다. 운영자가 수집 종료 뒤 수동 실행하거나 일정을 조정한다.
 일요일을 놓친 weekly는 다음 가동 시간에 수동 실행한다. 야간 정지로 생긴 복제 지연도 기동 후 확인한다.
 
 daily/weekly는 모두 독립적으로 복원 가능한 **전체 논리 덤프**다. 차등 백업이 아니다.
@@ -104,7 +105,7 @@ replica Compose에는 POSTGRES_USER/POSTGRES_DB가 없으므로 ini의 db_user/d
 cd ~/yon-db-replica
 sudo install -m 644 backup/yon-db-backup@.service backup/yon-db-backup*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-systemd-analyze calendar '*-*-* 11:00:00 Asia/Seoul'
+systemd-analyze calendar '*-*-* 15:30:00 Asia/Seoul'
 sudo systemctl start yon-db-backup@daily.service
 sudo systemctl start yon-db-backup@weekly.service
 sudo systemctl start yon-db-backup@monitor.service
@@ -113,12 +114,14 @@ sudo journalctl -u yon-db-backup@daily.service -u yon-db-backup@monitor.service 
 
 초기 weekly는 첫 일요일 전에도 수동으로 기준 세트를 만든다. 이후 예약은 일요일에만 추가한다.
 systemd가 /var/lib/yon-backup을 ubuntu 소유·0700으로 만든다. backup.ini의 state_dir을 바꾸면 소유권·공간도 별도로 확인한다.
-완료 세트·SHA256·복원 시험과 복제 최신성을 확인한 뒤, 실제 서버 가동 시간을 확인해 타이머를 켠다.
+완료 세트·SHA256·복원 시험과 복제 최신성을 확인한 뒤 타이머를 켠다.
 
 ```bash
 sudo systemctl enable --now yon-db-backup.timer yon-db-backup-monitor.timer
 systemctl list-timers 'yon-db-backup*'
 ```
+
+이미 설치한 타이머의 시간만 바꾸려면 [AWS 담당자 지침](db-backup-aws-instructions.md#기존-설치의-백업-시간만-변경)의 재설치·재시작 절차를 따른다.
 
 이전 #92 버전을 이미 설치했다면 **옛 서버의 백업 타이머를 먼저 비활성화**한다. 옛 monthly 타이머도 중지한다.
 이전 안의 WAL 아카이브까지 운영 적용했다면 타이머만 꺼도 WAL 설정은 남는다. 담당자가 기존 스트리밍 복제를 보존하면서 해제 절차를 별도로 확인한다.
@@ -184,7 +187,7 @@ sudo cat /var/lib/yon-backup/monitor.json
 | 항목 | 담당자 기록 |
 | --- | --- |
 | 복제본 EC2/경로/프로젝트/서비스/DB명 | |
-| 실제 기동·정지/수집 종료/일요일 가동 시간·확정 백업 시각 | 11:00 KST 임시, 확인 필요 |
+| 실제 기동·정지/수집 종료/일요일 가동 시간·확정 백업 시각 | 09:00~18:00 KST 가동, 백업 15:30 KST. 수집 종료·일요일 가동 확인 |
 | 코드 커밋/배포 참조/사용 중 앱 이미지 | |
 | 실제 덤프 크기/전체 세트 용량/남은 디스크 | |
 | 첫 daily·weekly/재생 시각/streaming/monitor | |
@@ -201,7 +204,7 @@ sudo cat /var/lib/yon-backup/monitor.json
 2026-10-27 로컬 검증: 단위 22개 통과, PostgreSQL 16.15 실제 스트리밍 복제본의 로컬 덤프·복원 통과.
 raw 100건·행동 로그 100건·notification 스키마 1건과 파티션·소유자·권한을 확인했다.
 primary 중단 중 덤프 보관/점검 실패, 재연결 후 정상 점검, primary 및 승격 후 실행 거부를 확인했다.
-11:00 KST 일정 문법은 CI의 systemd-analyze 단계에서 확인하며 실제 가동 시간은 운영 담당자가 확정한다.
+15:30 KST 일정 문법은 CI의 systemd-analyze 단계에서 확인한다. 운영 적용 뒤 다음 실행이 15:30 KST로 표시되는지 담당자가 확인한다.
 
 근거: [PostgreSQL hot standby](https://www.postgresql.org/docs/16/hot-standby.html),
 [재생 시각 함수](https://www.postgresql.org/docs/16/functions-admin.html),

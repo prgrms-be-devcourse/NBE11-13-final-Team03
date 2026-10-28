@@ -30,7 +30,7 @@ jobs:
       - name: Unit checks and timer syntax
         run: |
           python3 -m unittest discover -s deploy/tests -p test_db_backup.py -v
-          systemd-analyze calendar '*-*-* 11:00:00 Asia/Seoul'
+          systemd-analyze calendar '*-*-* 15:30:00 Asia/Seoul'
       - name: Require local test dependencies
         run: |
           docker info
