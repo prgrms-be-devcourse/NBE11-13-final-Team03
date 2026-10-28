@@ -25,6 +25,7 @@ import com.team3.backend.search.domain.repository.OpportunitySearchRepository;
 import com.team3.backend.search.dto.OpportunitySearchItemDto;
 import com.team3.backend.search.dto.OpportunitySearchResponseDto;
 import com.team3.backend.search.dto.OpportunitySearchSort;
+import jakarta.persistence.EntityManager;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Expression;
@@ -33,6 +34,8 @@ import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
 import lombok.RequiredArgsConstructor;
+import org.hibernate.dialect.PostgreSQLDialect;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -61,6 +64,10 @@ public class OpportunitySearchService {
     private final RegionDirectory regionDirectory;
     private final EligibilityProvider eligibilityProvider;
     private final PreferenceService preferenceService;
+    private final EntityManager entityManager;
+
+    /** PostgreSQL 여부는 한 번만 확인하고 재사용한다. */
+    private volatile Boolean postgres;
 
     /** 공고를 DB에서 페이지 조회한 뒤 인증 사용자에게 현재 페이지의 개인화 상태를 덧붙인다. */
     @Transactional(readOnly = true)
@@ -178,6 +185,7 @@ public class OpportunitySearchService {
                 return criteriaBuilder.conjunction();
             });
         }
+        disableJitForCurrentTransaction();
         // DB에서 대표 날짜를 정렬한 뒤 페이지를 잘라야 결과 순서와 전체 건수가 유지된다.
         Page<Opportunity> results = searchRepository.findAll(
                 filters, PageRequest.of(page, size, pageSort));
@@ -200,6 +208,34 @@ public class OpportunitySearchService {
                 items, results.getNumber(), results.getSize(),
                 results.getTotalElements(), results.getTotalPages(), results.hasNext()
         );
+    }
+
+    /**
+     * 이 검색 트랜잭션에서만 PostgreSQL JIT를 끈다.
+     *
+     * 검색 술어는 조건을 EXISTS 서브쿼리로 펼쳐 플래너 비용 추정치가 수백만까지 올라간다.
+     * 그러면 jit_optimize/inline_above_cost(기본 500,000)를 넘겨 LLVM 컴파일이 켜지는데,
+     * 실제 데이터는 작아 컴파일 비용이 실행 비용을 크게 웃돈다 (실험 DB 측정: 실행 시간의 90% 이상).
+     *
+     * SET LOCAL이라 이 트랜잭션이 끝나면 커넥션 설정이 원래대로 돌아가고, 다른 DB 작업에는 영향이 없다.
+     * 서버 전역 설정은 건드리지 않는다. PostgreSQL이 아닌 환경(H2 테스트 등)에서는 아무것도 하지 않는다.
+     */
+    private void disableJitForCurrentTransaction() {
+        if (!isPostgres()) {
+            return;
+        }
+        entityManager.createNativeQuery("SET LOCAL jit = off").executeUpdate();
+    }
+
+    private boolean isPostgres() {
+        Boolean cached = postgres;
+        if (cached == null) {
+            cached = entityManager.getEntityManagerFactory()
+                    .unwrap(SessionFactoryImplementor.class)
+                    .getJdbcServices().getDialect() instanceof PostgreSQLDialect;
+            postgres = cached;
+        }
+        return cached;
     }
 
     private static void addDescendants(RegionIndex index, String code, Set<String> codes) {
