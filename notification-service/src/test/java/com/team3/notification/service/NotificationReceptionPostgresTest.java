@@ -76,6 +76,7 @@ class NotificationReceptionPostgresTest {
              var statement = connection.createStatement()) {
             statement.execute(sql("notification-inbox.sql"));
             statement.execute(sql("notification-user-api.sql"));
+            statement.execute(sql("notification-session-end.sql"));
             statement.execute(sql("notification-withdrawal.sql"));
             statement.execute(sql("notification-delivery.sql"));
             // Existing test-only Entity is scanned on the test classpath, not shipped in the Boot JAR.
@@ -275,6 +276,77 @@ class NotificationReceptionPostgresTest {
     }
 
     @Test
+    void sessionEndDeactivatesOnlyThatSessionsEndpointsAndIsIdempotent() throws Exception {
+        var loggedOut = userApi.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest(
+                "laptop-token", "44444444-4444-4444-8444-444444444444"));
+        var phone = userApi.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest(
+                "phone-token", "55555555-5555-4555-8555-555555555555"));
+        var legacy = userApi.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest("legacy-token"));
+        var other = userApi.registerEndpoint(8, new com.team3.notification.api.NotificationUserDtos.EndpointRequest(
+                "other-user-token", "44444444-4444-4444-8444-444444444444"));
+        userApi.updateSettings(7, new com.team3.notification.api.NotificationUserDtos.SettingsRequest(true, true));
+
+        var result = handler.handle(sessionEnd(Map.of()));
+        assertThat(result.status()).isEqualTo(SESSION_ENDED);
+        assertThat(result.notificationId()).isNull();
+        assertThat(result.duplicateMessage()).isFalse();
+        assertThat(active(loggedOut.id())).isFalse();
+        assertThat(active(phone.id())).isTrue();      // another session of the same user
+        assertThat(active(legacy.id())).isTrue();     // registered before session binding
+        assertThat(active(other.id())).isTrue();      // same session ID string, other user
+        assertThat(userApi.settings(7).pushEnabled()).isTrue(); // logout is not a consent change
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM withdrawn_users", Long.class)).isZero();
+
+        // Replay keeps the receipt; a changed identity is a conflict; a second logout message is consumed again.
+        assertThat(handler.handle(sessionEnd(Map.of("futureOptional", true))).duplicateMessage()).isTrue();
+        assertThatThrownBy(() -> handler.handle(sessionEnd(Map.of("occurredAt", "2026-10-29T00:00:00Z"))))
+                .isInstanceOf(MessageIdentityConflictException.class);
+        assertThat(handler.handle(sessionEnd(Map.of("messageId", UUID.randomUUID().toString()))).status()).isEqualTo(SESSION_ENDED);
+        assertThat(consumed.count()).isEqualTo(2);
+
+        // The next login on that browser re-registers the same token and binds it to the new session.
+        var again = userApi.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest(
+                "laptop-token", "66666666-6666-4666-8666-666666666666"));
+        assertThat(again.id()).isEqualTo(loggedOut.id());
+        assertThat(active(loggedOut.id())).isTrue();
+        assertThat(jdbc.queryForObject("SELECT session_id FROM notification_endpoints WHERE id = ?", String.class, loggedOut.id()))
+                .isEqualTo("66666666-6666-4666-8666-666666666666");
+        // A registration without a session (older Application) keeps the known session instead of clearing it.
+        userApi.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest("laptop-token"));
+        assertThat(jdbc.queryForObject("SELECT session_id FROM notification_endpoints WHERE id = ?", String.class, loggedOut.id()))
+                .isEqualTo("66666666-6666-4666-8666-666666666666");
+    }
+
+    @Test
+    void sessionEndAfterWithdrawalRecordsConsumptionWithoutResurrectingAnything() throws Exception {
+        userApi.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest(
+                "gone-token", "44444444-4444-4444-8444-444444444444"));
+        handler.handle(withdrawal(Map.of()));
+        assertThat(handler.handle(sessionEnd(Map.of())).status()).isEqualTo(SESSION_ENDED);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_endpoints", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_settings", Long.class)).isZero();
+        assertThat(consumed.count()).isEqualTo(2);
+    }
+
+    @Test
+    void sessionEndConsumptionFailureRollsBackDeactivation() throws Exception {
+        var endpoint = userApi.registerEndpoint(7, new com.team3.notification.api.NotificationUserDtos.EndpointRequest(
+                "atomic-session-token", "44444444-4444-4444-8444-444444444444"));
+        jdbc.execute("ALTER TABLE notification.consumed_messages ADD CONSTRAINT reject_session_receipt "
+                + "CHECK (message_id <> '11111111-1111-4111-8111-111111111113'::uuid)");
+        try {
+            assertThatThrownBy(() -> handler.handle(sessionEnd(Map.of()))).isInstanceOf(DataIntegrityViolationException.class);
+        } finally { jdbc.execute("ALTER TABLE notification.consumed_messages DROP CONSTRAINT reject_session_receipt"); }
+        assertThat(active(endpoint.id())).isTrue();
+        assertThat(handler.handle(sessionEnd(Map.of())).status()).isEqualTo(SESSION_ENDED);
+        assertThat(active(endpoint.id())).isFalse();
+    }
+
+    private boolean active(long endpointId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT active FROM notification_endpoints WHERE id = ?", Boolean.class, endpointId));
+    }
+
+    @Test
     void withdrawalConsumptionFailureRollsBackTombstoneAndEveryDeletion() throws Exception {
         var first = handler.handle(NotificationMessages.json(Map.of()));
         userApi.updateSettings(7, new com.team3.notification.api.NotificationUserDtos.SettingsRequest(true, true));
@@ -348,6 +420,14 @@ class NotificationReceptionPostgresTest {
                     .header("X-INTERNAL-KEY", "test-notification-key").GET().build();
             assertThat(client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(410);
         }
+    }
+
+    private String sessionEnd(Map<String, ?> changes) throws Exception {
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        Map<String, Object> envelope = new LinkedHashMap<>(mapper.readValue(new ClassPathResource("contracts/user-session-ended-v1.json")
+                .getContentAsString(StandardCharsets.UTF_8), Map.class));
+        envelope.putAll(changes);
+        return mapper.writeValueAsString(envelope);
     }
 
     private String withdrawal(Map<String, ?> changes) throws Exception {
