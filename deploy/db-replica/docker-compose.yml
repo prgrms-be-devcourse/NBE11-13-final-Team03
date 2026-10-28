@@ -1,0 +1,33 @@
+# DB 읽기 복제본 서버(EC2)용 compose. 자동 배포하지 않는다. README "DB 읽기 복제본" 절차로 처음 한 번 띄운다.
+# primary(DB 서버)의 WAL을 물리 스트리밍으로 받아 재생하는 읽기 전용 서버다 (비동기 복제, 복제 슬롯 yon_replica_1).
+# 데이터 볼륨은 pg_basebackup으로 채운 뒤 띄운다 (빈 볼륨으로 띄우면 새 DB가 만들어지므로 순서를 지킨다).
+# 실행 (복제본 서버의 ~/yon-db-replica): docker compose up -d
+name: yon-db-replica
+
+services:
+  postgres-replica:
+    image: postgres:16-alpine
+    # hot_standby_feedback: 복제본의 긴 조회가 primary vacuum과 충돌해 취소되지 않게 한다 (primary에 정리 안 된 행이 조금 더 남음)
+    # max_standby_streaming_delay: 그래도 충돌하면 재생을 최대 30초 기다린 뒤 조회를 취소한다
+    command: ["postgres", "-c", "hot_standby_feedback=on", "-c", "max_standby_streaming_delay=30s"]
+    environment:
+      TZ: Asia/Seoul
+    # 메인 서버(backend 읽기)만 접속한다. 보안 그룹에서 5432는 yon-main 보안 그룹에만 연다
+    ports:
+      - "${DB_BIND_IP:?.env에 이 서버의 사설 IP(DB_BIND_IP)가 필요합니다}:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  postgres_data:

@@ -25,31 +25,41 @@ public class SlackWebhookSender implements AutoCloseable {
 
     public void send(CollectionCompletedMessage message) {
         var result = message.payload();
-        var text = String.format(Locale.ROOT,
-                "[수집 완료] %s %s · 새 %,d · 교체 %,d · 유지 %,d · 실패 %,d",
-                result.dataSource(), result.collectedDate(), result.newCount(), result.updatedCount(),
-                result.unchangedCount(), result.failedCount());
-        if (message.schemaVersion() == 2) {
-            var type = switch (result.syncType()) {
+        var source = switch (result.dataSource()) {
+            case "YOUTH_POLICY" -> "청년 정책";
+            case "EMPLOYMENT24" -> "고용24";
+            default -> throw new IllegalArgumentException("INVALID_COLLECTION_COMPLETED_PAYLOAD");
+        };
+        var v2 = message.schemaVersion() == 2;
+        var text = new StringBuilder("[수집 결과]")
+                .append("\n수집일: ").append(result.collectedDate())
+                .append("\n데이터 유형: ").append(source);
+        if (v2) {
+            var kind = switch (result.syncType()) {
                 case "SCHEDULED" -> "정기 수집";
                 case "MANUAL" -> "수동 수집";
-                default -> "수동 재시도";
+                case "MANUAL_RETRY" -> "수동 재시도";
+                default -> throw new IllegalArgumentException("INVALID_COLLECTION_COMPLETED_PAYLOAD");
             };
+            text.append(String.format(Locale.ROOT, "\n실행: #%d · %s", result.jobId(), kind));
+        }
+        text.append(String.format(Locale.ROOT, "\n신규: %,d건\n갱신: %,d건\n변경 없음: %,d건\n실패: %,d건",
+                result.newCount(), result.updatedCount(), result.unchangedCount(), result.failedCount()));
+        if (v2) {
+            // 페이지 실패는 레코드 수로 환산하지 않는다. 레코드 실패가 0이어도 상태가 부분 성공인 이유를 보여 준다.
             var outcome = switch (result.status()) {
                 case "SUCCESS" -> "성공";
-                case "PARTIAL_SUCCESS" -> "부분 실패";
+                case "PARTIAL_SUCCESS" -> "부분 성공";
                 case "FAILED" -> "실패";
-                default -> "중단";
+                case "INTERRUPTED" -> "중단";
+                default -> throw new IllegalArgumentException("INVALID_COLLECTION_COMPLETED_PAYLOAD");
             };
-            text = String.format(Locale.ROOT,
-                    "[%s · %s] %s %s · 실행 #%d · 새 %,d · 교체 %,d · 유지 %,d · 레코드 실패 %,d · 페이지 실패 %,d · 소요 %d분 %02d.%03d초",
-                    type, outcome, result.dataSource(), result.collectedDate(), result.jobId(), result.newCount(),
-                    result.updatedCount(), result.unchangedCount(), result.failedCount(), result.failedPageCount(),
-                    result.durationMillis() / 60_000, result.durationMillis() / 1_000 % 60, result.durationMillis() % 1_000);
+            text.append(String.format(Locale.ROOT, "\n페이지 실패: %,d건\n소요 시간: %d분 %02d초\n상태: %s",
+                    result.failedPageCount(), result.durationMillis() / 60_000, result.durationMillis() / 1_000 % 60, outcome));
         }
         var request = HttpRequest.newBuilder(webhook).timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json; charset=utf-8")
-                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(Map.of("text", text)), StandardCharsets.UTF_8))
+                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(Map.of("text", text.toString())), StandardCharsets.UTF_8))
                 .build();
         try {
             var response = http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

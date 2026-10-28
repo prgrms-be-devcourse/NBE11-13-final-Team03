@@ -76,6 +76,11 @@ jobs:
           for key in ('skipped', 'failures', 'errors'):
               assert int(completion.attrib[key]) == 0, f'Collection completion Outbox tests: {key}={completion.attrib[key]}'
           print(f"Collection completion PostgreSQL tests passed: {completion.attrib['tests']}")
+          partition = ET.parse(results / 'TEST-com.team3.dataservice.collection.service.RawPartitionPostgresTest.xml').getroot()
+          assert int(partition.attrib['tests']) > 0, 'Raw partition migration tests did not run'
+          for key in ('skipped', 'failures', 'errors'):
+              assert int(partition.attrib[key]) == 0, f'Raw partition migration tests: {key}={partition.attrib[key]}'
+          print(f"Raw partition migration tests passed: {partition.attrib['tests']}")
           sqs = ET.parse(results / 'TEST-com.team3.dataservice.outbox.CollectionSqsOutboxPostgresTest.xml').getroot()
           assert int(sqs.attrib['tests']) > 0, 'Collection SQS/PostgreSQL tests did not run'
           for key in ('skipped', 'failures', 'errors'):

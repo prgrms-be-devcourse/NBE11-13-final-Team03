@@ -39,6 +39,9 @@ public class RawNormalizationRequest {
     @JoinColumn(name = "previous_raw_record_id", updatable = false)
     private RawExternalRecord previousRawRecord;
 
+    @Column(name = "source_id", nullable = false, updatable = false)
+    private Long sourceId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "event_type", nullable = false, updatable = false, length = 16)
     private RecordResultType eventType;
@@ -56,6 +59,7 @@ public class RawNormalizationRequest {
         }
         this.rawRecord = rawRecord;
         this.previousRawRecord = previousRawRecord;
+        this.sourceId = rawRecord.getSource().getId();
         this.eventType = eventType;
         this.createdAt = createdAt;
     }

@@ -19,8 +19,11 @@ public final class NotificationUserDtos {
     public record UnreadCount(boolean available, Long unreadCount) { }
     public record Settings(boolean inAppEnabled, boolean pushEnabled, Instant pushConsentAt, Instant updatedAt) { }
     public record SettingsRequest(@NotNull Boolean inAppEnabled, @NotNull Boolean pushEnabled) { }
-    public record EndpointRequest(@NotBlank @Size(max = 2048) @Pattern(regexp = "[!-~]+") String fcmToken) {
-        @Override public String toString() { return "EndpointRequest[fcmToken=REDACTED]"; }
+    /** sessionId is the Application login session supplied by the facade; absent from older Application versions. */
+    public record EndpointRequest(@NotBlank @Size(max = 2048) @Pattern(regexp = "[!-~]+") String fcmToken,
+                                  @Size(max = 36) @Pattern(regexp = "[!-~]+") String sessionId) {
+        public EndpointRequest(String fcmToken) { this(fcmToken, null); }
+        @Override public String toString() { return "EndpointRequest[fcmToken=REDACTED, sessionId=" + sessionId + "]"; }
     }
     public record Endpoint(Long id, boolean active) { }
 }

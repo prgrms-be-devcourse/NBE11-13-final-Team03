@@ -201,4 +201,27 @@ class NotificationMessageContractTest {
                     .isInstanceOf(RuntimeException.class);
         }
     }
+
+    @Test
+    void readsSessionEndControlContractAndRejectsMalformedSession() throws Exception {
+        var json = new ClassPathResource("contracts/user-session-ended-v1.json").getContentAsString(StandardCharsets.UTF_8);
+        assertThat(decoder.isSessionEnd(json)).isTrue();
+        assertThat(decoder.isWithdrawal(json)).isFalse();
+        var message = decoder.decodeSessionEnd(json);
+        assertThat(message.schemaVersion()).isEqualTo(1);
+        assertThat(message.userId()).isEqualTo(7L);
+        assertThat(message.sessionId()).isEqualTo("44444444-4444-4444-8444-444444444444");
+        assertThat(message.occurredAt()).isEqualTo(Instant.parse("2026-10-28T00:00:00Z"));
+        // Same fingerprint for the same fields in another order; a different session is another message.
+        assertThat(fingerprints.fingerprint(message)).isEqualTo(fingerprints.fingerprint(decoder.decodeSessionEnd(
+                json.replace("\"userId\": 7,\n", "").replace("\"occurredAt\"", "\"userId\": 7, \"occurredAt\""))));
+        assertThat(fingerprints.fingerprint(message)).isNotEqualTo(fingerprints.fingerprint(decoder.decodeSessionEnd(
+                json.replace("44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"))));
+        for (String malformed : List.of(json.replace("\"sessionId\": \"44444444-4444-4444-8444-444444444444\"", "\"sessionId\": 44"),
+                json.replace("\"userId\": 7", "\"userId\": \"7\""), json.replace("\"schemaVersion\": 1", "\"schemaVersion\": 1.0"))) {
+            assertThatThrownBy(() -> decoder.decodeSessionEnd(malformed)).isInstanceOf(RuntimeException.class);
+        }
+        var withdrawal = new ClassPathResource("contracts/user-withdrawn-v1.json").getContentAsString(StandardCharsets.UTF_8);
+        assertThat(decoder.isSessionEnd(withdrawal)).isFalse();
+    }
 }

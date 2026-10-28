@@ -19,19 +19,23 @@ public class NotificationMessageHandler {
     private final NotificationMessageFingerprint fingerprints;
     private final NotificationReceiveTransaction transaction;
     private final UserWithdrawalHandler withdrawals;
+    private final UserSessionEndHandler sessionEnds;
 
     public NotificationMessageHandler(NotificationMessageDecoder decoder, NotificationMessageValidator validator,
                                       NotificationMessageFingerprint fingerprints,
-                                      NotificationReceiveTransaction transaction, UserWithdrawalHandler withdrawals) {
+                                      NotificationReceiveTransaction transaction, UserWithdrawalHandler withdrawals,
+                                      UserSessionEndHandler sessionEnds) {
         this.decoder = decoder;
         this.validator = validator;
         this.fingerprints = fingerprints;
         this.transaction = transaction;
         this.withdrawals = withdrawals;
+        this.sessionEnds = sessionEnds;
     }
 
     public NotificationReceptionResult handle(String json) {
         if (decoder.isWithdrawal(json)) return withdrawals.handle(decoder.decodeWithdrawal(json));
+        if (decoder.isSessionEnd(json)) return sessionEnds.handle(decoder.decodeSessionEnd(json));
         return handle(decoder.decode(json));
     }
 

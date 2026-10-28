@@ -4,11 +4,12 @@
 
 | 서버 | 컨테이너 | 폴더 | 배포 |
 |---|---|---|---|
-| DB 서버 | PostgreSQL 16 | `deploy/db` | 수동 (처음 한 번) |
+| DB 서버 | PostgreSQL 16 (primary) | `deploy/db` | 수동 (처음 한 번) |
+| DB 읽기 복제본 | PostgreSQL 16 (물리 스트리밍 복제, 읽기 전용) | `deploy/db-replica` | 수동 (처음 한 번) |
 | 메인 서버 | `backend`, `notification-service` (컨테이너만 나눠 한 서버) | `deploy/main` | 자동 (`Publish backend image`·`Notification service` 성공 시 그 서비스만) |
 | 데이터 서버 | `data-service` (수집·원본 저장·정규화·조건 묶음, **1개만**) | `deploy/data` | 자동 (`Data service` 성공 시) |
 
-- 프론트(React)는 S3 + CloudFront로 따로 배포한다 (이 폴더 범위 밖).
+- 프론트(React)는 S3 + CloudFront로 따로 배포한다 (`frontend.yml`, 아래 "프론트 배포").
 - 서버끼리는 **같은 VPC의 사설 IP**로 통신한다.
   - 메인·데이터 → DB: `DB_URL=jdbc:postgresql://<DB 사설 IP>:5432/yon`
   - 메인 → 데이터: `DATA_SERVICE_GRPC_ADDRESS=static://<데이터 사설 IP>:9092` (내부 키 `DATA_SERVICE_INTERNAL_API_KEY`)
@@ -21,7 +22,9 @@
 |---|---|
 | `yon-db` | 5432 ← `yon-main`, `yon-data` 보안 그룹만 / 22 |
 | `yon-main` | `BACKEND_PORT`(8080) ← 공개 / 22 |
-| `yon-data` | 9092 ← `yon-main` 보안 그룹만 / 22 |
+| `yon-data` | 9092 ← `yon-main` 보안 그룹만 / 22 ← `yon-main` 보안 그룹만 (배포·관리 SSH 모두 메인 서버 경유) |
+
+탄력적 IP는 계정당 1개라 메인 서버에만 둔다. 데이터·DB 서버의 공개 IP는 재시작마다 바뀌므로 접속·배포 모두 메인 서버를 거쳐 사설 IP로 한다.
 
 **5432·9092는 0.0.0.0/0으로 열지 않는다.** data-service는 Spring Security가 없다.
 한 겹 더: DB 서버 `.env`의 `DB_BIND_IP`, 데이터 서버 `.env`의 `DATA_SERVICE_BIND_IP`에 각 서버의 사설 IP를 넣으면 포트가 사설 IP에만 바인딩된다 (보안 그룹 실수 대비).
@@ -43,6 +46,7 @@ EC2 재구축 전에 TLS 종단(nginx+certbot 또는 ALB/CloudFront)을 정하�
 | `data-service.yml` (Data service) | main push 중 `data-service/**`·`database/**` 변경 시 → 테스트 → `ghcr.io/<저장소>/data-service:sha-<커밋>` 게시 |
 | `notification-service.yml` (Notification service) | main push 중 `notification-service/**` 등 변경 시 → 테스트 → `ghcr.io/<저장소>/notification-service:sha-<커밋>` 게시 |
 | `deploy.yml` (Deploy) | 위 셋 중 하나가 **성공하면** 그 서비스를 그 서버에 배포 |
+| `frontend.yml` (Frontend) | PR·main push 중 `frontend/**` 변경 시 lint·테스트·빌드, main이면 S3 업로드 + CloudFront 무효화 |
 
 배포 순서 (`deploy.yml`)
 1. 서비스의 서버 변수(`EC2_MAIN_HOST` / `EC2_DATA_HOST`)가 비어 있으면 건너뜀
@@ -53,6 +57,47 @@ EC2 재구축 전에 TLS 종단(nginx+certbot 또는 ALB/CloudFront)을 정하�
 
 - 수동 실행: Actions → Deploy → Run workflow → `service`(backend/data-service/notification-service), `image_tag`(비우면 최신 커밋, 롤백은 `sha-<40자리 커밋 SHA>`)
 - 배포는 한 번에 하나씩 (`concurrency: deploy-production`)
+
+### 프론트 배포 (`frontend.yml`)
+
+CloudFront 한 배포가 기본 경로는 S3(프론트), `/api/*`·`/oauth2/*`·`/login/oauth2/*`는 메인 서버 backend로 보낸다.
+AWS 인증은 OIDC 역할로 한다 (계정에서 IAM 사용자·액세스 키를 만들 수 없음).
+
+| 준비 | 내용 |
+|---|---|
+| OIDC 공급자 | IAM → 자격 증명 공급자 `token.actions.githubusercontent.com` (대상 `sts.amazonaws.com`) |
+| IAM 역할 | 신뢰 정책: 위 공급자, `aud`=`sts.amazonaws.com`, `sub`=`repo:<조직>/<저장소>:ref:refs/heads/main`<br>권한: 프론트 버킷 `s3:ListBucket`(버킷)·`s3:PutObject`·`s3:DeleteObject`(버킷/*), 그 배포 `cloudfront:CreateInvalidation`만 |
+| Actions 변수 | `FRONTEND_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`, `FRONTEND_DEPLOY_ROLE_ARN` (키가 아니라 secret 불필요). 선택 `VITE_FIREBASE_*` (공개 설정) |
+
+- 업로드: `assets/`(해시 파일명)는 1년 캐시·삭제 안 함, 나머지는 `no-cache` + 빌드에서 사라진 파일 삭제 → CloudFront `/*` 무효화
+- 옛 `assets/`는 지우지 않아 배포마다 조금씩 쌓인다 (한 번에 수백 KB). 나이 기준 S3 수명 주기는 배포가 오래 없으면 현재 파일까지 지우므로 쓰지 않고, 필요할 때 현재 빌드에 없는 파일만 수동 정리한다
+- `FRONTEND_BUCKET`이 비어 있으면 배포만 건너뛴다
+
+CloudFront 설정 (콘솔에서 한 번, 워크플로가 바꾸지 않음)
+
+| behavior | 원본 | 설정 |
+|---|---|---|
+| 기본 (`*`) | S3 프론트 버킷 (OAC) | 기본 루트 객체 `index.html`, viewer-request 함수 `yon-spa-rewrite` (캐시는 파일별 Cache-Control을 따름) |
+| `/api/*`, `/oauth2/*`, `/login/oauth2/*` | 메인 서버 backend (HTTP 8080, 사용자 지정 헤더 `X-Forwarded-Proto: https`) | CachingDisabled + 원본 요청 정책 `AllViewer` (쿠키·쿼리·헤더 전체, Host 포함) |
+
+- SPA 딥링크: `BrowserRouter`라 `/mypage` 같은 경로를 새로고침하면 S3에 그 파일이 없다. 기본 behavior에만 붙인 `yon-spa-rewrite`가 확장자 없는 경로를 `/index.html`로 바꾼다 (`login-success.html`, `assets/*.js`처럼 확장자가 있으면 그대로)
+
+  ```js
+  function handler(event) {
+    var request = event.request;
+    if (request.uri.indexOf('.') === -1) {
+      request.uri = '/index.html';
+    }
+    return request;
+  }
+  ```
+
+- **배포 단위 사용자 지정 오류 응답(403/404 → `/index.html`)은 쓰지 않는다.** 같은 배포의 `/api/*` 응답까지 바뀌어 backend의 403/404 JSON이 `index.html`이 된다
+- 인증: `/api/*`에 쿠키가 전달돼야 로그인·`XSRF-TOKEN`이 동작한다 (`AllViewer`)
+- 소셜 로그인: Spring이 `redirect_uri`를 요청 Host·`X-Forwarded-Proto`로 만든다. `AllViewer`가 Host(CloudFront 도메인)를, 원본 사용자 지정 헤더가 `https`를 넘기고, backend는 `SERVER_FORWARD_HEADERS_STRATEGY=framework`로 이를 쓴다 → `https://<CloudFront 도메인>/login/oauth2/code/kakao`가 카카오 콘솔 등록 주소와 같아야 한다
+  - framework 전략은 헤더를 그대로 믿으므로 8080은 CloudFront에서만 접근하게 막아야 한다 (보안 그룹 CloudFront 접두사 목록)
+- 수동 재배포: Actions → Frontend → Run workflow (main)
+- 수동 배포(워크플로를 쓸 수 없을 때): `frontend`에서 `npm ci && npm run build` → `dist` 내용물을 버킷에 업로드 → CloudFront 무효화 `/*`
 
 ### 서버 준비 순서: DB → 데이터 → 메인
 
@@ -88,7 +133,8 @@ sudo timedatectl set-timezone Asia/Seoul
 | 종류 | 이름 | 값 |
 |---|---|---|
 | Variable | `EC2_MAIN_HOST` | 메인 서버 탄력적 IP 또는 도메인 |
-| Variable | `EC2_DATA_HOST` | 데이터 서버 공개 IP (SSH용) |
+| Variable | `EC2_DATA_HOST` | 데이터 서버 사설 IP (`EC2_JUMP_HOST`를 쓸 때). 쓰지 않으면 공개 IP |
+| Variable | `EC2_JUMP_HOST` | (선택) 메인 서버 탄력적 IP. 있으면 데이터 서버 배포는 메인 서버를 거쳐 SSH한다 (ProxyJump) |
 | Variable | `EC2_USER` | `ubuntu` |
 | Variable | `EC2_DEPLOY_DIR` | (선택) 기본값 `/home/<EC2_USER>/yon` |
 | Secret | `EC2_SSH_KEY` | **배포 전용** 개인키 전체 (두 서버 공용) |
@@ -158,15 +204,91 @@ cd ~/yon-db
 ```
 IDENTITY 버전으로 되돌릴 때는 이전 버전을 띄우기 전에 같은 방식으로 `sql/opportunity-id-identity-rollback.sql`을 실행한다.
 
+### 원본 스냅샷 출처 파티셔닝
+
+수집·정제를 중지한 뒤 원본 전환 SQL → 점검 → 파티셔닝 PR 병합·배포 순서를 지킨다.
+backend·행동 로그 전환은 포함하지 않는다. 기존 DB는 SQL 적용 전 병합하지 않는다.
+전환 후 옛 이미지로 자동 롤백돼도 DB는 복구되지 않으므로 데이터 서비스를 멈추고 SQL도 되돌려야 한다.
+AWS 담당자에게는 [서버별 작업 순서](../docs/raw-partition-aws-runbook.md)를 전달한다.
+설계·검증 범위는 [원본 파티셔닝 절차](../docs/raw-external-record-partitioning.md)를 따른다.
+
+### 사용자 행동 로그 월 파티셔닝
+
+backend의 PARTITIONED TABLE 인식 설정을 먼저 배포한 뒤 backend 중지 → 전환 SQL → 점검 → 재기동 순서로 수행한다.
+원본 스냅샷 파티셔닝과 독립적인 작업이며 SQL은 자동 실행되지 않는다.
+명령·D+1 검증·롤백·월 점검은 [행동 로그 파티셔닝 절차](../docs/user-behavior-events-partitioning.md)를 따른다.
+
 ### 백업
 
-DB는 DB 서버의 도커 볼륨(`yon-db_postgres_data`)에 있다. 인스턴스를 지우면 함께 사라진다.
-아래는 수동 백업이다. 인스턴스 유실에 대비한 주기 백업(cron + S3 업로드)은 후속으로 추가한다.
+정기 백업은 **DB 복제본 서버**의 로컬 디스크에 보관한다. [백업 운영 절차](../docs/db-backup.md)를 따른다.
+`deploy/db-replica/backup/`을 `~/yon-db-replica/backup/`에 설치한다. standby만 허용하고 primary는 거부한다.
+11:00 KST(서버 가동·수집 종료 확인 전 임시 시각)에 daily 전체 덤프, 일요일에는 같은 덤프의 weekly 사본을 추가한다.
+완성 세트 기준 daily 7개·weekly 4개, SHA256·flock·디스크 80% 차단·복제 최신성 점검을 포함한다.
+**PITR 미지원, RPO 약 24시간. primary·replica 동시 유실에 대비한 외부 사본은 없다.**
+기존 DB/복제 설정은 변경하지 않으며 PR 병합만으로 활성화되지 않는다.
+AWS 담당자에게는 [작업 지침](../docs/db-backup-aws-instructions.md)을 전달한다.
+
+## DB 읽기 복제본 (replica)
+
+DB 서버(primary)의 WAL을 물리 스트리밍으로 받아 재생하는 읽기 전용 서버다. 비동기 복제라 primary 커밋을 기다리게 하지 않고, 몇 초 이내 늦을 수 있다.
+backend의 읽기 전용 트랜잭션만 이쪽을 쓰고, 쓰기·data-service·notification-service는 primary만 쓴다 (라우팅은 backend 설정).
+물리 복제라 파티션 생성·분리 같은 DDL과 계정도 그대로 따라온다. 파티션 관리는 primary에서만 한다.
+
+- EC2: `yon-db-replica` (t3.small, DB 서버와 같은 서브넷), 공통 준비는 위 "EC2 3대 공통"과 같다
+- 보안 그룹 `yon-db-replica`: 5432 ← `yon-main` 보안 그룹, 22 ← `yon-main` 보안 그룹 (노트북에서는 ProxyJump로 접속)
+- `yon-db` 보안 그룹에 5432 ← `yon-db-replica` 보안 그룹 추가
+
+### 1. primary 준비 (DB 서버, 처음 한 번)
 
 ```bash
 cd ~/yon-db
-docker compose exec -T postgres-db pg_dump -U postgres -d yon -Fc > ~/yon-backup-$(date +%Y%m%d%H%M).dump
+docker compose exec postgres-db psql -U postgres -d postgres
 ```
+```text
+CREATE ROLE replicator WITH REPLICATION LOGIN;
+\password replicator
+SELECT pg_create_physical_replication_slot('yon_replica_1');
+ALTER SYSTEM SET max_slot_wal_keep_size = '2GB';
+SELECT pg_reload_conf();
+SELECT slot_name, active FROM pg_replication_slots;
+\q
+```
+**마지막 조회로 슬롯이 만들어졌는지 확인한다** (`yon_replica_1 | f`). 슬롯이 없으면 2번의 복사가 끝까지 진행된 뒤 마지막에
+`replication slot "yon_replica_1" does not exist`로 실패하고 복사한 데이터를 지운다. `\password`에서 빈 값을 넣으면 비밀번호가 지워지니 다시 입력한다.
+복제 슬롯은 복제본이 잠깐 끊겨도 필요한 WAL을 남긴다. 복제본이 오래 죽어 있으면 primary 디스크가 차지 않게 2GB에서 슬롯을 끊는다 (그때는 3번부터 다시 한다).
+
+복제 접속 허용 (복제본 사설 IP만) 후 설정 다시 읽기:
+```bash
+docker compose exec -T postgres-db sh -c 'echo "host replication replicator <복제본 사설 IP>/32 scram-sha-256" >> "$PGDATA/pg_hba.conf"'
+docker compose exec -T postgres-db psql -U postgres -c 'SELECT pg_reload_conf()'
+```
+
+### 2. 복제본 띄우기 (복제본 서버)
+
+```bash
+mkdir -p ~/yon-db-replica && cd ~/yon-db-replica
+```
+`deploy/db-replica/docker-compose.yml`과 `.env`(`DB_BIND_IP`=이 서버의 사설 IP, `chmod 600`)를 둔다. 빈 볼륨으로 띄우면 새 DB가 만들어지므로, 컨테이너만 만들고 볼륨을 primary 복사본으로 채운 뒤 띄운다.
+
+```bash
+docker compose create
+docker run --rm -it -v yon-db-replica_postgres_data:/var/lib/postgresql/data postgres:16-alpine sh -c \
+  'chown postgres:postgres "$PGDATA" && chmod 700 "$PGDATA" && su-exec postgres pg_basebackup -h <DB 서버 사설 IP> -U replicator -D "$PGDATA" -Fp -Xs -P -R -S yon_replica_1 -W'
+docker compose up -d
+```
+`-W`가 replicator 비밀번호를 묻는다. 실패하면 pg_basebackup이 볼륨을 비우므로 원인을 고친 뒤 같은 `docker run` 명령만 다시 실행한다 (`docker compose create`는 다시 하지 않아도 된다). `-R`이 `standby.signal`과 접속 정보(`postgresql.auto.conf`, 비밀번호 포함, 권한 700 데이터 폴더 안)를 남긴다.
+
+### 3. 확인
+
+primary(DB 서버):
+```bash
+docker compose exec -T postgres-db psql -U postgres -Atc "select client_addr, state, sync_state, replay_lag from pg_stat_replication; select slot_name, active from pg_replication_slots"
+```
+`streaming|async`, 슬롯 `active=t`. 복제본에서 `select pg_is_in_recovery()`가 `t`이고 쓰기는 `read-only transaction` 오류가 나야 정상이다.
+
+### 장애 때 (수동)
+- primary가 죽으면: 복제본에서 `docker compose exec -u postgres postgres-replica pg_ctl promote -D /var/lib/postgresql/data` → 메인·데이터 서버 `.env`의 `DB_URL`을 복제본 사설 IP로 바꾸고 재시작. 옛 primary는 버리고 새 복제본을 2번부터 다시 만든다.
+- 복제본이 죽으면: backend 읽기만 영향. 복제본 주소를 primary로 바꾸거나 복제본을 다시 띄운다. 슬롯이 끊겼으면(`active=f`가 오래 지속, 디스크 경고) `SELECT pg_drop_replication_slot('yon_replica_1')` 후 1·2번을 다시 한다.
 
 ## 데이터 서버
 
@@ -198,12 +320,12 @@ backend와 같은 서버에서 컨테이너만 나눠 돈다. 호스트 포트�
 1. DB 서버에서 알림 테이블 생성 (처음 한 번, `notification_user`로. 순서는 `database/local/03-apply-notification-ddl.sh`와 같다)
 
 ```bash
-scp database/scripts/notification-{inbox,user-api,withdrawal,delivery,admin}.sql ubuntu@<DB 서버>:~/yon-db/sql/
+scp database/scripts/notification-{inbox,user-api,session-end,withdrawal,delivery,admin}.sql ubuntu@<DB 서버>:~/yon-db/sql/
 ```
 DB 서버에서:
 ```bash
 cd ~/yon-db
-for f in inbox user-api withdrawal delivery admin; do
+for f in inbox user-api session-end withdrawal delivery admin; do
   { echo 'SET ROLE notification_user;'; echo 'SET search_path TO notification, pg_catalog;'; cat sql/notification-$f.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1 || break
 done
 ```
@@ -216,6 +338,7 @@ done
 기능을 켜기 전에 추가로 적용할 SQL (위 1번과 같은 방식, `notification_user`, 알림 서버를 멈춘 상태에서)
 - 푸시 슬롯 모드(`NOTIFICATION_PUSH_SLOTS_ENABLED`): `notification-push-slots.sql`. 푸시 만료 분리 이전의 delivery SQL을 적용했던 기존 DB는 그 전에 `notification-push-expiry.sql` (새 DB는 delivery SQL에 포함)
 - 새 적합 알림 우선순위(#80 머지 후): `notification-new-match-priority.sql`
+- 로그아웃 시 푸시 Endpoint 정리(세션 바인딩, `docs/notification-session-end.md`): `notification-session-end.sql`. 알림 서버를 먼저 올리고 backend를 배포한다
 - 그 밖에 알림 SQL이 추가되면 파일 머리말의 적용 시점을 따르고 이 목록에 더한다
 
 ## 운영 중 자주 쓰는 명령 (메인·데이터 서버의 배포 폴더)

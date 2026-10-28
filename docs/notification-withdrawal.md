@@ -8,6 +8,9 @@
 Delivery를 포함한 변경 이후에는 관련 테스트를 다시 검증한다.
 SQS·DLQ·푸시 슬롯·빈도 제한은 이번 범위가 아니다.
 
+로그아웃(세션 종료)의 Endpoint 비활성화는 같은 Outbox·수신 경로를 쓰는 별도 제어 메시지 USER_SESSION_ENDED로 처리한다
+([notification-session-end.md](notification-session-end.md)).
+
 사용자 확정(2026-10-24): 탈퇴 시 기존 알림·Endpoint·설정을 삭제한다.
 WithdrawnUser는 자동 삭제 없이 유지하며 운영 활성화 전 큐 보존·재발행 한도와 함께 보관 기간을 확정한다.
 소비 기록은 지연·중복 메시지 처리 근거로 보존한다. 사용자 원본 정보·토큰·알림 본문은 Tombstone에 복사하지 않는다.

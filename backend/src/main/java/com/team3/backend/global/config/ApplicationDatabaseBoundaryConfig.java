@@ -1,5 +1,7 @@
 package com.team3.backend.global.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,10 +14,15 @@ import java.sql.SQLException;
  * Checks the real PostgreSQL session before Hibernate can access or change tables.
  * Keep in sync with notification-service NotificationDatabaseBoundaryConfig: only account/schema names differ,
  * and the checks array order must match the SELECT column order.
+ * 예외(backend만): DB 읽기 복제본 풀(ReadReplicaDataSourceConfig.REPLICA_BEAN)은 연결 실패를 경고로만 남긴다.
+ * 복제본이 꺼져 있어도 backend는 떠야 하고(조회는 primary로 대체), 같은 연결 검증은 primary·라우팅 빈에서 이미 한다.
+ * 연결은 됐는데 경계 위반이면 primary와 똑같이 기동을 멈춘다.
  */
 @Configuration(proxyBeanMethods = false)
 @Profile("database-boundary")
 public class ApplicationDatabaseBoundaryConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(ApplicationDatabaseBoundaryConfig.class);
 
     @Bean
     static BeanPostProcessor databaseBoundaryValidator() {
@@ -23,14 +30,14 @@ public class ApplicationDatabaseBoundaryConfig {
             @Override
             public Object postProcessAfterInitialization(Object bean, String beanName) {
                 if (bean instanceof DataSource dataSource) {
-                    validate(dataSource);
+                    validate(dataSource, ReadReplicaDataSourceConfig.REPLICA_BEAN.equals(beanName));
                 }
                 return bean;
             }
         };
     }
 
-    private static void validate(DataSource dataSource) {
+    static void validate(DataSource dataSource, boolean replica) {
         String[] checks = {"login", "current schema", "search path", "notification schema exists",
                 "other schema access", "public schema access", "elevated privileges", "unmigrated public tables",
                 "cross-schema foreign keys"};
@@ -68,6 +75,10 @@ public class ApplicationDatabaseBoundaryConfig {
                 }
             }
         } catch (SQLException exception) {
+            if (replica) {
+                log.warn("action=READ_REPLICA_BOUNDARY_CHECK result=SKIPPED reason={}", exception.getClass().getSimpleName());
+                return;
+            }
             throw new IllegalStateException("Cannot validate application database boundary", exception);
         }
     }
