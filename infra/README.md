@@ -21,14 +21,52 @@
 
 ## AWS 담당자: 2차 조회
 
-AWS CLI 2와 Python 3.9 이상이 있는 CloudShell에서 전달받은 `infra/` 폴더를 푼 후 실행한다.
+CloudShell은 필수가 아니다. AWS CLI 2와 Python 3.9 이상이 있는 로컬 PC나 권한이 준비된 EC2에서도 같은 수집기를 실행한다.
+전달받은 `infra/` 폴더를 푼 루트에서 실행한다.
 스크립트는 로그인한 계정을 먼저 대조한다. 다른 계정/인증 실패면 자원 조회를 시작하지 않는다.
+
+### CloudShell 없이 Windows에서 실행
+
+AWS CLI 2.32.0 이상을 [공식 설치 안내](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)에 따라 준비한다.
+웹 콘솔 로그인이 가능한 IAM 사용자/역할은 `aws login`의 브라우저 인증으로 임시 자격증명을 받을 수 있다.
+해당 identity에 `SignInLocalDevelopmentAccess` 권한과 실제 인프라 조회 권한이 필요하다. 로그인 가능 여부와 조회 권한은 별개다.
+계정 선택·로그인·동의는 사용자가 브라우저에서 직접 완료한다. 새 장기 Access Key를 발급하거나 채팅에 자격증명을 붙여 넣지 않는다.
+
+PowerShell에서:
+
+```powershell
+aws --version
+aws login --profile yon-inventory --region ap-northeast-2
+if ($LASTEXITCODE -ne 0) { throw 'AWS 브라우저 로그인 실패: 권한과 로그인 방식을 확인하세요.' }
+$env:AWS_PROFILE = 'yon-inventory'
+aws sts get-caller-identity --query Account --output text --no-cli-pager
+if ($LASTEXITCODE -ne 0) { throw 'AWS 계정 확인 실패' }
+$inventoryOutput = Join-Path $env:USERPROFILE ('yon-inventory-2-' + (Get-Date -Format 'yyyyMMddTHHmmss'))
+py -3 infra/scripts/collect_inventory.py --output $inventoryOutput
+```
+
+출력 계정은 `174170816230`이어야 한다. 수집기도 이를 다시 검사한다.
+로그인에서 권한 거부가 나면 관리자가 로그인 기능 사용 권한을 확인해야 하며, 수집 결과의 AccessDenied는 별도 조회 권한 확인이 필요하다.
+IAM Identity Center를 사용하는 계정은 위 로그인 대신 `aws configure sso --profile yon-inventory` 후 `aws sso login --profile yon-inventory`를 사용한다.
+이미 승인된 CLI 프로필이 있으면 해당 프로필을 AWS_PROFILE로 선택하면 된다.
+수집 후 이 로그인 세션을 닫으려면 `aws logout --profile yon-inventory`를 실행한다.
+Windows 출력 폴더는 사용자 전용 위치에 보관하고 공유 드라이브에 두지 않는다. 아래 POSIX 파일 권한 설명은 Windows ACL을 대신하지 않는다.
+
+### Linux/macOS 또는 CloudShell에서 실행
+
+웹 콘솔 로그인이 가능한 로컬 PC에서는 먼저 `aws login --profile yon-inventory --region ap-northeast-2`를 완료하고 `export AWS_PROFILE=yon-inventory`를 설정한다.
+CloudShell이나 조회 권한이 준비된 EC2 역할을 사용한다면 해당 환경의 기존 인증을 사용한다.
 
 ```bash
 umask 077
 INVENTORY_DIR="$HOME/yon-inventory-2-$(date -u +%Y%m%dT%H%M%SZ)"
 python3 infra/scripts/collect_inventory.py --output "$INVENTORY_DIR"
 ```
+
+EC2는 연결된 역할이 인프라 조회 권한을 갖는지 먼저 확인한다. 기존 main/data의 SQS 역할만으로 모든 조회가 가능하다고 가정하지 않는다.
+SSH 호스트 키가 달라지면 검증 없이 known_hosts를 지우거나 확인을 끄지 않고, AWS 담당자가 신뢰할 수 있는 경로에서 현재 서버 키를 확인한다.
+
+### 결과 전달
 
 기존 디렉터리는 덮어쓰지 않는다. `inventory.json` 하나에 조회별 `status`, 성공 `data` 또는 실패 `error_code`를 저장한다.
 CloudFront LIVE Function 코드는 같은 디렉터리의 `cf-function-*.js`로 따로 받는다.
@@ -123,3 +161,4 @@ Terraform으로 인프라를 가져와도 DB 데이터·.env·Compose·비밀값
 - [AWS CloudFront 접두사 목록](https://aws.amazon.com/blogs/networking-and-content-delivery/limit-access-to-your-origins-using-the-aws-managed-prefix-list-for-amazon-cloudfront/)
 - [Spring 전달 헤더 처리](https://docs.spring.io/spring/reference/web/webmvc/filters.html#filters-forwarded-headers)
 - [ACM 내보내기 지원 인증서](https://docs.aws.amazon.com/acm/latest/userguide/acm-exportable-certificates.html): EC2 origin TLS에 ACM을 전혀 쓸 수 없다는 기존 계획의 단정은 제외한다. 비용·갱신·배포 방식은 별도 결정한다.
+- [웹 콘솔 계정으로 AWS CLI 로그인](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html)
