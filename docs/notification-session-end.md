@@ -24,7 +24,8 @@ Endpoint에 등록한 세션을 기록하고, 로그아웃은 그 세션의 Endp
 Notification HTTP/DB 호출은 하지 않는다. 로그아웃 응답 204는 Outbox 커밋을 뜻하고, 정리 완료를 기다리지 않는다.
 
 - dedupKey는 `USER_SESSION_ENDED:{messageId}`다. 세션 ID가 재사용되므로 사용자·세션 조합으로 중복 제거하지 않는다.
-- `logoutAll`은 세션 ID가 없어 이 메시지를 보내지 않는다. 현재 호출처가 없다.
+- 모든 기기 로그아웃(`POST /api/auth/logout-all`, `AuthService.logoutAll`)은 저장된 Refresh Token의 세션마다 메시지를 하나씩 보내고,
+  Refresh Token 행이 이미 없는 호출 세션도 포함한다. 프런트는 아직 이 엔드포인트를 쓰지 않는다.
 - 탈퇴는 기존대로 `USER_WITHDRAWN`이 Endpoint 전체를 삭제한다.
 
 ## 메시지 계약

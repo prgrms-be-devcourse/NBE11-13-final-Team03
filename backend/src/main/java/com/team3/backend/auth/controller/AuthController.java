@@ -66,6 +66,42 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
+    @Operation(
+            summary = "모든 기기 로그아웃",
+            description = """
+                    로그인한 사용자의 모든 세션을 로그아웃합니다.
+
+                    서버에 저장된 사용자의 Refresh Token을 모두 삭제하고,
+                    현재 브라우저의 Access Token과 Refresh Token 쿠키를 제거합니다.
+                    다른 기기는 Access Token 만료 후 재발급이 거부됩니다.
+                    모든 세션이 등록한 푸시 Endpoint는 알림 서버가 USER_SESSION_ENDED 메시지로 비활성화합니다.
+                    """
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "204",
+                    description = "모든 기기 로그아웃 성공"
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "인증되지 않은 사용자 또는 유효하지 않은 Access Token"
+            )
+    })
+    @SecurityRequirement(name = "cookieAuth")
+    @PostMapping("/logout-all")
+    public ResponseEntity<Void> logoutAll(
+            @AuthenticationPrincipal CustomUserDetails user,
+            HttpServletResponse response
+    ) {
+        authService.logoutAll(
+                user.getUserId(),
+                user.getSessionId()
+        );
+
+        tokenCookieManager.deleteTokenCookies(response);
+
+        return ResponseEntity.noContent().build();
+    }
 
     @Operation(
             summary = "Access Token 재발급",

@@ -1,5 +1,6 @@
 package com.team3.backend.auth.service;
 
+import com.team3.backend.auth.domain.entity.RefreshToken;
 import com.team3.backend.auth.domain.repository.RefreshTokenRepository;
 import com.team3.backend.outbox.domain.entity.OutboxEvent;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
@@ -8,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.util.LinkedHashSet;
 
 @Service
 @RequiredArgsConstructor
@@ -38,8 +41,23 @@ public class AuthService {
         );
     }
 
+    /**
+     * Ends every login session of the user (all devices). One USER_SESSION_ENDED per stored session, plus the
+     * calling session in case its Refresh Token row is already gone (expired or evicted) while its access token is valid.
+     */
     @Transactional
-    public void logoutAll(Long userId) {
+    public void logoutAll(Long userId, String currentSessionId) {
+        var sessionIds = new LinkedHashSet<String>();
+        sessionIds.add(currentSessionId);
+        refreshTokenRepository.findAllByUserId(userId).stream()
+                .map(RefreshToken::getSessionId)
+                .forEach(sessionIds::add);
+
         refreshTokenRepository.deleteAllByUserId(userId);
+
+        Instant now = clock.instant();
+        for (String sessionId : sessionIds) {
+            outboxRepository.saveAndFlush(OutboxEvent.userSessionEnded(userId, sessionId, now));
+        }
     }
 }
