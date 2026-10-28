@@ -92,7 +92,7 @@ python3 infra/scripts/collect_inventory.py --scope network --output "$INVENTORY_
 정책은 읽기 작업 12개만 허용하며 생성·변경·삭제 권한은 없다. 목록 조회에는 Resource `*`와 서울 리전 조건을 사용한다.
 인스턴스 속성 조회는 대상 4대의 ARN으로 제한한다. 목록 조회의 특정 VPC 제한은 수집기 필터다. 이 범위가 허용되지 않으면 콘솔에서 필요한 ID만 제공한다.
 조회 후 결과를 비공개로 전달하고 담당자가 **추가한 임시 인라인 정책만** 제거한다. 기존 SQS 정책은 유지한다.
-정책 추가 후에도 거부되면 권한 경계·조직 정책 등은 관리자에게 확인한다. 전체 서비스 조회와 원격 상태 준비는 별도 조건이다.
+정책 추가 후에도 거부되면 권한 경계·조직 정책 등은 관리자에게 확인한다. 전체 서비스 조회 권한은 별도로 확인한다.
 
 ### 수집 결과 확인
 
@@ -126,12 +126,12 @@ AWS 담당자는 원본을 승인된 비공개 경로로 전달하고, `complete
 ## 코드 담당자: Terraform 검증
 
 Terraform **1.17.0**, AWS provider는 `.terraform.lock.hcl`의 검증된 버전을 사용한다.
-현재 `.tf`에는 버전/공급자 선언만 있다. 관리 자원·data·import·provider 인증 설정은 다음 단계에서 추가한다.
+현재 `.tf`에는 버전/공급자 선언과 local backend만 있다. 관리 자원·data·import·provider 인증 설정은 다음 단계에서 추가한다.
 
 ```bash
 python3 -m unittest discover -s infra/tests -v
 terraform -chdir=infra/terraform fmt -check
-terraform -chdir=infra/terraform init -backend=false -input=false -lockfile=readonly
+terraform -chdir=infra/terraform init -input=false -lockfile=readonly
 terraform -chdir=infra/terraform validate
 terraform -chdir=infra/terraform plan -input=false -refresh=false -detailed-exitcode
 ```
@@ -139,38 +139,47 @@ terraform -chdir=infra/terraform plan -input=false -refresh=false -detailed-exit
 CI도 같은 검사를 AWS 자격증명/OIDC 없이 실행한다. 빈 계획의 종료 코드 0은 **AWS 접근·실제 구성 일치·복구 가능성 검증이 아니다.**
 공급자를 내려받을 네트워크는 필요하다. Terraform 파일과 provider lock 파일은 커밋하되 `.terraform/`·state·plan·실제 backend 설정은 제외한다.
 
-## 원격 상태·권한 준비 — 다음 단계 진입 조건
+## 상태 파일 — 추가 S3 없이 로컬 보관
 
-기존에 공유된 계정의 추가 S3 버킷 생성 제한이 있다. 상태 저장용 버킷을 임의 생성하거나 프론트 버킷을 공유하지 않는다.
-AWS 담당자/팀이 추가 비공개 버킷 승인 또는 별도 원격 backend를 결정해야 한다. 버킷 이름은 승인된 실제 이름을 사용한다.
-로컬 state는 이 빈 준비 구성의 검증에만 사용하며 운영 자원 import는 원격 상태 결정 뒤 진행한다.
+추가 S3 버킷을 만들 수 없다는 팀 제약에 따라 local backend를 사용한다. 프론트 버킷도 공유하지 않는다.
+원격 상태 저장소 생성은 네트워크 단계의 선행 조건에서 제외한다.
+운영 실행자는 AWS 담당자 한 명으로 정하고, 지정한 PC 또는 EC2 한 곳의 절대 경로에 상태 파일을 보관한다.
+여러 PC·checkout에서 각자 빈 state로 운영 명령을 실행하지 않는다. 같은 경로를 사용해야 로컬 잠금도 공유된다.
 
-S3가 승인되면 아래 예시를 사용한다. 실제 생성과 접근 검증은 AWS 담당자 작업이다.
+지정 실행 환경이 Ubuntu EC2인 경우 준비 예시:
 
 ```bash
-cd infra/terraform
-cp backend.tf.example backend.tf
-cp backend.hcl.example backend.hcl
-# backend.hcl의 승인된 버킷 이름을 채운다. 비밀 키는 넣지 않는다.
-terraform init -backend-config=backend.hcl
+umask 077
+TF_STATE_DIR="$HOME/yon-terraform-state"
+mkdir -p "$TF_STATE_DIR"
+chmod 700 "$TF_STATE_DIR"
+terraform -chdir=infra/terraform init -input=false -lockfile=readonly \
+  -backend-config="path=$TF_STATE_DIR/terraform.tfstate"
 ```
 
-상태 버킷은 비공개·암호화·버전 관리를 적용하고 `use_lockfile=true`로 잠근다. 필요하면 KMS 권한도 확인한다.
-새 PR에서 활성 backend 설정과 운영 절차를 함께 확정한다. backend.tf의 비밀값 없는 선언은 추적 대상으로 전환하고, 실제 backend.hcl은 계속 제외한다.
-현재 CI의 로컬 빈 계획도 해당 PR에서 원격 plan 절차로 바꾼다.
+Windows에서는 사용자 전용 폴더의 절대 경로를 같은 `path` 설정에 사용한다.
+`backend.hcl.example`을 복사해 실제 경로를 채운 뒤 `-backend-config=backend.hcl`로 초기화할 수도 있다.
+checkout을 새로 받더라도 지정한 기존 state 경로로 초기화한다. 경로를 바꾸거나 기존 state가 발견되면 먼저 담당자가 상태·백업을 확인한다.
+이미 관리 자원이 들어간 상태에서 단순히 재초기화하거나 state를 옮기지 않는다.
 
-PR용 역할은 **AWS 인프라 조회 전용**으로 별도 준비한다. 기존 배포 역할에 ReadOnly 정책을 더하는 것은 쓰기 권한을 제거하지 않는다.
-선택한 backend의 state 읽기와 잠금 파일 생성·삭제 권한은 별도로 필요하다. import 실행자는 state 쓰기도 필요하다.
-현재 main 전용 OIDC `sub`를 PR에 그대로 쓰지 말고 실제 PR 토큰 subject·저장소·audience 조건을 확인한다.
-외부 fork PR에는 AWS 권한을 주지 않는다. `pull_request_target`으로 외부 코드를 실행하는 구조는 사용하지 않는다.
-원격 plan 결과에는 민감한 값이 포함될 수 있어 Git/공개 PR 댓글에 원문을 자동 게시하지 않는다.
+import/apply 전후에 상태 파일을 백업하고, 담당자가 관리하는 별도 보호 위치에도 사본을 보관한다.
+같은 디스크의 `.backup` 파일만으로는 해당 디스크 유실을 대비하지 못한다. 새 클라우드 저장소를 만들 필요는 없다.
+state와 plan은 민감한 값을 포함할 수 있으므로 Git·공개 PR·CI artifact에 올리지 않는다. 폴더 권한과 로컬 디스크 보호도 확인한다.
+다른 실행자로 인계할 때는 마지막 state·백업과 코드 커밋을 함께 전달하고 이전 실행은 중단한다.
+잠금 파일을 임의 삭제하거나 `-lock=false`로 동시 실행하지 않는다.
+
+CI는 AWS 인증 없이 문법 검증과 **현재 자원이 없는 구성의 빈 계획**만 실행한다.
+자원/import를 추가하는 다음 PR부터 CI의 빈 plan 단계를 제외하고, 실제 운영 state를 가진 지정 실행자가 plan을 검토한다.
+운영 state를 복사하지 않은 CI plan을 실제 운영 변경 계획으로 쓰지 않는다. S3 상태 버킷·PR용 AWS OIDC 역할은 현재 단계의 필수 조건이 아니다.
+기존 배포 역할의 권한을 넓히지 않으며, 조회 정책은 별도 지침대로 필요한 범위만 임시 적용한다.
+수집기의 조회 정책이 Terraform provider의 모든 조회나 운영 변경 권한까지 보장하지는 않으므로 후속 단계에서 필요한 작업을 확인한다.
 
 ## 후속 PR 순서와 완료 기준
 
 | 단계 | 작업 | 완료 기준 |
 | --- | --- | --- |
 | 이번 준비 PR | 기준 인벤토리·읽기 수집기·Terraform 골격·검증 CI·담당자 지침 | 모의 테스트, fmt/init/validate/빈 plan 통과 |
-| 원격 상태 준비 | 승인된 저장소·상태 잠금·조회 역할·OIDC 조건 | AWS 담당자 연결/권한 확인, 2차 조회 오류 분류 완료 |
+| 조회·실행 준비 | 조회 권한·2차 조회, 단일 실행자와 로컬 state 경로 지정 | 필요한 네트워크 ID 확보, 조회 오류 분류, 상태 경로·백업 담당 확인 |
 | 네트워크 가져오기 | VPC·서브넷·IGW·라우팅/연결·그룹 4개·인바운드 10/아웃바운드 4 규칙 | import 계획의 생성·변경·삭제 0 → state에 import 적용 → 다시 plan 변경 0 |
 | 첫 운영 변경 | 8080의 소스를 CloudFront origin-facing 접두사 목록으로 제한 | CloudFront 경유 API/OAuth 정상, 직접 접속 차단, 롤백 방법 확인 |
 | 관리 범위 확대 | IAM·프론트·EC2/EIP/키 페어를 묶음별 import | 묶음별 실제 변경 0, 삭제/교체 방지 검토 |
@@ -185,7 +194,7 @@ Terraform으로 인프라를 가져와도 DB 데이터·.env·Compose·비밀값
 
 ## 근거
 
-- [S3 backend와 상태 잠금](https://developer.hashicorp.com/terraform/language/backend/s3)
+- [Local backend와 상태 잠금](https://developer.hashicorp.com/terraform/language/backend/local)
 - [AWS CloudFront 접두사 목록](https://aws.amazon.com/blogs/networking-and-content-delivery/limit-access-to-your-origins-using-the-aws-managed-prefix-list-for-amazon-cloudfront/)
 - [Spring 전달 헤더 처리](https://docs.spring.io/spring/reference/web/webmvc/filters.html#filters-forwarded-headers)
 - [ACM 내보내기 지원 인증서](https://docs.aws.amazon.com/acm/latest/userguide/acm-exportable-certificates.html): EC2 origin TLS에 ACM을 전혀 쓸 수 없다는 기존 계획의 단정은 제외한다. 비용·갱신·배포 방식은 별도 결정한다.

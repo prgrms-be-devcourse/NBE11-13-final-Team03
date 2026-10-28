@@ -5,6 +5,5 @@ terraform/*.tfstate*
 terraform/*.tfplan
 terraform/*.tfvars
 terraform/*.tfvars.json
-terraform/backend.tf
 terraform/backend.hcl
 terraform/crash.log

@@ -1,5 +1,2 @@
-bucket       = "REPLACE_WITH_APPROVED_PRIVATE_STATE_BUCKET"
-key          = "yon/production/terraform.tfstate"
-region       = "ap-northeast-2"
-encrypt      = true
-use_lockfile = true
+# Operator-only absolute path outside the checkout; adapt for the chosen host.
+path = "/home/ubuntu/yon-terraform-state/terraform.tfstate"

@@ -33,7 +33,7 @@ jobs:
         working-directory: infra/terraform
         run: |
           terraform fmt -check
-          terraform init -backend=false -input=false -lockfile=readonly
+          terraform init -input=false -lockfile=readonly
           terraform validate
           # Preparation has no resources/imports. This does not verify AWS access.
           terraform plan -input=false -refresh=false -detailed-exitcode
