@@ -6,3 +6,6 @@
 
 # Local performance test data
 /perf-data/
+
+# Local search performance test environment
+/docker/compose.search-perf.yaml
