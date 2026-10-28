@@ -21,7 +21,8 @@ export function parseRegions(data: unknown): RegionOption[] {
   return options
 }
 export async function getRegions(signal?: AbortSignal): Promise<RegionOption[]> {
-  return parseRegions((await apiClient.get<unknown>('/regions', { signal })).data)
+  // 개인화는 없지만 만료된 Access Token 쿠키가 있으면 서버가 401을 내므로 같은 복구 규칙을 적용한다.
+  return parseRegions((await apiClient.get<unknown>('/regions', { signal, recoverAuth: true })).data)
 }
 export const regionsQuery = () => ({
   queryKey: ['regions'] as const,

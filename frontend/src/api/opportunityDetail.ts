@@ -151,7 +151,7 @@ export function isOpportunityId(id: string | undefined): id is string {
 }
 export async function getOpportunityDetail(id: string, signal?: AbortSignal): Promise<OpportunityDetail> {
   if (!isOpportunityId(id)) throw new ApiError('configuration', '올바른 공고 번호가 아닙니다.')
-  const { data } = await apiClient.get<unknown>(`/opportunities/${id}`, { signal })
+  const { data } = await apiClient.get<unknown>(`/opportunities/${id}`, { signal, recoverAuth: true })
   if (!isOpportunityDetail(data) || String(data.opportunityId) !== id) throw new ApiError('unknown', '상세 응답 형식을 확인할 수 없습니다.')
   return data
 }

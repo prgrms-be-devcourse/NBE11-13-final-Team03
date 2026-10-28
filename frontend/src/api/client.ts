@@ -10,6 +10,14 @@ declare module 'axios' {
      * 쿠키 전송 여부나 서버의 인증·권한 검사를 켜고 끄는 옵션이 아니다.
      */
     requiresAuth?: boolean
+    /**
+     * 비회원도 조회할 수 있지만 로그인 사용자에게는 개인화(찜 여부 등)가 붙는 공개 조회에 지정한다.
+     * 만료·잘못된 Access Token의 401 + AUTH_006/AUTH_007이면 requiresAuth와 같은 재발급 가드로 1회 재발급한다.
+     * 재발급 성공이면 같은 요청을 재전송하고, 재발급이 401로 확정 실패하면 인증 손실을 알린 뒤 같은 요청을 익명으로 1회 재전송한다.
+     * 재발급이 네트워크·타임아웃·5xx 등으로 불확실하면 익명으로 바꾸지 않고 그 오류를 그대로 낸다.
+     * requiresAuth가 함께 지정되면 requiresAuth의 규칙이 우선한다.
+     */
+    recoverAuth?: boolean
   }
 }
 
@@ -23,6 +31,8 @@ type ReissueAttempt = {
   session: number
   promise?: Promise<void>
   controller?: AbortController
+  /** 이 시도의 401 확정 실패를 인증 손실 listener에 한 번만 알렸다. */
+  lossNotified?: boolean
 }
 
 const defaults = {
@@ -42,11 +52,26 @@ let csrfBootstrap: Promise<void> | undefined
 let authGeneration = 0
 let authSession = 0
 let reissueAttempt: ReissueAttempt = { generation: authGeneration, session: authSession }
+let authLostListener: (() => void) | undefined
+
+/**
+ * recoverAuth 공개 조회의 재발급이 401로 확정 실패했을 때 한 번 호출된다(동시 요청 여러 개여도 재발급 시도당 1회).
+ * 세션 Query 소유자가 등록해 인증 상태 재확인·개인화 캐시 정리를 수행한다. 해제 함수를 돌려준다.
+ */
+export function onAuthLost(listener: () => void): () => void {
+  authLostListener = listener
+  return () => { if (authLostListener === listener) authLostListener = undefined }
+}
 
 function assertCurrentSession(session: number): void {
   if (session !== authSession) {
     throw new ApiError('cancelled', '인증 상태가 변경되어 요청을 취소했습니다.')
   }
+}
+
+function isRecoverable401(config: RequestConfig, error: ApiError): boolean {
+  return !config._authRetried && error.status === 401 && (error.code === 'AUTH_006' || error.code === 'AUTH_007') &&
+    config.url !== '/auth/reissue' && config.url !== '/auth/logout'
 }
 
 /** 서버에서 재로그인 성공을 확인한 뒤에만 호출한다. 단순 401/네트워크 오류에는 호출하지 않는다. */
@@ -149,17 +174,30 @@ apiClient.interceptors.response.use(
   async (error: unknown) => {
     const normalized = toApiError(error)
     const config = axios.isAxiosError(error) ? error.config as RequestConfig | undefined : undefined
-    if (config?.requiresAuth && !config._authRetried && normalized.status === 401 &&
-        (normalized.code === 'AUTH_006' || normalized.code === 'AUTH_007') &&
-        config.url !== '/auth/reissue' && config.url !== '/auth/logout') {
-      config._authRetried = true
-      const attempt = config._reissueAttempt
-      if (!attempt) throw normalized
-      assertCurrentSession(attempt.session)
+    if (!config || !(config.requiresAuth || config.recoverAuth) || !isRecoverable401(config, normalized)) throw normalized
+    config._authRetried = true
+    const attempt = config._reissueAttempt
+    if (!attempt) throw normalized
+    assertCurrentSession(attempt.session)
+    if (config.requiresAuth) {
       if (attempt.generation === authGeneration) await reissue(attempt)
       assertCurrentSession(attempt.session)
       return apiClient.request(config)
     }
-    throw normalized
+    try {
+      if (attempt.generation === authGeneration) await reissue(attempt)
+    } catch (failure: unknown) {
+      const reissueError = toApiError(failure)
+      // 401만 리프레시 토큰 무효로 확정된 실패다. 네트워크·타임아웃·5xx·취소는 익명으로 바꾸지 않고 그대로 낸다.
+      if (reissueError.status !== 401) throw reissueError
+      assertCurrentSession(attempt.session)
+      if (!attempt.lossNotified) {
+        attempt.lossNotified = true
+        authLostListener?.()
+      }
+    }
+    assertCurrentSession(attempt.session)
+    // 재발급 성공이면 새 쿠키로, 확정 실패면 비회원으로 같은 요청을 1회 재전송한다.
+    return apiClient.request(config)
   },
 )

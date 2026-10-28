@@ -1,9 +1,9 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AuthContext } from './AuthContext'
-import { authObservationOptions, authStatus, authTransitionKey, createAuthActions } from './session'
+import { authObservationOptions, authStatus, authTransitionKey, createAuthActions, observeAuthLoss } from './session'
 import type { AuthTransitionKind } from './session'
 import PushBridge from '../push/PushBridge'
 
@@ -12,6 +12,8 @@ function AuthProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient()
   const location = useLocation()
   const actions = useMemo(() => createAuthActions(client), [client])
+  // 공개 조회가 재발급 실패로 익명 전환되면 같은 인증 Query로 상태를 다시 확인한다.
+  useEffect(() => observeAuthLoss(client), [client])
   const transition = useMutation({ mutationKey: authTransitionKey, mutationFn: (kind: AuthTransitionKind) => kind === 'oauth' ? actions.completeOAuth() : kind === 'withdraw' ? actions.withdraw() : actions.logout() })
   const oauthPage = location.pathname === '/login-success.html'
   const query = useQuery(authObservationOptions(client, transition, oauthPage))
