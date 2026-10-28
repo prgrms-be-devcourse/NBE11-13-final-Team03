@@ -1,0 +1,129 @@
+name: Frontend
+
+# frontend/ 변경을 검사하고, main에 반영되면 빌드 결과를 S3에 올린 뒤 CloudFront 캐시를 비운다.
+# 구조: CloudFront 한 배포 = 기본 경로는 S3(프론트), /api/*·/oauth2/*·/login/oauth2/*는 메인 서버 backend
+#       (deploy/README.md "프론트 배포")
+#
+# AWS 인증은 키 없이 OIDC 역할을 잠깐 빌려 쓴다 (계정에서 IAM 사용자 생성이 막혀 있음).
+# 필요한 설정 (Settings → Secrets and variables → Actions → Variables)
+#   FRONTEND_BUCKET              S3 버킷 이름
+#   CLOUDFRONT_DISTRIBUTION_ID   CloudFront 배포 ID
+#   FRONTEND_DEPLOY_ROLE_ARN     이 저장소 main 브랜치만 맡을 수 있는 IAM 역할
+#                                (그 버킷 s3:ListBucket·PutObject·DeleteObject, 그 배포 cloudfront:CreateInvalidation만)
+#   (선택) VITE_FIREBASE_*       Firebase 웹 앱 공개 설정 (frontend/.env.example). 비어 있으면 푸시 연결만 꺼진다
+# FRONTEND_BUCKET이 비어 있으면 배포는 건너뛴다.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-${{ github.ref }}
+  # PR은 새 푸시가 오면 이전 검증을 취소한다. main은 배포가 끊기지 않게 끝까지 돈다
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - name: Build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_VAPID_KEY: ${{ vars.VITE_FIREBASE_VAPID_KEY }}
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: deploy-frontend
+      cancel-in-progress: false
+    env:
+      BUCKET: ${{ vars.FRONTEND_BUCKET }}
+      DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+      ROLE_ARN: ${{ vars.FRONTEND_DEPLOY_ROLE_ARN }}
+    steps:
+      - name: Check settings
+        run: |
+          set -euo pipefail
+          if [ -z "$BUCKET" ]; then
+            echo "::notice::FRONTEND_BUCKET이 비어 있어 프론트 배포를 건너뜁니다"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ -z "$DISTRIBUTION_ID" ] || [ -z "$ROLE_ARN" ]; then
+            echo "::error::CLOUDFRONT_DISTRIBUTION_ID, FRONTEND_DEPLOY_ROLE_ARN 변수가 필요합니다"
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: env.SKIP != 'true'
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          role-session-name: frontend-deploy-${{ github.run_id }}
+          aws-region: ap-northeast-2
+
+      - uses: actions/download-artifact@v4
+        if: env.SKIP != 'true'
+        with:
+          name: frontend-dist
+          path: dist
+
+      - name: Upload to S3
+        if: env.SKIP != 'true'
+        run: |
+          set -euo pipefail
+          # 아티팩트를 내려받으면 파일 수정 시각이 바뀌어 sync가 매번 전부 다시 올린다 (의도: 규모가 작고 Cache-Control이 항상 갱신됨)
+          # 파일 이름에 해시가 붙는 assets/는 오래 캐시하고 지우지 않는다 (열려 있던 화면이 옛 파일을 계속 찾을 수 있게)
+          # 나머지(index.html, login-*.html, 이미지)는 매번 확인하고, 빌드에서 사라진 파일은 지운다
+          aws s3 sync dist/assets "s3://$BUCKET/assets" --cache-control "public,max-age=31536000,immutable"
+          aws s3 sync dist "s3://$BUCKET" --exclude "assets/*" --cache-control "no-cache" --delete
+
+      - name: Invalidate CloudFront
+        if: env.SKIP != 'true'
+        run: |
+          set -euo pipefail
+          id=$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*" --query Invalidation.Id --output text)
+          echo "프론트 배포: s3://$BUCKET (CloudFront 무효화 $id, 커밋 ${GITHUB_SHA::7})" >> "$GITHUB_STEP_SUMMARY"
