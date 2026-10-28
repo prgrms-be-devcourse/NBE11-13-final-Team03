@@ -11,11 +11,14 @@ import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.Objects;
 import java.util.function.BiConsumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 
 @Service
 public class YouthPolicyCollectionService {
+    private static final Logger log = LoggerFactory.getLogger(YouthPolicyCollectionService.class);
     private static final int MAX_CONSECUTIVE_PAGE_FAILURES = 3;
     private final YouthPolicyClient client;
 
@@ -82,13 +85,15 @@ public class YouthPolicyCollectionService {
 
     private YouthPolicyPage fetchWithRetry(int pageNumber, int pageSize) {
         for (int attempt = 1; ; attempt++) {
-            CollectionRetry.beforeAttempt(attempt);
+            CollectionRetry.beforeAttempt(attempt, 2_000L);
             try {
                 return client.fetchPage(pageNumber, pageSize);
             } catch (YouthPolicyClientException exception) {
                 if (!exception.isRetryable() || attempt >= CollectionRetry.MAX_ATTEMPTS) {
                     throw exception;
                 }
+                log.warn("source=YOUTH_POLICY page={} errorCode={} attempt={} maxAttempts={} retry=scheduled",
+                        pageNumber, exception.getErrorCode(), attempt, CollectionRetry.MAX_ATTEMPTS);
             }
         }
     }

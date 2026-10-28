@@ -97,9 +97,10 @@ class YouthPolicyClientTests {
         server.verify();
     }
 
-    @Test
-    void rejectsAnApiErrorWithoutExposingTheExternalMessage() {
-        respond("{\"resultCode\":401,\"resultMessage\":\"invalid " + apiKey + "\"}");
+    @ParameterizedTest
+    @ValueSource(ints = {401, 403})
+    void rejectsAnApiErrorWithoutExposingTheExternalMessage(int status) {
+        respond("{\"resultCode\":" + status + ",\"resultMessage\":\"invalid " + apiKey + "\"}");
         YouthPolicyClientException exception = assertThrows(YouthPolicyClientException.class,
                 () -> client.fetchPage(1, 100));
         assertEquals("API_ERROR", exception.getErrorCode());
@@ -110,14 +111,14 @@ class YouthPolicyClientTests {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {302, 401, 429, 503})
+    @ValueSource(ints = {302, 400, 401, 403, 429, 503})
     void reportsHttpErrorsAndWhetherTheyCanBeRetried(int status) {
         server.expect(anything()).andRespond(withStatus(HttpStatus.valueOf(status))
                 .body(apiKey).contentType(MediaType.TEXT_PLAIN));
         YouthPolicyClientException exception = assertThrows(YouthPolicyClientException.class,
                 () -> client.fetchPage(1, 100));
         assertEquals("HTTP_" + status, exception.getErrorCode());
-        assertEquals(status == 429 || status >= 500, exception.isRetryable());
+        assertEquals(status == 403 || status == 429 || status >= 500, exception.isRetryable());
         assertFalse(exception.toString().contains(apiKey));
         server.verify();
     }

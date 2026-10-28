@@ -20,10 +20,11 @@ class YouthPolicyCollectionServiceTests {
         return new YouthPolicyPage(totalCount, List.of(JsonNodeFactory.instance.objectNode()));
     }
 
-    @Test
-    void continuesAfterFailureAndReturnsItsDetails() {
+    @ParameterizedTest
+    @ValueSource(strings = {"HTTP_403", "HTTP_503"})
+    void continuesAfterFailureAndReturnsItsDetails(String errorCode) {
         when(client.fetchPage(1, 1)).thenReturn(page(3));
-        when(client.fetchPage(2, 1)).thenThrow(new YouthPolicyClientException("HTTP_503", true));
+        when(client.fetchPage(2, 1)).thenThrow(new YouthPolicyClientException(errorCode, true));
         when(client.fetchPage(3, 1)).thenReturn(page(3));
 
         var result = service.collect(1, 10);
@@ -33,7 +34,7 @@ class YouthPolicyCollectionServiceTests {
         assertEquals(1, result.pageFailures().size());
         var failure = result.pageFailures().getFirst();
         assertEquals(2, failure.pageNumber());
-        assertEquals("HTTP_503", failure.errorCode());
+        assertEquals(errorCode, failure.errorCode());
         assertTrue(failure.retryable());
         verify(client, times(3)).fetchPage(2, 1);
         verify(client).fetchPage(3, 1);
@@ -41,7 +42,7 @@ class YouthPolicyCollectionServiceTests {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"HTTP_503", "CONNECTION_ERROR", "API_ERROR", "HTTP_429"})
+    @ValueSource(strings = {"HTTP_403", "HTTP_503", "CONNECTION_ERROR", "API_ERROR", "HTTP_429"})
     void stopsAfterThreeFirstPageAttempts(String errorCode) {
         when(client.fetchPage(anyInt(), eq(1)))
                 .thenThrow(new YouthPolicyClientException(errorCode, true));
@@ -73,7 +74,7 @@ class YouthPolicyCollectionServiceTests {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"HTTP_401", "HTTP_403", "HTTP_400", "API_ERROR", "INVALID_RESPONSE"})
+    @ValueSource(strings = {"HTTP_401", "HTTP_400", "API_ERROR", "INVALID_RESPONSE"})
     void nonRetryableFailureOnMiddlePageStopsCollection(String errorCode) {
         when(client.fetchPage(1, 1)).thenReturn(page(1000));
         when(client.fetchPage(2, 1)).thenThrow(new YouthPolicyClientException(errorCode, false));
@@ -96,7 +97,7 @@ class YouthPolicyCollectionServiceTests {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"HTTP_503", "CONNECTION_ERROR", "API_ERROR"})
+    @ValueSource(strings = {"HTTP_403", "HTTP_503", "CONNECTION_ERROR", "API_ERROR"})
     void repeatedMiddlePageFailuresStopWithoutReachingPageLimit(String errorCode) {
         when(client.fetchPage(1, 1)).thenReturn(page(null));
         when(client.fetchPage(2, 1)).thenThrow(new YouthPolicyClientException(errorCode, true));
@@ -123,6 +124,27 @@ class YouthPolicyCollectionServiceTests {
         assertEquals(2, result.records().size());
         assertTrue(result.pageFailures().isEmpty());
         verify(client, times(3)).fetchPage(2, 1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"HTTP_403", "HTTP_429", "HTTP_503"})
+    void retriesPageThirtyBeforeSavingItOnceAndCollectingTheRemainingPages(String errorCode) {
+        var rows = java.util.Collections.nCopies(100, (tools.jackson.databind.JsonNode) JsonNodeFactory.instance.objectNode());
+        when(client.fetchPage(anyInt(), eq(100))).thenReturn(new YouthPolicyPage(3600, rows));
+        when(client.fetchPage(30, 100)).thenThrow(new YouthPolicyClientException(errorCode, true))
+                .thenThrow(new YouthPolicyClientException(errorCode, true))
+                .thenReturn(new YouthPolicyPage(3600, rows));
+        var offsets = new java.util.ArrayList<Integer>();
+
+        var result = service.collectPages(100, 1000, (offset, page) -> offsets.add(offset));
+
+        assertTrue(result.completed());
+        assertEquals(3600, result.fetchedCount());
+        assertTrue(result.pageFailures().isEmpty());
+        assertEquals(java.util.stream.IntStream.range(0, 36).map(n -> n * 100).boxed().toList(), offsets);
+        verify(client, times(3)).fetchPage(30, 100);
+        verify(client).fetchPage(36, 100);
+        verify(client, never()).fetchPage(37, 100);
     }
 
     @Test
@@ -161,7 +183,7 @@ class YouthPolicyCollectionServiceTests {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"HTTP_401", "HTTP_403", "HTTP_400", "API_ERROR", "INVALID_RESPONSE"})
+    @ValueSource(strings = {"HTTP_401", "HTTP_400", "API_ERROR", "INVALID_RESPONSE"})
     void stopsOnNonRetryableFirstPageFailure(String errorCode) {
         when(client.fetchPage(1, 1)).thenThrow(new YouthPolicyClientException(errorCode, false));
         var result = service.collect(1, 1000);
