@@ -164,12 +164,34 @@ class SecurityIntegrationTest {
                 .andExpect(jsonPath("$").value(user.getId().intValue()));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/opportunities", "/api/opportunities/1", "/api/regions", "/api/security-test/protected"})
+    @DisplayName("Refresh Token 쿠키만 남은 로그인 브라우저의 요청은 공개 API에서도 익명으로 처리하지 않는다")
+    void refreshCookieWithoutAccessCookieReturnsUnauthorized(String path) throws Exception {
+        mockMvc.perform(get(path).cookie(new Cookie("refresh_token", "any-refresh-cookie")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_006"));
+    }
+
+    @Test
+    void refreshCookieDoesNotBlockCsrfBootstrapOrReissue() throws Exception {
+        mockMvc.perform(get("/api/interests/options").cookie(new Cookie("refresh_token", "any-refresh-cookie")))
+                .andExpect(status().isOk())
+                .andExpect(cookie().exists("XSRF-TOKEN"));
+        mockMvc.perform(post("/api/auth/reissue").with(csrfCookie())
+                        .cookie(new Cookie("refresh_token", "invalid-refresh")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_002"));
+    }
+
     @Test
     void reissueWithoutRefreshTokenStillFailsWithRefreshError() throws Exception {
         mockMvc.perform(post("/api/auth/reissue").with(csrfCookie())
                         .cookie(new Cookie("access_token", accessToken(Duration.ofMinutes(-1)))))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("AUTH_001"));
+                .andExpect(jsonPath("$.code").value("AUTH_001"))
+                .andExpect(cookie().maxAge("access_token", 0))
+                .andExpect(cookie().maxAge("refresh_token", 0));
     }
 
     @Test
@@ -177,10 +199,13 @@ class SecurityIntegrationTest {
         mockMvc.perform(post("/api/auth/reissue").with(csrfCookie())
                         .cookie(new Cookie("access_token", "invalid-access"), new Cookie("refresh_token", "invalid-refresh")))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("AUTH_002"));
+                .andExpect(jsonPath("$.code").value("AUTH_002"))
+                .andExpect(cookie().maxAge("access_token", 0))
+                .andExpect(cookie().maxAge("refresh_token", 0));
     }
 
     @Test
+    @DisplayName("재발급이 확정 실패하면 토큰 쿠키를 지워 다음 공개 조회가 비회원으로 성공한다")
     void reissueWithExpiredRefreshTokenStillFailsWithRefreshError() throws Exception {
         var refresh = tokens.generateToken(User.builder().id(42L).role(Role.USER).build(),
                 "test-session", Duration.ofMinutes(-1), TokenType.REFRESH);
@@ -188,7 +213,26 @@ class SecurityIntegrationTest {
                         .cookie(new Cookie("access_token", accessToken(Duration.ofMinutes(-1))),
                                 new Cookie("refresh_token", refresh)))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("AUTH_003"));
+                .andExpect(jsonPath("$.code").value("AUTH_003"))
+                .andExpect(cookie().maxAge("access_token", 0))
+                .andExpect(cookie().maxAge("refresh_token", 0));
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("동시 재발급에 진 요청의 불일치 실패는 다른 요청이 갓 발급한 쿠키를 지우지 않는다")
+    void reissueMismatchKeepsCookiesIssuedByConcurrentReissue() throws Exception {
+        var user = users.saveAndFlush(User.builder().kakaoId(990002L).nickname("JWT mismatch")
+                .email("jwt-mismatch@example.com").role(Role.USER).build());
+        var pair = tokenService.issueToken(user, "jwt-mismatch-device");
+        tokenService.reissueToken(pair.refreshToken()); // 다른 탭이 먼저 회전시킨 상태
+        var response = mockMvc.perform(post("/api/auth/reissue").with(csrfCookie())
+                        .cookie(new Cookie("refresh_token", pair.refreshToken())))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_004"))
+                .andReturn().getResponse();
+        assertThat(response.getCookie("access_token")).isNull();
+        assertThat(response.getCookie("refresh_token")).isNull();
     }
 
     @Test

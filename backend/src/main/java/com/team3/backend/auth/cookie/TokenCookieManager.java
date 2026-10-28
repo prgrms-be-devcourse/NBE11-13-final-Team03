@@ -14,8 +14,8 @@ import java.time.Duration;
 @RequiredArgsConstructor
 public class TokenCookieManager {
 
-    private static final String ACCESS_TOKEN_COOKIE = "access_token";
-    private static final String REFRESH_TOKEN_COOKIE = "refresh_token";
+    public static final String ACCESS_TOKEN_COOKIE = "access_token";
+    public static final String REFRESH_TOKEN_COOKIE = "refresh_token";
 
     private final JwtProperties jwtProperties;
     private final AuthCookieProperties cookieProperties;

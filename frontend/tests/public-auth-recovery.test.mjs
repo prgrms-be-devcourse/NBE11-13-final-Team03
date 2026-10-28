@@ -34,28 +34,33 @@ function cookie() { Object.defineProperty(globalThis, 'document', { configurable
 function deferred() { let resolve; const promise = new Promise((done) => { resolve = done }); return { resolve, promise } }
 const tick = () => new Promise((resolve) => setImmediate(resolve))
 
-test('expired token on public search: 401 → reissue 200 → same request resent with the saved flag intact', async () => {
-  cookie()
-  const paths = []
-  let reissued = false
-  adapter = async (config) => {
-    paths.push(config.url)
-    if (config.url === '/auth/reissue') { reissued = true; return response(config, '') }
-    assert.equal(config.url, '/opportunities')
-    assert.equal(config.recoverAuth, true)
-    assert.equal(config.requiresAuth, undefined)
-    return reissued ? response(config, page(true)) : http(config, 401, 'AUTH_007')
-  }
-  let lost = 0
-  const off = onAuthLost(() => { lost++ })
-  try {
-    const result = await searchOpportunities(defaultSearchParams())
-    assert.equal(result.content[0].saved, true)
-    assert.deepEqual(paths, ['/opportunities', '/auth/reissue', '/opportunities'])
-    assert.equal(lost, 0)
-  } finally { off() }
-})
+// AUTH_007: 만료된 Access Token 쿠키가 아직 전달되는 짧은 창. AUTH_006: 오래 열어 둔 앱에서 Access Token 쿠키는
+// 사라지고 Refresh Token 쿠키만 남은 상태(서버가 공개 조회를 익명으로 답하지 않고 401을 낸다).
+for (const code of ['AUTH_007', 'AUTH_006']) {
+  test(`public search 401 ${code} while the cached user is still authenticated: reissue 200 → same request resent with the saved flag intact`, async () => {
+    cookie()
+    const paths = []
+    let reissued = false
+    adapter = async (config) => {
+      paths.push(config.url)
+      if (config.url === '/auth/reissue') { reissued = true; return response(config, '') }
+      assert.equal(config.url, '/opportunities')
+      assert.equal(config.recoverAuth, true)
+      assert.equal(config.requiresAuth, undefined)
+      return reissued ? response(config, page(true)) : http(config, 401, code)
+    }
+    let lost = 0
+    const off = onAuthLost(() => { lost++ })
+    try {
+      const result = await searchOpportunities(defaultSearchParams())
+      assert.equal(result.content[0].saved, true)
+      assert.deepEqual(paths, ['/opportunities', '/auth/reissue', '/opportunities'])
+      assert.equal(lost, 0)
+    } finally { off() }
+  })
+}
 
+// 재발급 401 응답은 서버가 토큰 쿠키를 지우므로(불일치 AUTH_004 제외) 익명 재전송에는 토큰 쿠키가 붙지 않는다.
 test('reissue 401 on public search: the same request is resent anonymously once and auth loss is reported exactly once', async () => {
   cookie()
   const paths = []

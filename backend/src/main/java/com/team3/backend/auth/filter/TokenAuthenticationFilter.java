@@ -1,5 +1,6 @@
 package com.team3.backend.auth.filter;
 
+import com.team3.backend.auth.cookie.TokenCookieManager;
 import com.team3.backend.auth.exception.AuthErrorCode;
 import com.team3.backend.auth.jwt.TokenProvider;
 import com.team3.backend.auth.jwt.TokenStatus;
@@ -53,9 +54,16 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             FilterChain filterChain
     ) throws ServletException, IOException {
 
-        String token = resolveToken(request);
+        String token = readCookie(request, TokenCookieManager.ACCESS_TOKEN_COOKIE);
 
         if (token == null) {
+            if (readCookie(request, TokenCookieManager.REFRESH_TOKEN_COOKIE) != null) {
+                // A refresh cookie without an access cookie is a logged-in browser whose access cookie
+                // expired. Public endpoints must not answer it anonymously; the frontend refreshes and retries.
+                reject(request, response, AuthErrorCode.ACCESS_TOKEN_NOT_FOUND);
+                return;
+            }
+
             request.setAttribute(
                     "auth_error",
                     AuthErrorCode.ACCESS_TOKEN_NOT_FOUND
@@ -72,7 +80,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
                 );
 
         if (status != TokenStatus.VALID) {
-            rejectInvalidToken(request, response);
+            reject(request, response, AuthErrorCode.INVALID_ACCESS_TOKEN);
             return;
         }
 
@@ -81,7 +89,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             authentication = tokenProvider.getAuthentication(token);
         } catch (JwtException | IllegalArgumentException failure) {
             // Parsing again may cross the expiry boundary or reject malformed principal claims.
-            rejectInvalidToken(request, response);
+            reject(request, response, AuthErrorCode.INVALID_ACCESS_TOKEN);
             return;
         }
 
@@ -91,13 +99,13 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private void rejectInvalidToken(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    private void reject(HttpServletRequest request, HttpServletResponse response, AuthErrorCode errorCode) throws IOException {
         SecurityContextHolder.clearContext();
-        request.setAttribute("auth_error", AuthErrorCode.INVALID_ACCESS_TOKEN);
-        authenticationEntryPoint.commence(request, response, new BadCredentialsException("Invalid access token"));
+        request.setAttribute("auth_error", errorCode);
+        authenticationEntryPoint.commence(request, response, new BadCredentialsException(errorCode.getMessage()));
     }
 
-    private String resolveToken(HttpServletRequest request) {
+    private String readCookie(HttpServletRequest request, String name) {
 
         Cookie[] cookies = request.getCookies();
 
@@ -106,7 +114,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
         }
 
         for (Cookie cookie : cookies) {
-            if ("access_token".equals(cookie.getName())) {
+            if (name.equals(cookie.getName())) {
                 return cookie.getValue();
             }
         }

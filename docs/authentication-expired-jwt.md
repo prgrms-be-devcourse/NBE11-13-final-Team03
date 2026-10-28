@@ -11,19 +11,27 @@
 | (b) Access Token 쿠키가 아예 없고 Refresh Token만 남아 있다 | 서버는 비회원 요청과 구분할 수 없다 | 프론트 복원·재발급 |
 
 Access Token 쿠키의 Max-Age는 JWT 유효기간과 같으므로 (a)는 쿠키 만료와 토큰 만료 사이의 짧은 창(시계 차이·전송 지연)에서만 생긴다.
-실제로 보고된 증상의 주 원인은 (b)다. **주 수정은 프론트의 인증 복원·재발급·익명 대체이고, 백엔드 401은 (a)의 창을 막는 안전망이다.**
+실제로 보고된 증상의 주 원인은 (b)다. (b)는 첫 진입뿐 아니라 로그인 상태로 앱을 오래 열어 둔 뒤 새 공개 조회를 할 때도 생긴다.
+**주 수정은 프론트의 인증 복원·재발급·익명 대체이고, 백엔드는 (a)의 만료 토큰과 (b)의 Refresh Token만 남은 요청을 401로 알려
+프론트가 재발급하게 하는 안전망이다.**
 
 ## 프론트: 인증 복원 순서와 공개 조회 복구
 
 프론트 담당자가 설계한 기존 인증 복구 흐름(`requiresAuth`, `reissueAttempt`·`authGeneration`·`authSession` 가드,
 `/users/me` 인증 Query, `resetPersonalizedQueries`)을 그대로 재사용한다. 새 재시도 체계는 추가하지 않는다.
 
-### 순서 보장 (경우 b)
+### 순서 보장 (경우 b, 첫 진입)
 
 검색(`OpportunitiesPage`), 홈 최신 목록(`HomePage`), 상세(`OpportunityDetailPage`)의 공개 조회 Query는
 인증 상태가 `checking`인 동안 비활성이다. 인증 Query(`GET /users/me`, `requiresAuth: true`)가 먼저 나가
 Access Token 쿠키가 없으면 401 → 재발급 → 새 쿠키를 받은 뒤에야 공개 조회가 시작된다.
 인증 확인이 `error`로 끝나면 공개 조회는 비회원으로 진행한다.
+
+### 오래 열어 둔 앱 (경우 b, 세션 중)
+
+인증 Query가 `authenticated`로 캐시된 채 Access Token 쿠키만 만료되면 새 공개 조회는 바로 나간다.
+이때 서버는 Refresh Token 쿠키만 있는 요청을 익명으로 답하지 않고 401 / `AUTH_006`을 내므로(아래 백엔드 항목),
+`recoverAuth`가 재발급 후 같은 요청을 다시 보내 개인화가 유지된다. 프론트가 쿠키 만료 시각을 추측하지 않는다.
 
 ### `recoverAuth` 옵션 (경우 a와 창 밖의 만료)
 
@@ -51,7 +59,8 @@ Access Token 쿠키가 없으면 401 → 재발급 → 새 쿠키를 받은 뒤�
 
 | 요청 | 처리 |
 | --- | --- |
-| Access Token 없는 공개 API | 기존 비회원 조회 유지 |
+| 토큰 쿠키가 전혀 없는 공개 API | 기존 비회원 조회 유지 |
+| Refresh Token 쿠키만 있는 공개 API | 401 / `AUTH_006`. 로그인 브라우저의 Access Token 쿠키 만료로 보고 프론트가 재발급한다 |
 | Access Token 없는 보호 API | 기존 401 / `AUTH_006` 유지 |
 | 만료·잘못된 Access Token이 있는 API | 401 / `AUTH_007`, 컨트롤러 실행 중단 |
 | 유효한 Access Token이 있는 API | 인증 사용자로 처리, 기존 권한 검사 유지 |
@@ -67,8 +76,10 @@ Access Token 쿠키가 없으면 401 → 재발급 → 새 쿠키를 받은 뒤�
 claim 해석이 실패한 경우도 401로 처리한다. CSRF 검사는 완화하지 않는다.
 Spring Security의 `csrf.spa()`가 발급하는 `XSRF-TOKEN` 쿠키와 `X-XSRF-TOKEN` 헤더 흐름은 변경하지 않는다.
 
-재발급 실패(401) 응답은 쿠키를 지우지 않는다. (a)의 창 안에서 재발급까지 실패하면 익명 재전송도 같은 만료 쿠키를 보내
-401로 끝날 수 있는데, 창이 지나면 쿠키가 사라져 다음 조회는 비회원으로 성공한다. 재발급 실패 시 쿠키 삭제는 별도 검토 대상이다.
+`POST /api/auth/reissue`가 401로 실패하면(`AUTH_001`/`002`/`003`/`005`) Access Token·Refresh Token 쿠키를 함께 지운다.
+그래야 프론트의 익명 재전송과 이후 공개 조회에 쓸모없는 쿠키가 붙어 401이 반복되지 않는다.
+저장된 토큰과의 불일치(`AUTH_004`)는 예외다. 다른 탭의 동시 재발급에 진 경우라 브라우저가 이미 새 쿠키를 갖고 있을 수 있으며,
+그 쿠키를 지우면 정상 세션이 끊긴다. 이 경우 프론트의 익명 재전송은 새 쿠키로 나가 개인화된 응답을 받는다.
 
 ## 검증
 
@@ -76,17 +87,18 @@ Spring Security의 `csrf.spa()`가 발급하는 `XSRF-TOKEN` 쿠키와 `X-XSRF-T
 
 | 범위 | 결과 |
 | --- | --- |
-| `frontend`: `npm run lint`, `npm test`, `npm run build` | 통과. 테스트 296개 중 291 통과, 5개는 Chrome 미설치로 건너뜀 |
-| `backend`: `com.team3.backend.auth.*`, `com.team3.backend.architecture.*` | 통과. 12개 클래스 77개 테스트, 실패·오류·건너뜀 0 |
-| `backend` 전체 `bash gradlew test --no-daemon -q` | 통과(148개 클래스 1020개 테스트, 실패·오류 0, 건너뜀 98) |
+| `frontend`: `npm run lint`, `npm test`, `npm run build` | 통과. 테스트 297개 중 292 통과, 5개는 Chrome 미설치로 건너뜀 |
+| `backend`: `com.team3.backend.auth.*`, `com.team3.backend.architecture.*` | 통과. 12개 클래스 85개 테스트, 실패·오류·건너뜀 0 |
+| `backend` 전체 `bash gradlew test --no-daemon -q` | 통과(148개 클래스 1028개 테스트, 실패·오류 0, 건너뜀 98) |
 
-프론트 회귀 테스트는 `frontend/tests/public-auth-recovery.test.mjs`에 있다. 검색 401→재발급 200→재전송(찜 유지),
+프론트 회귀 테스트는 `frontend/tests/public-auth-recovery.test.mjs`에 있다. 검색 401(`AUTH_007`·`AUTH_006`)→재발급 200→재전송(찜 유지),
 재발급 401→익명 재전송(찜 없음·인증 재확인·개인화 캐시 정리), 재발급 네트워크·타임아웃·5xx→오류 유지,
 동시 요청 3개→재발급 1회, 재발급 중 로그아웃→늦은 응답 무시를 다룬다.
 
 백엔드 회귀 테스트는 `SecurityIntegrationTest`·`TokenAuthenticationFilterTest`에 있다. 만료·잘못된 토큰의 401,
-비회원 공개 조회, 실제 CSRF 쿠키 bootstrap→Refresh Token 회전→새 Access Token의 사용자 식별, Refresh Token 오류 응답,
-CSRF 거부, OAuth 진입·내부 키 인증 유지, context path 처리를 다룬다. Postgres 통합 테스트에는 Docker가 필요하다.
+Refresh Token 쿠키만 있는 공개 조회의 401, 쿠키가 전혀 없는 비회원 공개 조회, 실제 CSRF 쿠키 bootstrap→Refresh Token 회전→
+새 Access Token의 사용자 식별, 재발급 실패 시 쿠키 삭제(불일치는 유지), Refresh Token 오류 응답, CSRF 거부,
+OAuth 진입·내부 키 인증 유지, context path 처리를 다룬다. Postgres 통합 테스트에는 Docker가 필요하다.
 
 ```bash
 cd backend && bash gradlew test --no-daemon -q --tests 'com.team3.backend.auth.*' --tests 'com.team3.backend.architecture.*'

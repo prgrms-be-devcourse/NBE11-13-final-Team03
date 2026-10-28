@@ -1,5 +1,6 @@
 package com.team3.backend.auth.filter;
 
+import com.team3.backend.auth.exception.AuthErrorCode;
 import com.team3.backend.auth.jwt.TokenProvider;
 import com.team3.backend.auth.jwt.TokenStatus;
 import com.team3.backend.auth.jwt.TokenType;
@@ -65,6 +66,31 @@ class TokenAuthenticationFilterTest {
         verify(entryPoint).commence(eq(request), eq(response), any());
         verifyNoInteractions(chain);
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @Test
+    void refreshCookieWithoutAccessCookieIsNotAnonymousOnPublicApi() throws Exception {
+        var request = new MockHttpServletRequest("GET", "/api/opportunities");
+        var response = new MockHttpServletResponse();
+        request.setCookies(new Cookie("refresh_token", "refresh"));
+
+        new TokenAuthenticationFilter(tokens, entryPoint).doFilter(request, response, chain);
+
+        verify(entryPoint).commence(eq(request), eq(response), any());
+        verifyNoInteractions(chain, tokens);
+        assertThat(request.getAttribute("auth_error")).isEqualTo(AuthErrorCode.ACCESS_TOKEN_NOT_FOUND);
+    }
+
+    @Test
+    void noCookiesAtAllRemainsAnonymous() throws Exception {
+        var request = new MockHttpServletRequest("GET", "/api/opportunities");
+        var response = new MockHttpServletResponse();
+
+        new TokenAuthenticationFilter(tokens, entryPoint).doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verifyNoInteractions(tokens, entryPoint);
+        assertThat(request.getAttribute("auth_error")).isEqualTo(AuthErrorCode.ACCESS_TOKEN_NOT_FOUND);
     }
 
     @ParameterizedTest
