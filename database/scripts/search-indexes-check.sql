@@ -1,8 +1,24 @@
 -- 통합 검색 성능 인덱스(search-indexes.sql)의 적용 결과를 확인한다. 읽기 전용이며 아무것도 바꾸지 않는다.
 -- application_user로 실행한다. 반복 실행해도 된다.
 --
--- 실행 (DB 서버 ~/yon-db, application_user로):
---   { echo 'SET ROLE application_user;'; cat sql/search-indexes-check.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon
+-- 실행 대상이 둘로 나뉜다. 인덱스는 primary에서 만들지만, 검색 질의는 읽기 복제본에서 돈다.
+--
+--   1~3, 5번  인덱스가 제대로 만들어졌는지 보는 카탈로그 조회다.
+--             primary에서 확인한다. 복제본에서도 같은 결과가 나오지만(복제로 반영됨) 기준은 primary다.
+--   4번       pg_stat_user_indexes 사용 통계는 서버마다 따로 쌓인다.
+--             검색이 실제로 도는 읽기 복제본에서 봐야 의미가 있다. primary에서는 idx_scan이 0에 머문다.
+--   6번       EXPLAIN (ANALYZE, BUFFERS)도 복제본에서 실행한다.
+--             플래너가 고르는 계획은 서버의 통계·캐시 상태를 따르므로, 검색이 도는 서버에서 봐야 한다.
+--
+-- primary 점검 (1~3, 5번 확인용) — 노트북 저장소 루트에서:
+--   { echo 'SET ROLE application_user;'; cat database/scripts/search-indexes-check.sql; } \
+--     | ssh ubuntu@<DB 서버> 'cd ~/yon-db && docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1'
+--
+-- 복제본 점검 (4, 6번 확인용) — 노트북 저장소 루트에서:
+--   { echo 'SET ROLE application_user;'; cat database/scripts/search-indexes-check.sql; } \
+--     | ssh ubuntu@<DB 복제본 서버> 'cd ~/yon-db-replica && docker compose exec -T postgres-replica psql -U postgres -d yon -v ON_ERROR_STOP=1'
+--
+-- 복제본은 읽기 전용이라 SET ROLE 과 SELECT 만으로 끝나는 이 파일을 그대로 실행할 수 있다.
 --
 -- 마지막 두 EXPLAIN은 실제 검색이 만드는 SQL을 그대로 실행한다 (ANALYZE라 질의가 실제로 돈다).
 -- SELECT뿐이라 데이터는 바뀌지 않지만 S11은 수 초가 걸릴 수 있다. 부하가 적은 시간에 실행한다.
@@ -17,7 +33,7 @@ SET statement_timeout = '120s';
 SET TIME ZONE 'Asia/Seoul';
 
 \echo ''
-\echo '=== 1. 세 인덱스의 존재 / valid / ready / 정의 / 크기 ==='
+\echo '=== 1. [primary] 세 인덱스의 존재 / valid / ready / 정의 / 크기 ==='
 \echo '    (indisvalid=f 또는 indisready=f 이면 CONCURRENTLY가 실패한 것이다. 롤백 후 재생성한다)'
 SELECT c.relname                                   AS index_name,
        i.indisvalid                                AS is_valid,
@@ -34,7 +50,7 @@ WHERE n.nspname = 'application'
 ORDER BY c.relname;
 
 \echo ''
-\echo '=== 2. 세 인덱스가 모두 정상인지 한 줄로 판정 ==='
+\echo '=== 2. [primary] 세 인덱스가 모두 정상인지 한 줄로 판정 ==='
 SELECT count(*) FILTER (WHERE i.indisvalid AND i.indisready)                AS ok_count,
        3                                                                   AS expected,
        CASE WHEN count(*) FILTER (WHERE i.indisvalid AND i.indisready) = 3
@@ -49,7 +65,7 @@ WHERE n.nspname = 'application'
                     'idx_opportunities_type_latest');
 
 \echo ''
-\echo '=== 3. application 스키마의 INVALID / NOT READY 인덱스 전체 (0행이어야 정상) ==='
+\echo '=== 3. [primary] application 스키마의 INVALID / NOT READY 인덱스 전체 (0행이어야 정상) ==='
 SELECT c.relname AS index_name, t.relname AS table_name, i.indisvalid, i.indisready
 FROM pg_index i
 JOIN pg_class c ON c.oid = i.indexrelid
@@ -59,8 +75,8 @@ WHERE n.nspname = 'application' AND (NOT i.indisvalid OR NOT i.indisready)
 ORDER BY c.relname;
 
 \echo ''
-\echo '=== 4. 인덱스 사용 통계 (idx_scan이 0이면 아직 쓰이지 않은 것이다) ==='
-\echo '    통계는 마지막 pg_stat_reset 이후 누적이다. 적용 직후에는 0이 정상이다'
+\echo '=== 4. [replica] 인덱스 사용 통계 (idx_scan이 0이면 아직 쓰이지 않은 것이다) ==='
+\echo '    통계는 서버마다 따로 쌓인다. 검색이 도는 복제본에서 봐야 하며, primary에서는 0이 정상이다'
 SELECT relname AS table_name, indexrelname AS index_name,
        idx_scan, idx_tup_read, idx_tup_fetch
 FROM pg_stat_user_indexes
@@ -71,7 +87,7 @@ WHERE schemaname = 'application'
 ORDER BY indexrelname;
 
 \echo ''
-\echo '=== 5. 대상 테이블의 전체 인덱스 (기존 인덱스가 그대로인지 확인) ==='
+\echo '=== 5. [primary] 대상 테이블의 전체 인덱스 (기존 인덱스가 그대로인지 확인) ==='
 SELECT tablename, indexname, pg_size_pretty(pg_relation_size(schemaname||'.'||indexname)) AS size
 FROM pg_indexes
 WHERE schemaname = 'application'
@@ -79,7 +95,7 @@ WHERE schemaname = 'application'
 ORDER BY tablename, indexname;
 
 \echo ''
-\echo '=== 6. 대표 검색 실행 계획 — 실제 Hibernate SQL 그대로 ==='
+\echo '=== 6. [replica] 대표 검색 실행 계획 — 실제 Hibernate SQL 그대로 ==='
 \echo '    기대: idx_opportunity_conditions_nationwide / idx_application_windows_active /'
 \echo '          idx_opportunities_type_latest 가 Index Scan 또는 Index Only Scan 으로 나타난다'
 \echo '    주의: 원본 SQL의 날짜 리터럴만 CURRENT_DATE로 바꿨다. 애플리케이션은 KST 기준 오늘을 넘긴다'

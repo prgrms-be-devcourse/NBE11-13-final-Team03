@@ -4,8 +4,10 @@
 -- CREATE INDEX CONCURRENTLY는 트랜잭션 안에서 실행할 수 없다. 그래서 BEGIN/COMMIT 없이,
 -- 문장마다 따로 커밋되는 자동 커밋 모드로 실행한다. 서비스를 멈출 필요는 없다.
 --
--- 실행 (DB 서버 ~/yon-db, 테이블 소유자 application_user로):
---   { echo 'SET ROLE application_user;'; cat sql/search-indexes.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1
+-- 실행 대상: primary(쓰기) DB 한 곳뿐이다. 복제본은 primary의 인덱스를 스트리밍 복제로 자동 반영한다.
+-- 실행 (노트북 저장소 루트에서, 테이블 소유자 application_user로):
+--   { echo 'SET ROLE application_user;'; cat database/scripts/search-indexes.sql; } \
+--     | ssh ubuntu@<DB 서버> 'cd ~/yon-db && docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1'
 --
 -- 실행 후 반드시 search-indexes-check.sql로 세 인덱스가 valid·ready인지 확인한다.
 -- CONCURRENTLY는 실패해도 INVALID 인덱스를 남기며, 그 상태에서 이 파일을 다시 실행하면

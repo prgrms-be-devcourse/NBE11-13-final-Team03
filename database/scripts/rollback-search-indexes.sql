@@ -5,8 +5,10 @@
 -- DROP INDEX CONCURRENTLY도 트랜잭션 안에서 실행할 수 없다. BEGIN/COMMIT 없이 실행한다.
 -- 서비스를 멈출 필요는 없다.
 --
--- 실행 (DB 서버 ~/yon-db, 테이블 소유자 application_user로):
---   { echo 'SET ROLE application_user;'; cat sql/rollback-search-indexes.sql; } | docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1
+-- 실행 대상: primary(쓰기) DB 한 곳뿐이다. 복제본은 삭제도 복제로 자동 반영된다.
+-- 실행 (노트북 저장소 루트에서, 테이블 소유자 application_user로):
+--   { echo 'SET ROLE application_user;'; cat database/scripts/rollback-search-indexes.sql; } \
+--     | ssh ubuntu@<DB 서버> 'cd ~/yon-db && docker compose exec -T postgres-db psql -U postgres -d yon -v ON_ERROR_STOP=1'
 --
 -- CONCURRENTLY 생성이 실패해 INVALID 인덱스가 남은 경우에도 이 파일로 지운다.
 -- 제거 후 search-indexes-check.sql의 1·3번을 다시 실행해 0행인지 확인한다.
