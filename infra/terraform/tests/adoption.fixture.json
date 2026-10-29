@@ -406,7 +406,7 @@
         "acm_certificate_arn": null,
         "iam_certificate_id": null,
         "minimum_protocol_version": "TLSv1",
-        "ssl_support_method": "vip"
+        "ssl_support_method": null
       },
       "custom_error_responses": [],
       "logging": []

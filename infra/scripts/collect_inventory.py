@@ -22,7 +22,7 @@ class Collector:
     def __init__(self):
         self.results = {}
 
-    def query(self, key, *args, absent_codes=()):
+    def query(self, key, *args, absent_codes=(), empty_ok=False):
         if args[1].split("-")[0] not in {"get", "list", "describe"}:
             raise ValueError("Only read-only AWS operations are permitted")
         command = ["aws", *args, "--region", REGION, "--output", "json", "--no-cli-pager"]
@@ -35,7 +35,8 @@ class Collector:
                 self.results[key] = {"status": "absent" if code in absent_codes else "error", "error_code": code,
                                      "exit_code": result.returncode}
                 return {}
-            data = json.loads(result.stdout)
+            # GetBucketVersioning on a bucket that was never versioned succeeds with an empty body, so the CLI prints nothing.
+            data = {} if empty_ok and not result.stdout.strip() else json.loads(result.stdout)
             if not isinstance(data, dict):
                 raise ValueError("Expected one JSON object")
         except (OSError, subprocess.TimeoutExpired, ValueError) as error:
@@ -118,7 +119,8 @@ class Collector:
             absent = {"get-bucket-policy": ("NoSuchBucketPolicy",), "get-public-access-block": ("NoSuchPublicAccessBlockConfiguration",),
                       "get-bucket-ownership-controls": ("OwnershipControlsNotFoundError",),
                       "get-bucket-encryption": ("ServerSideEncryptionConfigurationNotFoundError",)}
-            q(f"s3/{operation}", "s3api", operation, "--bucket", BUCKET, absent_codes=absent.get(operation, ()))
+            q(f"s3/{operation}", "s3api", operation, "--bucket", BUCKET, absent_codes=absent.get(operation, ()),
+              empty_ok=operation == "get-bucket-versioning")
         if import_only:
             q("key-pair", "ec2", "describe-key-pairs", "--key-names", "team03_key", "--include-public-key")
             q("s3/tags", "s3api", "get-bucket-tagging", "--bucket", BUCKET, absent_codes=("NoSuchTagSet",))

@@ -35,6 +35,32 @@ class AdoptionTests(unittest.TestCase):
             self.assertEqual(json.loads(config["roles"]["team03-frontend-deploy"]["assume_role_policy"]), trust)
             self.assertFalse(any("team03-github-actions-deploy" in address for address in targets))
 
+    def test_cloudfront_values_match_provider_read_back(self):
+        with tempfile.TemporaryDirectory() as path:
+            file, raw = make_inventory(Path(path))
+            distro = next(v for k, v in raw["results"].items() if k.startswith("cloudfront/") and not k.endswith("/tags"))
+            config = distro["data"]["Distribution"]["DistributionConfig"]
+            config["Comment"] = ""
+            config["Origins"]["Items"].append({"Id": "frontend-s3", "DomainName": "bucket.s3.ap-northeast-2.amazonaws.com",
+                                               "ConnectionAttempts": 3, "ConnectionTimeout": 10, "OriginAccessControlId": "E2JJZ8SZNVRWDC",
+                                               "S3OriginConfig": {"OriginAccessIdentity": ""}})
+            file.write_text(json.dumps(raw), encoding="utf-8")
+            prepared, _ = prepare_import.prepare(file)
+            distribution = prepared["distribution"]
+            self.assertIsNone(distribution["comment"])
+            self.assertIsNone(distribution["viewer_certificate"]["ssl_support_method"])
+            origins = {o["origin_id"]: o for o in distribution["origins"]}
+            self.assertIsNone(origins["yon-backend"]["origin_access_control_id"])
+            self.assertEqual(origins["frontend-s3"]["s3_origin_config"], [])
+            self.assertEqual(origins["frontend-s3"]["origin_access_control_id"], "E2JJZ8SZNVRWDC")
+
+    def test_oidc_snapshot_url_matches_provider_state(self):
+        with tempfile.TemporaryDirectory() as path:
+            file, _ = make_inventory(Path(path))
+            config, targets = prepare_import.prepare(file)
+            self.assertEqual(config["oidc"]["url"], "https://token.actions.githubusercontent.com")
+            self.assertEqual(targets["aws_iam_openid_connect_provider.github"]["values"]["url"], "token.actions.githubusercontent.com")
+
     def test_batch_refuses_a_different_existing_backend(self):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path) / "checkout"
