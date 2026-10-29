@@ -103,5 +103,19 @@ class ImageRetentionTest(unittest.TestCase):
         self.assertIn(f"{REPO}:sha-busy", self.remaining())
 
 
+    def test_history_write_failure_warns_and_skips_cleanup(self):
+        self.images(f"{REPO}:sha-old")
+        (self.root / "deploy-history").write_text("not a directory")
+        output = self.deploy("sha-new")
+        self.assertIn("::warning::배포 이력 저장 실패", output)
+        self.assertIn(f"{REPO}:sha-old", self.remaining())
+        self.assertFalse((self.root / "removed.txt").exists())
+
+    def test_summary_reports_images_left_on_the_server(self):
+        self.images(f"{REPO}:sha-busy")
+        (self.root / "busy.txt").write_text(f"{REPO}:sha-busy\n")
+        output = self.deploy("sha-new")
+        self.assertIn("이력 1개, 서버 이미지 2개, 0개 삭제", output)
+
 if __name__ == "__main__":
     unittest.main()
