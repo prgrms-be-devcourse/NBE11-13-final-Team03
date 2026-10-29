@@ -25,7 +25,13 @@ import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.recommendation.dto.RecommendationEligibleCandidate;
+import com.team3.backend.recommendation.service.RecommendationCandidateService;
+import com.team3.backend.recommendation.service.RecommendationEligibilityService;
+import com.team3.backend.recommendation.service.RecommendationFullScanReference;
+import com.team3.backend.recommendation.service.RecommendationInterestMatcher;
 import com.team3.backend.recommendation.service.RecommendationSelectionService;
+import com.team3.backend.eligibility.service.EligibilityProfileService;
+import com.team3.backend.preference.service.PreferenceService;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
 import com.team3.backend.user.domain.entity.Role;
@@ -97,6 +103,11 @@ class RecommendationPostgresIntegrationTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private RegionDirectory regionDirectory;
     @Autowired private RecommendationSelectionService selectionService;
+    @Autowired private EligibilityProfileService profileService;
+    @Autowired private RecommendationCandidateService candidateService;
+    @Autowired private RecommendationInterestMatcher interestMatcher;
+    @Autowired private RecommendationEligibilityService eligibilityService;
+    @Autowired private PreferenceService preferenceService;
 
     @AfterEach
     void clearRegionIndex() {
@@ -250,12 +261,12 @@ class RecommendationPostgresIntegrationTest {
         List<Long> largeBatch;
         try {
             statistics.clear();
-            smallBatch = selectionService.select(owner.getId(), 2, TODAY).stream()
+            smallBatch = fullScanReference().select(owner.getId(), 2, TODAY).stream()
                     .map(item -> item.candidate().opportunityId()).toList();
             long smallBatchStatements = statistics.getPrepareStatementCount();
             entityManager.clear();
             statistics.clear();
-            largeBatch = selectionService.select(owner.getId(), 100, TODAY).stream()
+            largeBatch = fullScanReference().select(owner.getId(), 100, TODAY).stream()
                     .map(item -> item.candidate().opportunityId()).toList();
             long largeBatchStatements = statistics.getPrepareStatementCount();
             assertTrue(smallBatchStatements > largeBatchStatements);
@@ -265,6 +276,10 @@ class RecommendationPostgresIntegrationTest {
             statistics.setStatisticsEnabled(previouslyEnabled);
         }
         assertEquals(largeBatch, smallBatch);
+        // 운영 경로(DB 그룹별 상위 후보)도 뒤 배치의 마감 임박 공고를 포함해 같은 결과를 낸다
+        entityManager.clear();
+        assertEquals(smallBatch, selectionService.select(owner.getId(), TODAY).stream()
+                .map(item -> item.candidate().opportunityId()).toList());
         assertEquals(5, smallBatch.size());
         assertEquals(late.getId(), smallBatch.getFirst());
         assertEquals(5, smallBatch.stream().distinct().count());
@@ -326,7 +341,9 @@ class RecommendationPostgresIntegrationTest {
             assertTrue(oneItemSql.stream().anyMatch(sql -> sql.contains("user_opportunity_preferences")));
             assertTrue(oneItemSql.stream().anyMatch(sql -> sql.contains("opportunity_regions")));
             assertTrue(oneItemSql.stream().anyMatch(sql -> sql.contains("opportunity_versions")));
-            assertTrue(oneItemSql.stream().allMatch(sql -> sql.stripLeading().toLowerCase().startsWith("select")));
+            // 읽기 전용: SELECT 또는 쓰기가 없는 CTE 조회(그룹별 상위 후보)만 실행된다
+            assertTrue(oneItemSql.stream().map(sql -> sql.stripLeading().toLowerCase()).allMatch(sql -> sql.startsWith("select")
+                    || (sql.startsWith("with") && !sql.matches("(?s).*\\b(insert|update|delete|merge)\\b.*"))));
             assertEquals(oneItemStatements + 1, coldStatements);
             System.out.println("RECOMMENDATION_SQL_TABLES " + oneItemSql.stream()
                     .map(sql -> {
@@ -356,6 +373,12 @@ class RecommendationPostgresIntegrationTest {
             SqlCapture.stop();
             statistics.setStatisticsEnabled(previouslyEnabled);
         }
+    }
+
+    /** 운영 경로 이전의 전체 후보 순회 참조 구현 (배치 크기와 무관한 결과·SQL 수 비교용) */
+    private RecommendationFullScanReference fullScanReference() {
+        return new RecommendationFullScanReference(profileService, candidateService, interestMatcher,
+                eligibilityService, preferenceService);
     }
 
     private List<Map<String, Object>> recommendations(User owner) throws Exception {

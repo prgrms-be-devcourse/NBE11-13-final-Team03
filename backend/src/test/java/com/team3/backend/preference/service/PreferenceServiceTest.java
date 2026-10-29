@@ -376,34 +376,35 @@ class PreferenceServiceTest {
     }
 
     @Test
-    void hiddenOpportunityIdsAreScopedToUserAndCandidatesWithOneQuery() {
+    void hiddenOpportunityIdsAreScopedToUserWithOneQuery() {
         Long userId = createUser(211L);
         Long otherUserId = createUser(212L);
+        Long noHiddenUserId = createUser(216L);
         Long hiddenId = createOpportunity("Hidden candidate");
         Long bothId = createOpportunity("Saved and hidden candidate");
         Long savedOnlyId = createOpportunity("Saved candidate");
         Long otherUserHiddenId = createOpportunity("Other user's hidden candidate");
-        Long outsideCandidatesId = createOpportunity("Hidden outside candidates");
+        Long unhiddenId = createOpportunity("Hidden then restored");
 
         preferenceService.hide(userId, hiddenId);
         preferenceService.save(userId, bothId);
         preferenceService.hide(userId, bothId);
         preferenceService.save(userId, savedOnlyId);
         preferenceService.hide(otherUserId, otherUserHiddenId);
-        preferenceService.hide(userId, outsideCandidatesId);
+        preferenceService.hide(userId, unhiddenId);
+        preferenceService.unhide(userId, unhiddenId);
 
         Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         boolean statisticsEnabled = statistics.isStatisticsEnabled();
         statistics.setStatisticsEnabled(true);
         try {
             long beforeEmpty = statistics.getPrepareStatementCount();
-            assertEquals(Set.of(), preferenceService.getHiddenOpportunityIds(userId, List.of()));
-            assertEquals(0, statistics.getPrepareStatementCount() - beforeEmpty);
+            assertEquals(Set.of(), preferenceService.getHiddenOpportunityIds(noHiddenUserId));
+            assertEquals(1, statistics.getPrepareStatementCount() - beforeEmpty);
 
-            long beforeCandidates = statistics.getPrepareStatementCount();
-            assertEquals(Set.of(hiddenId, bothId), preferenceService.getHiddenOpportunityIds(userId,
-                    List.of(hiddenId, bothId, bothId, savedOnlyId, otherUserHiddenId, Long.MAX_VALUE)));
-            assertEquals(1, statistics.getPrepareStatementCount() - beforeCandidates);
+            long beforeAll = statistics.getPrepareStatementCount();
+            assertEquals(Set.of(hiddenId, bothId), preferenceService.getHiddenOpportunityIds(userId));
+            assertEquals(1, statistics.getPrepareStatementCount() - beforeAll);
         } finally {
             statistics.setStatisticsEnabled(statisticsEnabled);
         }

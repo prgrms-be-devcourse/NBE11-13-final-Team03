@@ -85,18 +85,14 @@ public interface UserOpportunityPreferenceRepository
             @Param("opportunityIds") Collection<Long> opportunityIds
     );
 
-    /** 지정한 공고 중 저장 여부와 관계없이 숨긴 공고 ID만 조회한다. */
+    /** 사용자가 저장 여부와 관계없이 숨긴 공고 ID 전체를 조회한다. */
     @Query("""
         select preference.opportunity.id
         from UserOpportunityPreference preference
         where preference.user.id = :userId
-          and preference.opportunity.id in :opportunityIds
           and preference.isHidden = true
         """)
-    List<Long> findHiddenOpportunityIds(
-            @Param("userId") Long userId,
-            @Param("opportunityIds") Collection<Long> opportunityIds
-    );
+    List<Long> findHiddenOpportunityIds(@Param("userId") Long userId);
 
     /** 공고를 저장한 사용자 ID를 마지막 ID 이후부터 오름차순으로 조회한다. */
     @Query("""

@@ -21,7 +21,6 @@ import java.util.Set;
 public class RecommendationService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final int CANDIDATE_BATCH_SIZE = 100;
 
     private final RecommendationSelectionService selectionService;
     private final RecommendationReasonService reasonService;
@@ -35,7 +34,7 @@ public class RecommendationService {
     }
 
     List<RecommendationItemDto> recommend(Long userId, LocalDate today) {
-        List<RecommendationEligibleCandidate> selected = selectionService.select(userId, CANDIDATE_BATCH_SIZE, today);
+        List<RecommendationEligibleCandidate> selected = selectionService.select(userId, today);
         if (selected.isEmpty()) {
             return List.of();
         }

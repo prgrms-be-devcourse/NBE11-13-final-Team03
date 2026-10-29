@@ -31,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,13 +49,14 @@ class RecommendationSelectionServiceTest {
     @Mock private EligibilityProvider eligibilityProvider;
     @Mock private PreferenceService preferenceService;
 
-    private RecommendationSelectionService service;
+    /** 그룹·정렬·혼합 규칙은 운영 RecommendationSelectionService.TopCandidates를 그대로 쓰는 전체 순회 참조 구현으로 검증한다 */
+    private RecommendationFullScanReference service;
 
     @BeforeEach
     void setUp() {
         var matcher = new RecommendationInterestMatcher(userInterestService);
         var eligibility = new RecommendationEligibilityService(eligibilityProvider);
-        service = new RecommendationSelectionService(profileService, candidateService, matcher,
+        service = new RecommendationFullScanReference(profileService, candidateService, matcher,
                 eligibility, preferenceService);
     }
 
@@ -173,6 +176,20 @@ class RecommendationSelectionServiceTest {
     }
 
     @Test
+    void hiddenIdsAreLoadedOnceAndAppliedToEveryBatch() {
+        List<RecommendationCandidate> candidates = List.of(
+                policy(1, "other", 1, 20), policy(2, "other", 2, 20),
+                policy(3, "other", 3, 20), policy(4, "other", 4, 20));
+        setup(candidates, Map.of(1L, EligibilityStatus.ELIGIBLE, 2L, EligibilityStatus.ELIGIBLE,
+                3L, EligibilityStatus.ELIGIBLE, 4L, EligibilityStatus.ELIGIBLE), Set.of(1L, 4L), true);
+
+        assertEquals(List.of(2L, 3L), ids(service.select(USER_ID, 1, TODAY)));
+        verify(preferenceService, times(1)).getHiddenOpportunityIds(USER_ID);
+        verify(eligibilityProvider, never()).findFreshStatuses(USER_ID, List.of(1L), TODAY);
+        verify(eligibilityProvider, never()).findFreshStatuses(USER_ID, List.of(4L), TODAY);
+    }
+
+    @Test
     void policyDeadlineAndNewBoundariesAreStable() {
         List<RecommendationCandidate> candidates = List.of(
                 policy(1, "high", 15, 8), policy(2, "high", 14, 8),
@@ -262,7 +279,7 @@ class RecommendationSelectionServiceTest {
                             .sorted(java.util.Comparator.comparing(RecommendationCandidate::opportunityId))
                             .limit(size).toList();
                 });
-        when(preferenceService.getHiddenOpportunityIds(eq(USER_ID), anyList())).thenReturn(hidden);
+        when(preferenceService.getHiddenOpportunityIds(USER_ID)).thenReturn(hidden);
         when(eligibilityProvider.findFreshStatuses(eq(USER_ID), anyList(), eq(TODAY)))
                 .thenAnswer(invocation -> {
                     List<Long> ids = invocation.getArgument(1);
