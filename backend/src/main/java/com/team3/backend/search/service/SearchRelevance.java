@@ -1,11 +1,12 @@
 package com.team3.backend.search.service;
 
+import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
+import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.opportunity.domain.entity.YouthPolicyDetail;
 import com.team3.backend.opportunity.domain.repository.ApplicationStatusSpecifications;
-import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.search.domain.repository.SearchSqlFunctions;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
@@ -202,18 +203,24 @@ final class SearchRelevance {
         Predicate upcomingCourse = criteriaBuilder.and(
                 criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.VOCATIONAL_TRAINING),
                 criteriaBuilder.exists(startsLater));
+        // 도메인 상태 판정(OPEN > ALWAYS_OPEN > UPCOMING > CLOSED > UNKNOWN)을 신청기간 한 번 조회로 계산한다.
+        // 신청기간마다 해당하는 가장 앞선 상태의 우선순위를 매기고 가장 작은 값을 고른다 (해당 없음은 NULL).
+        // 상태별 EXISTS(ApplicationStatusSpecifications.hasStatus)를 나열하면 부정 조건까지 10개의 하위 질의가
+        // 생기고 각각 신청기간 전체를 읽는다. 판정 조건은 같은 클래스의 신청기간 단위 판정을 그대로 쓴다.
+        Subquery<Integer> windowPriority = query.subquery(Integer.class);
+        Root<ApplicationWindow> window = windowPriority.from(ApplicationWindow.class);
+        Expression<Integer> priority = criteriaBuilder.<Integer>selectCase()
+                .when(ApplicationStatusSpecifications.open(window, criteriaBuilder, today), 0)
+                .when(ApplicationStatusSpecifications.always(window, criteriaBuilder), 0)
+                .when(ApplicationStatusSpecifications.upcoming(window, criteriaBuilder, today), 1)
+                .when(ApplicationStatusSpecifications.closed(window, criteriaBuilder, today), 3)
+                .otherwise(criteriaBuilder.nullLiteral(Integer.class));
+        windowPriority.select(criteriaBuilder.min(priority)).where(
+                criteriaBuilder.equal(window.get("version"), root.get("currentVersion")),
+                criteriaBuilder.equal(window.get("validationStatus"), ValidationStatus.VALID));
         return criteriaBuilder.<Integer>selectCase()
                 .when(upcomingCourse, 0)
-                .when(status(root, query, criteriaBuilder, ApplicationStatus.OPEN, today), 0)
-                .when(status(root, query, criteriaBuilder, ApplicationStatus.ALWAYS_OPEN, today), 0)
-                .when(status(root, query, criteriaBuilder, ApplicationStatus.UPCOMING, today), 1)
-                .when(status(root, query, criteriaBuilder, ApplicationStatus.CLOSED, today), 3)
-                .otherwise(2);
-    }
-
-    private static Predicate status(Root<Opportunity> root, CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder,
-                                    ApplicationStatus status, LocalDate today) {
-        return ApplicationStatusSpecifications.hasStatus(status, today).toPredicate(root, query, criteriaBuilder);
+                .otherwise(criteriaBuilder.coalesce(windowPriority, 2));
     }
 
     private static Expression<String> replaceAll(CriteriaBuilder criteriaBuilder, Expression<String> value,
