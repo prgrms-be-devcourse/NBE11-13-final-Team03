@@ -46,6 +46,38 @@ class ImportPlanTests(unittest.TestCase):
                 elif mutation == "duplicate": broken["planned_values"]["root_module"]["child_modules"].append({"resources": [copy.deepcopy(planned[0])]})
                 with self.assertRaises(ValueError): guard.check(broken, "after" if mutation == "after" else "import")
 
+    def test_only_approved_http_reimport_may_accompany_moves(self):
+        targets = copy.deepcopy(guard.expected_targets())
+        target = targets[guard.MAIN_HTTP_TARGET]
+        target["import_id"] = guard.MAIN_HTTP_NEW_ID
+        target["values"].update(id=guard.MAIN_HTTP_NEW_ID, cidr_ipv4=None, prefix_list_id=guard.MAIN_HTTP_PREFIX)
+        plan = valid_plan("after")
+        previous = {v: k for k, v in json.loads(guard.ADDRESS_MOVES.read_text()).items()}
+        prior = []
+        for resource, change in zip(plan["planned_values"]["root_module"]["resources"], plan["resource_changes"]):
+            resource["values"] = copy.deepcopy(targets[resource["address"]]["values"])
+            resource["values"].setdefault("id", targets[resource["address"]]["import_id"])
+            if resource["address"] == guard.MAIN_HTTP_TARGET:
+                change["change"]["importing"] = {"id": guard.MAIN_HTTP_NEW_ID}
+            else:
+                change["previous_address"] = previous[resource["address"]]
+                prior.append({"address": previous[resource["address"]], "values": copy.deepcopy(resource["values"])})
+        plan["prior_state"] = {"values": {"root_module": {"resources": prior}}}
+        self.assertEqual(guard.check(plan, "import", targets, rebind_main_http=True), len(targets))
+        with self.assertRaisesRegex(ValueError, "Do not mix"):
+            guard.check(plan, "import", targets)
+        for mutation in ("extra_import", "wrong_id", "wide_source", "not_forgotten", "update", "after"):
+            with self.subTest(mutation=mutation):
+                broken, expected = copy.deepcopy(plan), copy.deepcopy(targets)
+                main = next(r for r in broken["resource_changes"] if r["address"] == guard.MAIN_HTTP_TARGET)
+                if mutation == "extra_import": broken["resource_changes"][0]["change"]["importing"] = {"id": "unexpected"}
+                elif mutation == "wrong_id": main["change"]["importing"]["id"] = guard.MAIN_HTTP_OLD_ID
+                elif mutation == "wide_source": expected[guard.MAIN_HTTP_TARGET]["values"].update(cidr_ipv4="0.0.0.0/0")
+                elif mutation == "not_forgotten": broken["prior_state"]["values"]["root_module"]["resources"].append({"address": guard.MAIN_HTTP_SOURCE, "values": {"id": guard.MAIN_HTTP_OLD_ID}})
+                elif mutation == "update": main["change"]["actions"] = ["update"]
+                with self.assertRaises(ValueError):
+                    guard.check(broken, "after" if mutation == "after" else "import", expected, rebind_main_http=True)
+
     def test_move_manifest_matches_retained_hcl_declarations(self):
         moves = json.loads(guard.ADDRESS_MOVES.read_text())
         text = (guard.ADDRESS_MOVES.parents[1] / "terraform/moved.tf").read_text()

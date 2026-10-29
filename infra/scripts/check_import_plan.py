@@ -54,13 +54,30 @@ def expected_targets():
             add(f'aws_vpc_security_group_{direction}_rule.existing["{key}"]', rule["id"],
                 id=rule["id"], security_group_id=n["security_groups"][rule["group"]]["id"],
                 ip_protocol=rule["ip_protocol"], from_port=rule.get("from_port"), to_port=rule.get("to_port"),
-                cidr_ipv4=rule.get("cidr_ipv4"), cidr_ipv6=None, prefix_list_id=None,
+                cidr_ipv4=rule.get("cidr_ipv4"), cidr_ipv6=None, prefix_list_id=rule.get("prefix_list_id"),
                 referenced_security_group_id=n["security_groups"][peer]["id"] if peer else None,
                 description=rule.get("description"), tags=rule["tags"])
     return remap_targets(targets)
 
 
-def check(plan, phase, targets=None):
+MAIN_HTTP_SOURCE = 'aws_vpc_security_group_ingress_rule.existing["main_http"]'
+MAIN_HTTP_TARGET = 'module.main.aws_vpc_security_group_ingress_rule.this["main_http"]'
+MAIN_HTTP_OLD_ID = "sgr-05f5a7aabab29ed7d"
+MAIN_HTTP_NEW_ID = "sgr-01e8cd7a85445657c"
+MAIN_HTTP_PREFIX = "pl-22a6434b"
+
+
+def require_cloudfront_target(targets):
+    target = targets.get(MAIN_HTTP_TARGET, {})
+    values = target.get("values", {})
+    if (target.get("import_id") != MAIN_HTTP_NEW_ID or values.get("id") != MAIN_HTTP_NEW_ID
+            or values.get("prefix_list_id") != MAIN_HTTP_PREFIX or values.get("cidr_ipv4") is not None
+            or values.get("referenced_security_group_id") is not None
+            or values.get("ip_protocol") != "tcp" or values.get("from_port") != 8080 or values.get("to_port") != 8080):
+        raise ValueError("Rebinding requires the reviewed CloudFront-only main HTTP snapshot")
+
+
+def check(plan, phase, targets=None, *, rebind_main_http=False):
     if phase not in {"import", "after"}:
         raise ValueError("Unknown phase")
     if plan.get("errored") or plan.get("complete") is not True or plan.get("deferred_changes"):
@@ -83,7 +100,16 @@ def check(plan, phase, targets=None):
     if len(prior_resources) != len(prior):
         raise ValueError("Duplicate prior-state addresses")
     moves = json.loads(ADDRESS_MOVES.read_text(encoding="utf-8"))
-    if any(r.get("previous_address") for r in changes) and any(r["change"].get("importing") for r in changes):
+    imports = [r for r in changes if r["change"].get("importing")]
+    if rebind_main_http:
+        require_cloudfront_target(expected)
+        if MAIN_HTTP_SOURCE in prior:
+            raise ValueError("The stale main HTTP binding must be forgotten before re-import")
+        if (phase != "import" or len(imports) != 1 or imports[0]["address"] != MAIN_HTTP_TARGET
+                or imports[0].get("previous_address")
+                or imports[0]["change"]["importing"].get("id") != MAIN_HTTP_NEW_ID):
+            raise ValueError("Only the approved main HTTP re-import may accompany address moves")
+    elif any(r.get("previous_address") for r in changes) and imports:
         raise ValueError("Do not mix state address moves and new imports")
     for resource in changes:
         address = resource["address"]
@@ -122,11 +148,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("plan_json", type=Path, help="Private terraform show -json output")
     parser.add_argument("--phase", choices=("import", "after"), required=True)
+    parser.add_argument("--rebind-main-http", action="store_true", help="Allow only the approved main HTTP re-import with moves")
     parser.add_argument("--targets", type=Path, help="Private targets.json produced by prepare_import.py")
     args = parser.parse_args()
     try:
         targets = json.loads(args.targets.read_text(encoding="utf-8")) if args.targets else None
-        count = check(json.loads(args.plan_json.read_text(encoding="utf-8-sig")), args.phase, targets)
+        count = check(json.loads(args.plan_json.read_text(encoding="utf-8-sig")), args.phase, targets, rebind_main_http=args.rebind_main_http)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         parser.exit(1, f"STOP: {error}\n")
     print(f"PASS: {count} exact targets, phase={args.phase}, no AWS resource changes")

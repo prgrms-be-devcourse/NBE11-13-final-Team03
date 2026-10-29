@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "infra/scripts"))
 from check_import_plan import ADDRESS_MOVES, check
 from prepare_import import prepare
+from adopt_infrastructure import main_http_rebind
+from check_import_plan import MAIN_HTTP_SOURCE, MAIN_HTTP_OLD_ID
 sys.path.insert(0, str(ROOT / "infra/tests"))
 from import_fixture import make_inventory
 
@@ -122,6 +124,29 @@ def verify(mock_log, terraform):
         saved = work / "after.tfplan"
         run("plan", "-refresh=false", "-input=false", f"-var-file={variables}", f"-out={saved}")
         check(json.loads(run("show", "-json", str(saved))), "after", targets)
+        # Real Terraform state-rm on a private synthetic copy must remove exactly one binding.
+        stale = work / "stale.tfstate"
+        raw = {"version": 4, "terraform_version": "1.17.0", "serial": 1,
+               "lineage": str(uuid.uuid4()), "outputs": {}, "resources": list(resources.values())}
+        for resource in raw["resources"]:
+            if resource["type"] == "aws_vpc_security_group_ingress_rule" and resource["name"] == "existing":
+                for item in resource["instances"]:
+                    if item["index_key"] == "main_http":
+                        item["attributes"].update(id=MAIN_HTTP_OLD_ID, cidr_ipv4="0.0.0.0/0", prefix_list_id=None)
+        stale.write_text(json.dumps(raw), encoding="utf-8")
+        assert main_http_rebind(stale, targets)["old_id"] == MAIN_HTTP_OLD_ID
+        original = stale.read_bytes()
+        preview = work / "private-preview.tfstate"
+        shutil.copyfile(stale, preview)
+        run("state", "rm", f"-state={preview}", MAIN_HTTP_SOURCE)
+        assert stale.read_bytes() == original
+        def bindings(raw):
+            return {(r["type"], r["name"], i.get("index_key")): i["attributes"]["id"]
+                    for r in raw["resources"] for i in r["instances"]}
+        before = bindings(raw)
+        del before[("aws_vpc_security_group_ingress_rule", "existing", "main_http")]
+        assert bindings(json.loads(preview.read_text())) == before
+        print("PASS: native state rm forgets only the approved stale binding in a private copy; original unchanged")
         print(f"PASS: {len(targets)} synthetic state objects, {len(moves)} exact moves, no AWS changes or pending imports; post-apply no changes")
 
 

@@ -102,7 +102,7 @@ override_resource {
 
 override_resource {
   target = module.main.aws_vpc_security_group_ingress_rule.this["main_http"]
-  values = { "region" : "ap-northeast-2", "id" : "sgr-05f5a7aabab29ed7d", "security_group_id" : "sg-0fbaf2496d1edd1ed", "ip_protocol" : "tcp", "from_port" : 8080, "to_port" : 8080, "cidr_ipv4" : "0.0.0.0/0", "cidr_ipv6" : null, "prefix_list_id" : null, "referenced_security_group_id" : null, "description" : null, "tags" : {} }
+  values = { "region" : "ap-northeast-2", "id" : "sgr-01e8cd7a85445657c", "security_group_id" : "sg-0fbaf2496d1edd1ed", "ip_protocol" : "tcp", "from_port" : 8080, "to_port" : 8080, "cidr_ipv4" : null, "cidr_ipv6" : null, "prefix_list_id" : "pl-22a6434b", "referenced_security_group_id" : null, "description" : "CloudFront origin-facing only (2026-10-29)", "tags" : {} }
 }
 
 override_resource {

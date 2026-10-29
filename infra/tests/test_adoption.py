@@ -136,6 +136,109 @@ class AdoptionTests(unittest.TestCase):
             plan["resource_changes"][-1]["change"]["actions"] = ["update"]
             with self.assertRaisesRegex(ValueError, "forbidden"): check_import_plan.check(plan, "import", targets)
 
+    def test_rebind_requires_exact_reviewed_snapshot_and_stale_flat_binding(self):
+        from check_import_plan import (expected_targets, MAIN_HTTP_SOURCE, MAIN_HTTP_TARGET,
+                                       MAIN_HTTP_NEW_ID, MAIN_HTTP_OLD_ID, MAIN_HTTP_PREFIX)
+        targets = copy.deepcopy(expected_targets())
+        target = targets[MAIN_HTTP_TARGET]
+        target["import_id"] = MAIN_HTTP_NEW_ID
+        target["values"].update(id=MAIN_HTTP_NEW_ID, cidr_ipv4=None, prefix_list_id=MAIN_HTTP_PREFIX)
+        attributes = {**target["values"], "id": MAIN_HTTP_OLD_ID, "cidr_ipv4": "0.0.0.0/0", "prefix_list_id": None}
+        raw = {"resources": [{"mode": "managed", "type": "aws_vpc_security_group_ingress_rule", "name": "existing",
+                              "instances": [{"index_key": "main_http", "attributes": attributes}]}]}
+        with tempfile.TemporaryDirectory() as path:
+            state = Path(path) / "terraform.tfstate"
+            state.write_text(json.dumps(raw), encoding="utf-8")
+            original = state.read_bytes()
+            result = adopt_infrastructure.main_http_rebind(state, targets)
+            self.assertEqual(result, {"address": MAIN_HTTP_SOURCE, "old_id": MAIN_HTTP_OLD_ID, "new_id": MAIN_HTTP_NEW_ID})
+            self.assertEqual(state.read_bytes(), original)
+            unreviewed = copy.deepcopy(targets)
+            unreviewed[MAIN_HTTP_TARGET]["values"]["prefix_list_id"] = None
+            with self.assertRaises(ValueError): adopt_infrastructure.main_http_rebind(state, unreviewed)
+            for key, value in (("id", "sgr-unapproved"), ("from_port", 22), ("cidr_ipv4", "10.0.0.0/8")):
+                broken = copy.deepcopy(raw)
+                broken["resources"][0]["instances"][0]["attributes"][key] = value
+                state.write_text(json.dumps(broken), encoding="utf-8")
+                with self.assertRaises(ValueError): adopt_infrastructure.main_http_rebind(state, targets)
+            raw["resources"][0]["instances"][0]["attributes"]["id"] = MAIN_HTTP_NEW_ID
+            state.write_text(json.dumps(raw), encoding="utf-8")
+            self.assertIsNone(adopt_infrastructure.main_http_rebind(state, targets))
+
+    def test_rebind_preview_preserves_real_state_and_changed_plan_never_forgets(self):
+        from check_import_plan import expected_targets, ADDRESS_MOVES, MAIN_HTTP_SOURCE, MAIN_HTTP_TARGET, MAIN_HTTP_OLD_ID
+        targets = expected_targets()
+        for changed, apply in ((False, False), (True, True), (False, True)):
+            with self.subTest(changed=changed, apply=apply), tempfile.TemporaryDirectory() as path:
+                root = Path(path) / "checkout"
+                (root / "infra/terraform").mkdir(parents=True)
+                state_dir = Path(path) / "state"
+                state_dir.mkdir()
+                state = state_dir / "terraform.tfstate"
+                old_values = {**targets[MAIN_HTTP_TARGET]["values"], "id": MAIN_HTTP_OLD_ID,
+                              "cidr_ipv4": "0.0.0.0/0", "prefix_list_id": None}
+                state.write_text(json.dumps({"resources": [{"mode": "managed", "type": "aws_vpc_security_group_ingress_rule",
+                    "name": "existing", "instances": [{"index_key": "main_http", "attributes": old_values}]}]}), encoding="utf-8")
+                original = state.read_bytes()
+                calls = []
+                class Collector:
+                    def collect(self, *_): return True
+                def run(command, **kwargs):
+                    calls.append(command)
+                    operation = command[2]
+                    if operation == "version": kwargs["stdout"].write(b'{"terraform_version":"1.17.0"}')
+                    elif operation == "state":
+                        self.assertEqual(command[3], "rm")
+                        self.assertEqual(command[-1], MAIN_HTTP_SOURCE)
+                        # Planning uses only a private copy, even when --apply later rejects its preview.
+                        if not any(x.startswith("-state=") for x in command):
+                            self.assertTrue(apply and not changed)
+                            state.write_text('{"resources": []}', encoding="utf-8")
+                        else:
+                            self.assertTrue(any(x.startswith("-state=") and "rebind-preview.tfstate" in x for x in command))
+                    elif operation == "plan": Path(next(x[5:] for x in command if x.startswith("-out="))).write_bytes(b"plan")
+                    elif operation == "show":
+                        moves = {v: k for k, v in json.loads(ADDRESS_MOVES.read_text()).items()}
+                        resources, changes, prior = [], [], []
+                        for address, target in targets.items():
+                            values = {"id": target["import_id"], **target["values"]}
+                            resources.append({"address": address, "values": values})
+                            change = {"address": address, "mode": "managed", "provider_name": "registry.terraform.io/hashicorp/aws",
+                                      "change": {"actions": ["update"] if changed else ["no-op"]}}
+                            if Path(command[-1]).stem == "after-plan":
+                                prior.append({"address": address, "values": values})
+                            elif address == MAIN_HTTP_TARGET: change["change"]["importing"] = {"id": target["import_id"]}
+                            else:
+                                change["previous_address"] = moves[address]
+                                prior.append({"address": moves[address], "values": values})
+                            changes.append(change)
+                        kwargs["stdout"].write(json.dumps({"complete": True, "resource_changes": changes,
+                            "planned_values": {"root_module": {"resources": resources}},
+                            "prior_state": {"values": {"root_module": {"resources": prior}}}}).encode())
+                    elif operation == "apply":
+                        self.assertTrue(apply and not changed)
+                        updated = copy.deepcopy(old_values)
+                        updated.update(targets[MAIN_HTTP_TARGET]["values"])
+                        state.write_text(json.dumps({"resources": [{"module": "module.main", "mode": "managed",
+                            "type": "aws_vpc_security_group_ingress_rule", "name": "this",
+                            "instances": [{"index_key": "main_http", "attributes": updated}]}]}), encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0)
+                with patch.object(adopt_infrastructure, "ROOT", root), patch.object(adopt_infrastructure, "Collector", Collector), \
+                     patch.object(adopt_infrastructure, "prepare", return_value=({}, targets)), \
+                     patch.object(adopt_infrastructure.shutil, "which", return_value="terraform"), \
+                     patch.object(adopt_infrastructure.subprocess, "run", side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+                    if changed:
+                        with self.assertRaisesRegex(ValueError, "forbidden"):
+                            adopt_infrastructure.execute(state_dir, apply=True, rebind_main_http=True)
+                    else: adopt_infrastructure.execute(state_dir, apply=apply, rebind_main_http=True)
+                if apply and not changed:
+                    self.assertNotEqual(state.read_bytes(), original)
+                    self.assertEqual(sum(c[2] == "state" for c in calls), 2)
+                    self.assertIsNone(adopt_infrastructure.main_http_rebind(state, targets))
+                else:
+                    self.assertEqual(state.read_bytes(), original)
+                    self.assertEqual(sum(c[2] == "state" for c in calls), 1)
+
     def test_batch_never_applies_a_changed_plan_and_keeps_logs_private(self):
         for changed, moving in ((False, False), (True, False), (False, True)):
             with self.subTest(changed=changed, moving=moving), tempfile.TemporaryDirectory() as path:

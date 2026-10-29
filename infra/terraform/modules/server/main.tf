@@ -50,11 +50,22 @@ resource "aws_vpc_security_group_ingress_rule" "this" {
   from_port                    = each.value.from_port
   to_port                      = each.value.to_port
   cidr_ipv4                    = try(each.value.cidr_ipv4, null)
+  prefix_list_id               = try(each.value.prefix_list_id, null)
   referenced_security_group_id = try(var.peer_sg_ids[each.value.referenced_group], null)
   description                  = try(each.value.description, null)
   tags                         = length(each.value.tags) > 0 ? each.value.tags : null
 
-  lifecycle { prevent_destroy = true }
+  lifecycle {
+    prevent_destroy = true
+    precondition {
+      condition = length(compact([
+        try(each.value.cidr_ipv4, ""),
+        try(each.value.prefix_list_id, ""),
+        try(each.value.referenced_group, "")
+      ])) == 1
+      error_message = "Each ingress rule must have exactly one CIDR, prefix list or peer security group."
+    }
+  }
 }
 
 resource "aws_vpc_security_group_egress_rule" "this" {

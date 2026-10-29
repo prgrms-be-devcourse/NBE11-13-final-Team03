@@ -8,7 +8,7 @@ PR #103에서 네트워크·IAM·프론트·EC2의 기존 자원 import를 한 �
 
 ## 모듈 경계와 기존 state
 
-운영 import는 완료 기록을 확인하지 못했다. #111을 반영한 main의 flat 구성으로 import·사후 확인·서버 밖 state 백업·권한 회수를 마친 뒤, 이 모듈화 PR을 병합하고 담당자가 기존 state의 주소를 전환한다. [주소 전환 절차](module-migration.md)를 따른다.
+운영 담당자가 #111에 main `e671dfe` 기준 flat import 완료(52개, 2026-10-29 14:42 KST)와 사후 무변경·외부 백업·권한 회수를 기록했다. 이후 콘솔에서 교체된 main 8080 규칙 한 건은 `--rebind-main-http`로 안전하게 재등록한다. 병합 전 실제 state 계획을 담당자가 검증·승인한 뒤 병합하고 같은 state 경로로 적용한다. [주소 전환 절차](module-migration.md)를 따른다.
 
 | 경계 | 소유 대상 |
 | --- | --- |
