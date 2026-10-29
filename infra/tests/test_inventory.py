@@ -162,6 +162,18 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(collector.query("broken", "ec2", "describe-instances"), {})
         self.assertEqual(collector.results["broken"]["status"], "error")
 
+    def test_empty_versioning_response_means_never_versioned(self):
+        collector = inventory.Collector()
+        with patch.object(inventory.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")):
+            self.assertEqual(collector.query("s3/get-bucket-versioning", "s3api", "get-bucket-versioning", empty_ok=True), {})
+        self.assertEqual(collector.results["s3/get-bucket-versioning"]["status"], "ok")
+
+    def test_empty_response_is_a_failure_unless_explicitly_allowed(self):
+        collector = inventory.Collector()
+        with patch.object(inventory.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")):
+            self.assertEqual(collector.query("vpc", "ec2", "describe-vpcs"), {})
+        self.assertEqual(collector.results["vpc"]["status"], "error")
+
     def test_missing_target_distribution_is_not_a_complete_inventory(self):
         def response(args, **kwargs):
             if args[2] == "list-distributions":
