@@ -41,9 +41,16 @@ export const sortLabels: Record<SearchSort, string> = {
   DEADLINE_PRIORITY: '정책 마감 우선순', START_DATE_ASC: '교육 시작일 빠른순',
 }
 
-// 백엔드 기본 정렬과 같다. sort를 생략하면 검색어가 있을 때 관련도순, 없을 때 최신순이다.
+// 백엔드 SearchKeyword.hasTokens()와 같은 판정만 옮긴다: NFKC·소문자로 바꾼 뒤 단독 '+'·구분자·하이픈을 지우고
+// 남는 글자가 있어야 검색 토큰이 있다. 구분자로만 된 검색어(!!!, [, ())는 토큰이 없어 백엔드가 최신순으로 처리한다.
+const SEARCH_SEPARATORS = /[\s/,·・‧ᆞㆍ|()[\]{}「」『』<>"'`~!?:;&-]/gu
+export function hasSearchTokens(keyword: string): boolean {
+  return keyword.normalize('NFKC').toLowerCase().replace(/(?<![a-z+])\+/g, ' ').replace(SEARCH_SEPARATORS, '') !== ''
+}
+
+// 백엔드 기본 정렬과 같다. sort를 생략하면 검색 토큰이 있을 때 관련도순, 없을 때 최신순이다.
 export function defaultSort(keyword: string): SearchSort {
-  return keyword.trim() ? 'RELEVANCE' : 'LATEST'
+  return hasSearchTokens(keyword) ? 'RELEVANCE' : 'LATEST'
 }
 
 export function applicationStatusLabel(status: ApplicationStatus, type: SearchParams['type']): string {
@@ -59,9 +66,9 @@ export function defaultSearchParams(): SearchParams {
   }
 }
 
-// 관련도순은 검색어가 있을 때만 의미가 있다 (백엔드도 검색어 없이 요청하면 최신순으로 처리한다).
+// 관련도순은 검색 토큰이 있을 때만 의미가 있다 (백엔드도 토큰 없이 요청하면 최신순으로 처리한다).
 export function availableSorts(type: SearchParams['type'], keyword = ''): SearchSort[] {
-  return [...(keyword.trim() ? ['RELEVANCE' as const] : []), 'LATEST', 'OLDEST',
+  return [...(hasSearchTokens(keyword) ? ['RELEVANCE' as const] : []), 'LATEST', 'OLDEST',
     ...(type === 'YOUTH_POLICY' ? ['DEADLINE_PRIORITY' as const] : []),
     ...(type === 'VOCATIONAL_TRAINING' ? ['START_DATE_ASC' as const] : [])]
 }
@@ -152,7 +159,7 @@ export function serializeSearchParams(params: SearchParams): URLSearchParams {
   const selected = eligibilityStatuses.filter(status => params.eligibilityStatuses.includes(status))
   if (selected.length) url.set('eligibilityStatuses', selected.join(','))
   // 기본 정렬과 다를 때만 보낸다. 검색어가 있을 때 최신순은 sort=LATEST로 명시해야 관련도순과 구분된다.
-  const sort = params.sort === 'RELEVANCE' && !params.keyword.trim() ? 'LATEST' : params.sort
+  const sort = params.sort === 'RELEVANCE' && !hasSearchTokens(params.keyword) ? 'LATEST' : params.sort
   if (sort !== defaultSort(params.keyword)) url.set('sort', sort)
   if (params.page !== 0) url.set('page', String(params.page))
   if (params.size !== 10) url.set('size', String(params.size))

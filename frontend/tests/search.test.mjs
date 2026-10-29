@@ -5,7 +5,7 @@ import { QueryClient, QueryObserver } from '@tanstack/react-query'
 import { apiClient } from '../src/api/client.ts'
 import { ApiError } from '../src/api/ApiError.ts'
 import { getInterestOptions, isSearchResponse, searchOpportunities, searchQueryOptions } from '../src/api/opportunities.ts'
-import { availableSorts, changeSearchCategory, changeSearchConditions, changeSearchType, dateRangeError, defaultSearchParams, isValidDate, paginationPages, parseSearchParams, serializeSearchParams } from '../src/pages/opportunities/searchParams.ts'
+import { availableSorts, changeSearchCategory, changeSearchConditions, changeSearchType, dateRangeError, defaultSearchParams, defaultSort, hasSearchTokens, isValidDate, paginationPages, parseSearchParams, serializeSearchParams } from '../src/pages/opportunities/searchParams.ts'
 import { buildRegionTree, chooseRegionLevel, regionPath } from '../src/pages/profile/regionSelection.ts'
 
 const originalAdapter = apiClient.defaults.adapter
@@ -95,6 +95,32 @@ test('default sort follows the keyword like the backend and only non-default sor
   assert.equal(serializeSearchParams({ ...defaultSearchParams(), sort: 'RELEVANCE' }).get('sort'), null)
   assert.deepEqual(availableSorts('', '청년'), ['RELEVANCE', 'LATEST', 'OLDEST'])
   assert.deepEqual(availableSorts('YOUTH_POLICY', '청년'), ['RELEVANCE', 'LATEST', 'OLDEST', 'DEADLINE_PRIORITY'])
+})
+
+test('separator-only keywords have no search tokens and use LATEST like the backend', () => {
+  // 백엔드 SearchKeyword.hasTokens() 기준: 구분자·단독 '+'·하이픈만 있으면 토큰이 없다
+  for (const keyword of ['!!!', '[', '()', '+', '-', ' · ', 'ㆍ', '「」', '/,|']) {
+    assert.equal(hasSearchTokens(keyword), false, keyword)
+    assert.equal(defaultSort(keyword), 'LATEST', keyword)
+    assert.deepEqual(availableSorts('', keyword), ['LATEST', 'OLDEST'], keyword)
+    const parsed = parseSearchParams(new URLSearchParams({ keyword }))
+    assert.equal(parsed.params.sort, 'LATEST', keyword)
+    assert.equal(serializeSearchParams(parsed.params).get('sort'), null, keyword)
+    // 관련도순을 지정한 URL도 백엔드처럼 최신순으로 처리하고 오류로 보지 않는다
+    const relevance = parseSearchParams(new URLSearchParams({ keyword, sort: 'RELEVANCE' }))
+    assert.equal(relevance.params.sort, 'LATEST', keyword)
+    assert.deepEqual(relevance.notices, [], keyword)
+  }
+  for (const keyword of ['@#$', 'c++', '++', '１００％', '!!! 청년', 'ai']) {
+    assert.equal(hasSearchTokens(keyword), true, keyword)
+    assert.equal(defaultSort(keyword), 'RELEVANCE', keyword)
+  }
+  // 구분자만 있는 검색어로 바꾸면 기본 정렬이 최신순으로 따라가고, 직접 고른 정렬은 유지된다
+  const searched = changeSearchConditions(defaultSearchParams(), { keyword: '청년' })
+  assert.equal(changeSearchConditions(searched, { keyword: '!!!' }).sort, 'LATEST')
+  const oldest = changeSearchConditions(searched, { sort: 'OLDEST' })
+  assert.equal(changeSearchConditions(oldest, { keyword: '()' }).sort, 'OLDEST')
+  assert.equal(serializeSearchParams(changeSearchConditions(defaultSearchParams(), { keyword: '[', sort: 'LATEST' })).get('sort'), null)
 })
 
 test('keyword changes move only the default sort; explicitly chosen sorts are kept', () => {
