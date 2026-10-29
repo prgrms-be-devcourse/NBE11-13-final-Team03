@@ -1,4 +1,4 @@
-name: Infrastructure preparation
+name: Infrastructure validation
 
 on:
   pull_request:
@@ -23,17 +23,39 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Test read-only collector without AWS credentials
+      - name: Test inventory collector and import plan guard
         run: python3 -m unittest discover -s infra/tests -v
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: '1.17.0'
           terraform_wrapper: false
-      - name: Validate preparation configuration
+      - name: Validate network configuration without AWS credentials
         working-directory: infra/terraform
         run: |
-          terraform fmt -check
+          terraform fmt -check -recursive
           terraform init -input=false -lockfile=readonly
           terraform validate
-          # Preparation has no resources/imports. This does not verify AWS access.
-          terraform plan -input=false -refresh=false -detailed-exitcode
+          # Mock provider and explicit imported values; no real AWS plan/apply.
+          terraform test -json -verbose > "$RUNNER_TEMP/terraform-tests.jsonl"
+      - name: Require import-only actions in the mock plan
+        run: |
+          python3 - "$RUNNER_TEMP/terraform-tests.jsonl" <<'PY'
+          import json, pathlib, sys, tempfile
+          sys.path[:0] = ['infra/scripts', 'infra/tests']
+          from import_fixture import make_inventory
+          from prepare_import import prepare
+          with tempfile.TemporaryDirectory() as directory:
+              inventory, _ = make_inventory(pathlib.Path(directory))
+              config, targets = prepare(inventory)
+          assert json.loads(pathlib.Path('infra/terraform/tests/adoption.fixture.json').read_text())['adoption'] == config
+          plans = [entry['test_plan'] for line in pathlib.Path(sys.argv[1]).read_text().splitlines()
+                   if (entry := json.loads(line)).get('type') == 'test_plan']
+          assert plans, 'Terraform must emit a mock plan'
+          for plan in plans:
+              changes = plan['resource_changes']
+              assert len(changes) == len(targets) and {r['address'] for r in changes} == set(targets)
+              for resource in changes:
+                  assert resource['change']['actions'] == ['no-op'], resource['address']
+                  assert resource['change']['importing']['id'] == targets[resource['address']]['import_id'], resource['address']
+          print(f'PASS: {len(targets)} mock imports, zero create/update/delete actions')
+          PY

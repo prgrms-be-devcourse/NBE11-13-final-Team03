@@ -12,6 +12,14 @@ spec.loader.exec_module(inventory)
 
 
 class InventoryTests(unittest.TestCase):
+    def test_only_explicit_absence_codes_are_accepted(self):
+        for error_code, expected in (("NoSuchBucketPolicy", "absent"), ("AccessDenied", "error")):
+            result = subprocess.CompletedProcess([], 254, "", f"An error occurred ({error_code}) when calling the GetBucketPolicy operation")
+            collector = inventory.Collector()
+            with patch.object(inventory.subprocess, "run", return_value=result):
+                collector.query("policy", "s3api", "get-bucket-policy", absent_codes=("NoSuchBucketPolicy",))
+            self.assertEqual(collector.results["policy"]["status"], expected)
+
     def response(self, args, **kwargs):
         self.assertNotIn("--no-paginate", args)
         self.assertEqual(kwargs["env"]["AWS_PAGER"], "")

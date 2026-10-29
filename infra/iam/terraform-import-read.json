@@ -1,0 +1,58 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadEc2ImportDependenciesInSeoul",
+      "Effect": "Allow",
+      "Action": ["ec2:Describe*", "ec2:GetEbsEncryptionByDefault"],
+      "Resource": "*",
+      "Condition": {"StringEquals": {"aws:RequestedRegion": "ap-northeast-2"}}
+    },
+    {
+      "Sid": "ReadAdoptedRolesAndBindings",
+      "Effect": "Allow",
+      "Action": ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:ListInstanceProfilesForRole", "iam:ListRoleTags"],
+      "Resource": [
+        "arn:aws:iam::174170816230:role/team03-main-sqs",
+        "arn:aws:iam::174170816230:role/team03-data-sqs",
+        "arn:aws:iam::174170816230:role/team03-frontend-deploy"
+      ]
+    },
+    {
+      "Sid": "ReadAdoptedInstanceProfiles",
+      "Effect": "Allow",
+      "Action": ["iam:GetInstanceProfile", "iam:ListInstanceProfileTags"],
+      "Resource": ["arn:aws:iam::174170816230:instance-profile/team03-main-sqs", "arn:aws:iam::174170816230:instance-profile/team03-data-sqs"]
+    },
+    {
+      "Sid": "ReadAttachedManagedPolicyDocuments",
+      "Effect": "Allow",
+      "Action": ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListPolicyTags"],
+      "Resource": ["arn:aws:iam::174170816230:policy/*", "arn:aws:iam::aws:policy/*"]
+    },
+    {
+      "Sid": "ReadGithubOidcProvider",
+      "Effect": "Allow",
+      "Action": ["iam:GetOpenIDConnectProvider", "iam:ListOpenIDConnectProviderTags"],
+      "Resource": "arn:aws:iam::174170816230:oidc-provider/token.actions.githubusercontent.com"
+    },
+    {
+      "Sid": "ReadExistingFrontendBucketConfiguration",
+      "Effect": "Allow",
+      "Action": ["s3:GetBucket*", "s3:ListBucket", "s3:GetEncryptionConfiguration", "s3:GetAccelerateConfiguration", "s3:GetLifecycleConfiguration", "s3:GetReplicationConfiguration"],
+      "Resource": "arn:aws:s3:::yon-frontend-team03-174170816230-ap-northeast-2-an"
+    },
+    {
+      "Sid": "DiscoverExistingDistribution",
+      "Effect": "Allow",
+      "Action": ["cloudfront:ListDistributions"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadAdoptedFrontendResources",
+      "Effect": "Allow",
+      "Action": ["cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:GetOriginAccessControl", "cloudfront:DescribeFunction", "cloudfront:GetFunction", "cloudfront:ListTagsForResource"],
+      "Resource": ["arn:aws:cloudfront::174170816230:distribution/*", "arn:aws:cloudfront::174170816230:origin-access-control/E2JJZ8SZNVRWDC", "arn:aws:cloudfront::174170816230:function/yon-spa-rewrite"]
+    }
+  ]
+}

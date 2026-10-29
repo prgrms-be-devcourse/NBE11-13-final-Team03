@@ -1,0 +1,212 @@
+{
+  "account_id": "174170816230",
+  "egress_rules": {
+    "data": {
+      "cidr_ipv4": "0.0.0.0/0",
+      "group": "data",
+      "id": "sgr-06162a33efd262518",
+      "ip_protocol": "-1",
+      "tags": {}
+    },
+    "db": {
+      "cidr_ipv4": "0.0.0.0/0",
+      "group": "db",
+      "id": "sgr-0e4bf2af964175717",
+      "ip_protocol": "-1",
+      "tags": {}
+    },
+    "main": {
+      "cidr_ipv4": "0.0.0.0/0",
+      "group": "main",
+      "id": "sgr-05c778c6d5e5cdffc",
+      "ip_protocol": "-1",
+      "tags": {}
+    },
+    "replica": {
+      "cidr_ipv4": "0.0.0.0/0",
+      "group": "replica",
+      "id": "sgr-0855df5ec2c055f03",
+      "ip_protocol": "-1",
+      "tags": {}
+    }
+  },
+  "ingress_rules": {
+    "data_grpc": {
+      "from_port": 9092,
+      "group": "data",
+      "id": "sgr-0822ff4c706e1dcab",
+      "ip_protocol": "tcp",
+      "referenced_group": "main",
+      "tags": {},
+      "to_port": 9092
+    },
+    "data_ssh": {
+      "description": "ssh via yon-main",
+      "from_port": 22,
+      "group": "data",
+      "id": "sgr-08507733aeb83b722",
+      "ip_protocol": "tcp",
+      "referenced_group": "main",
+      "tags": {},
+      "to_port": 22
+    },
+    "db_data": {
+      "from_port": 5432,
+      "group": "db",
+      "id": "sgr-04e10529cd6758dcd",
+      "ip_protocol": "tcp",
+      "referenced_group": "data",
+      "tags": {},
+      "to_port": 5432
+    },
+    "db_main": {
+      "from_port": 5432,
+      "group": "db",
+      "id": "sgr-012f9acbdd2a43d46",
+      "ip_protocol": "tcp",
+      "referenced_group": "main",
+      "tags": {},
+      "to_port": 5432
+    },
+    "db_replica": {
+      "from_port": 5432,
+      "group": "db",
+      "id": "sgr-082e5a36242f1daaf",
+      "ip_protocol": "tcp",
+      "referenced_group": "replica",
+      "tags": {},
+      "to_port": 5432
+    },
+    "db_ssh": {
+      "from_port": 22,
+      "group": "db",
+      "id": "sgr-06d13f5dd51c26904",
+      "ip_protocol": "tcp",
+      "referenced_group": "main",
+      "tags": {},
+      "to_port": 22
+    },
+    "main_http": {
+      "cidr_ipv4": "0.0.0.0/0",
+      "from_port": 8080,
+      "group": "main",
+      "id": "sgr-05f5a7aabab29ed7d",
+      "ip_protocol": "tcp",
+      "tags": {},
+      "to_port": 8080
+    },
+    "main_ssh": {
+      "cidr_ipv4": "0.0.0.0/0",
+      "from_port": 22,
+      "group": "main",
+      "id": "sgr-0d3d7d9d481776c61",
+      "ip_protocol": "tcp",
+      "tags": {},
+      "to_port": 22
+    },
+    "replica_main": {
+      "from_port": 5432,
+      "group": "replica",
+      "id": "sgr-09085b1124dc31468",
+      "ip_protocol": "tcp",
+      "referenced_group": "main",
+      "tags": {},
+      "to_port": 5432
+    },
+    "replica_ssh": {
+      "from_port": 22,
+      "group": "replica",
+      "id": "sgr-032f88857867e0892",
+      "ip_protocol": "tcp",
+      "referenced_group": "main",
+      "tags": {},
+      "to_port": 22
+    }
+  },
+  "internet_gateway": {
+    "id": "igw-08837edad9a26957c",
+    "tags": {
+      "Name": "yon-igw"
+    }
+  },
+  "main_route_table": {
+    "association_id": "rtbassoc-03826c9eb986084a2",
+    "id": "rtb-0b7d3d03690c74791",
+    "tags": {}
+  },
+  "public_route_table": {
+    "id": "rtb-0e5380dd325267c16",
+    "tags": {
+      "Name": "yon-rtb-public"
+    }
+  },
+  "region": "ap-northeast-2",
+  "security_groups": {
+    "data": {
+      "description": "data",
+      "id": "sg-042c6f59681a7b1bd",
+      "name": "yon-data",
+      "tags": {}
+    },
+    "db": {
+      "description": "DB",
+      "id": "sg-03c341b41a4087a48",
+      "name": "yon-db",
+      "tags": {}
+    },
+    "main": {
+      "description": "main",
+      "id": "sg-0fbaf2496d1edd1ed",
+      "name": "yon-main",
+      "tags": {}
+    },
+    "replica": {
+      "description": "replica",
+      "id": "sg-04b53d2630b9a7ea9",
+      "name": "yon-db-replica",
+      "tags": {}
+    }
+  },
+  "source": {
+    "collected_at": "2026-10-28T03:49:08.890195+00:00",
+    "filename": "yon-network-inventory-20261028T034837Z.json",
+    "sha256": "1c3992ce21ff51ded669f47d0e940c5c8ab0a033bfbd63170d55f553dc95c720"
+  },
+  "subnets": {
+    "public_a": {
+      "association_id": "rtbassoc-01f78681b3a7bce31",
+      "availability_zone": "ap-northeast-2a",
+      "cidr_block": "10.0.0.0/20",
+      "id": "subnet-084d01b4bc4420dc4",
+      "map_public_ip_on_launch": true,
+      "private_dns_hostname_type_on_launch": "ip-name",
+      "tags": {
+        "Name": "yon-subnet-public1-ap-northeast-2a"
+      }
+    },
+    "public_b": {
+      "association_id": "rtbassoc-07f70dec8c3b309eb",
+      "availability_zone": "ap-northeast-2b",
+      "cidr_block": "10.0.16.0/20",
+      "id": "subnet-0f2f8345977f304f9",
+      "map_public_ip_on_launch": true,
+      "private_dns_hostname_type_on_launch": "ip-name",
+      "tags": {
+        "Name": "yon-subnet-public2-ap-northeast-2b"
+      }
+    }
+  },
+  "uncollected_vpc_attributes": [
+    "enable_dns_support",
+    "enable_dns_hostnames",
+    "enable_network_address_usage_metrics"
+  ],
+  "vpc": {
+    "cidr_block": "10.0.0.0/16",
+    "id": "vpc-032bd9d88d5c97147",
+    "instance_tenancy": "default",
+    "tags": {
+      "Name": "yon-vpc"
+    }
+  }
+}
