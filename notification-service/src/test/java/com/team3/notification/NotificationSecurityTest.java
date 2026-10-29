@@ -28,6 +28,8 @@ class NotificationSecurityTest {
         mockMvc.perform(post("/api/internal/notifications")).andExpect(status().isForbidden());
         mockMvc.perform(post("/internal/notification-messages")
                 .header("X-INTERNAL-KEY", "any-key")).andExpect(status().isForbidden());
+        mockMvc.perform(post("/internal/notifications/test-push")
+                .header("X-INTERNAL-KEY", "any-key")).andExpect(status().isForbidden());
     }
 
     @Test

@@ -73,7 +73,11 @@ resource "aws_cloudfront_function" "this" {
   publish                      = true
   key_value_store_associations = each.value.key_value_store_associations
   tags                         = each.value.tags
-  lifecycle { prevent_destroy = true }
+  # Preserve the imported Terraform-only flag; do not republish the live function.
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [publish]
+  }
 }
 
 resource "aws_cloudfront_distribution" "this" {
@@ -239,5 +243,9 @@ resource "aws_cloudfront_distribution" "this" {
       include_cookies = logging_config.value.include_cookies
     }
   }
-  lifecycle { prevent_destroy = true }
+  # Preserve imported Terraform-only defaults; prevent_destroy blocks deletion.
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [retain_on_delete, wait_for_deployment]
+  }
 }

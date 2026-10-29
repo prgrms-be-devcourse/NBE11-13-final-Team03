@@ -89,6 +89,12 @@ class OpportunitySearchPostgresTest {
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.datasource.driver-class-name", postgres::getDriverClassName);
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "create");
+        // 키워드 검색의 후보 확장은 제목 생성 컬럼이 있어야 한다. 스키마 생성 직후 생성 컬럼으로 바꾼다
+        registry.add("spring.jpa.properties.hibernate.hbm2ddl.import_files",
+                () -> "search-title-columns-hibernate-create.sql");
+        registry.add("spring.jpa.properties.hibernate.hbm2ddl.halt_on_error", () -> "true");
+        // import 파일은 기본 문자셋으로 읽힌다. 정규식의 가운뎃점(·・‧ᆞ)이 깨지지 않게 명시한다
+        registry.add("spring.jpa.properties.hibernate.hbm2ddl.charset_name", () -> "UTF-8");
     }
 
     @Autowired
@@ -1171,8 +1177,10 @@ class OpportunitySearchPostgresTest {
         entityManager.clear();
         regionDirectory.refresh();
 
+        // 검색어가 있으면 기본 정렬이 관련도순이므로 최신순은 명시한다
         MvcResult latest = mockMvc.perform(get("/api/opportunities")
-                        .param("keyword", "PG sort deadline").param("type", "YOUTH_POLICY"))
+                        .param("keyword", "PG sort deadline").param("type", "YOUTH_POLICY")
+                        .param("sort", "LATEST"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(4))
                 .andReturn();

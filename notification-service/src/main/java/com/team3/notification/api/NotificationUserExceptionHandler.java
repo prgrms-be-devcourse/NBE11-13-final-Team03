@@ -10,7 +10,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import java.util.Map;
 
-@RestControllerAdvice(assignableTypes = NotificationUserController.class)
+@RestControllerAdvice(assignableTypes = {NotificationUserController.class, NotificationTestPushController.class})
 public class NotificationUserExceptionHandler {
     @ExceptionHandler(NotificationUserApiException.class)
     ResponseEntity<Map<String, String>> business(NotificationUserApiException error) {

@@ -8,6 +8,12 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // 서비스 워커의 배포 등록 타입(classic)과 출력 형식을 일치시킨다.
+    worker: { format: 'iife' },
+    // 워커 전용 SDK도 미리 최적화해 등록 도중 Firebase 공통 모듈의 캐시 버전이 갈라지지 않게 한다.
+    optimizeDeps: {
+      include: ['@firebase/app', '@firebase/messaging', '@firebase/messaging/sw'],
+    },
     build: {
       rolldownOptions: {
         input: {

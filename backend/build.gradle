@@ -80,6 +80,10 @@ dependencyManagement {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // Gradle 테스트 JVM 기본 힙(512m)으로는 Spring 테스트 컨텍스트 캐시(기본 32개)가 쌓이면 OutOfMemoryError가 난다.
+    // CI 러너(16GB)에 맞춰 힙을 늘리고, 캐시 컨텍스트 수를 제한해 테스트 클래스가 늘어도 메모리가 계속 커지지 않게 한다.
+    maxHeapSize = '2g'
+    systemProperty 'spring.test.context.cache.maxSize', '16'
 }
 
 // Administrator SQL is test input, never an application startup resource.

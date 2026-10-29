@@ -52,7 +52,7 @@ resource "aws_vpc_security_group_ingress_rule" "this" {
   cidr_ipv4                    = try(each.value.cidr_ipv4, null)
   referenced_security_group_id = try(var.peer_sg_ids[each.value.referenced_group], null)
   description                  = try(each.value.description, null)
-  tags                         = each.value.tags
+  tags                         = length(each.value.tags) > 0 ? each.value.tags : null
 
   lifecycle { prevent_destroy = true }
 }
@@ -62,7 +62,7 @@ resource "aws_vpc_security_group_egress_rule" "this" {
   ip_protocol       = var.egress.ip_protocol
   cidr_ipv4         = var.egress.cidr_ipv4
   # Protocol -1 must not set from_port/to_port to -1.
-  tags = var.egress.tags
+  tags = length(var.egress.tags) > 0 ? var.egress.tags : null
 
   lifecycle { prevent_destroy = true }
 }

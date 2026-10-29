@@ -47,6 +47,16 @@ def verify(mock_log, terraform):
         attributes = instance["attributes"]
         if "tags_all" in attributes:
             attributes["tags_all"] = attributes.get("tags") or {}
+        # Reproduce the real import defaults reported by the operator (#111).
+        # These must stay no-op when moving existing state into modules.
+        if kind in {"aws_vpc_security_group_ingress_rule", "aws_vpc_security_group_egress_rule"}:
+            attributes["tags"] = attributes.get("tags") or None
+        if kind == "aws_cloudfront_function":
+            attributes["publish"] = None
+        if kind == "aws_cloudfront_distribution":
+            attributes.update(retain_on_delete=False, wait_for_deployment=True)
+        if kind == "aws_iam_openid_connect_provider":
+            attributes["url"] = attributes["url"].removeprefix("https://")
         defaults = {
             "aws_subnet": {"ipv6_native": False},
             "aws_instance": {"force_destroy": False, "get_password_data": False,
