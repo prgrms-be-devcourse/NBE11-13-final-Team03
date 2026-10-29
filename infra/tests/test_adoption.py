@@ -77,7 +77,7 @@ class AdoptionTests(unittest.TestCase):
             file.write_text(json.dumps(raw), encoding="utf-8")
             config, targets = prepare_import.prepare(file)
             self.assertTrue(all(not control for control in config["bucket_controls"].values()))
-            self.assertFalse(any(a.startswith("aws_s3_bucket_policy.") for a in targets))
+            self.assertFalse(any("aws_s3_bucket_policy." in a for a in targets))
             raw["results"]["s3/get-bucket-policy"] = {"status": "error", "error_code": "AccessDenied"}
             file.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaises(ValueError): prepare_import.prepare(file)
@@ -111,12 +111,13 @@ class AdoptionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "forbidden"): check_import_plan.check(plan, "import", targets)
 
     def test_batch_never_applies_a_changed_plan_and_keeps_logs_private(self):
-        for changed in (False, True):
-            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as path:
+        for changed, moving in ((False, False), (True, False), (False, True)):
+            with self.subTest(changed=changed, moving=moving), tempfile.TemporaryDirectory() as path:
                 root = Path(path) / "checkout"
                 (root / "infra/terraform").mkdir(parents=True)
                 state = Path(path) / "state"
                 calls = []
+                applied = False
 
                 class FakeCollector:
                     def collect(self, directory, scope):
@@ -125,6 +126,7 @@ class AdoptionTests(unittest.TestCase):
                         return True
 
                 def run(command, **kwargs):
+                    nonlocal applied
                     calls.append(command)
                     operation = command[2]
                     if operation == "version":
@@ -136,14 +138,22 @@ class AdoptionTests(unittest.TestCase):
                     elif operation == "show":
                         run_dir = Path(command[-1]).parent
                         targets = json.loads((run_dir / "targets.json").read_text())
-                        changes, resources = [], []
+                        changes, resources, prior = [], [], []
+                        from check_import_plan import ADDRESS_MOVES
+                        moves = {v: k for k, v in json.loads(ADDRESS_MOVES.read_text()).items()}
                         for address, target in targets.items():
                             change = {"actions": ["update"] if changed else ["no-op"]}
-                            if Path(command[-1]).stem == "import-plan": change["importing"] = {"id": target["import_id"]}
+                            if not moving and Path(command[-1]).stem == "import-plan": change["importing"] = {"id": target["import_id"]}
                             changes.append({"address": address, "mode": "managed", "provider_name": "registry.terraform.io/hashicorp/aws", "change": change})
-                            resources.append({"address": address, "values": target["values"]})
-                        kwargs["stdout"].write(json.dumps({"complete": True, "resource_changes": changes, "planned_values": {"root_module": {"resources": resources}}}).encode())
+                            values = {"id": target["import_id"], **target["values"]}
+                            resources.append({"address": address, "values": values})
+                            if moving:
+                                previous = moves.get(address) if not applied else None
+                                if previous: changes[-1]["previous_address"] = previous
+                                prior.append({"address": previous or address, "values": values})
+                        kwargs["stdout"].write(json.dumps({"complete": True, "resource_changes": changes, "planned_values": {"root_module": {"resources": resources}}, "prior_state": {"values": {"root_module": {"resources": prior}}}}).encode())
                     elif operation == "apply":
+                        applied = True
                         (state / "terraform.tfstate").write_text("{}")
                     return subprocess.CompletedProcess(command, 0)
 

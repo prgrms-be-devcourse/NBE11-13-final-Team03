@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from check_import_plan import expected_targets
+from check_import_plan import expected_targets, remap_targets
 from collect_inventory import ACCOUNT, REGION, VPC, BUCKET, INSTANCES, IMPORT_ROLES, TEMPORARY_POLICIES
 
 
@@ -294,7 +294,7 @@ def prepare(inventory_path):
                                       "key_value_store_associations": [x["KeyValueStoreARN"] for x in live.get("KeyValueStoreAssociations", {}).get("Items", [])],
                                       "tags": tags(get(f"cf-function/{name}/tags")["Tags"].get("Items", []))}
         add(f'aws_cloudfront_function.existing["{name}"]', name, id=name, name=name)
-    return config, targets
+    return config, remap_targets(targets)
 
 
 def main():

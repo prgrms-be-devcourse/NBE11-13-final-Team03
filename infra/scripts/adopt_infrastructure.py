@@ -1,4 +1,4 @@
-"""Collect and verify the whole adoption plan; --apply registers only no-change imports."""
+"""Verify adoption; --apply registers no-change imports or declared state moves."""
 import argparse
 from datetime import datetime, timezone
 import hashlib
@@ -70,25 +70,27 @@ def execute(state_dir, apply=False):
         data = json.loads(terraform(["show", "-json", str(saved)], name + ".json").read_text(encoding="utf-8"))
         check(data, phase, targets)
         pending = sum(bool(x["change"].get("importing")) for x in data["resource_changes"])
+        moved = sum(bool(x.get("previous_address")) for x in data["resource_changes"])
         print(f"PASS: {len(targets)} targets, {pending} pending imports, 0 AWS resource changes ({phase})", flush=True)
-        return saved, pending
+        print(f"Verified state address moves: {moved}", flush=True)
+        return saved, pending, moved
 
-    saved, pending = plan("import-plan", "import")
+    saved, pending, moved = plan("import-plan", "import")
     digest = hashlib.sha256(saved.read_bytes()).hexdigest()
-    write_json(run / "review.json", {"target_count": len(targets), "pending_imports": pending, "aws_resource_changes": 0,
+    write_json(run / "review.json", {"target_count": len(targets), "pending_imports": pending, "address_moves": moved, "aws_resource_changes": 0,
                                      "plan_sha256": digest, "terraform_version": version["terraform_version"]})
     if apply:
         if hashlib.sha256(saved.read_bytes()).hexdigest() != digest:
             raise ValueError("Saved plan changed after verification")
-        if pending:
+        if pending or moved:
             terraform(["apply", "-input=false", "-lock-timeout=60s", "-no-color", str(saved)], "apply.log")
         if not state.exists():
             raise ValueError("The imported state file is missing")
         shutil.copyfile(state, run / "after.tfstate")
         plan("after-plan", "after")
-        write_json(run / "completed.json", {"target_count": len(targets), "aws_resource_changes": 0,
+        write_json(run / "completed.json", {"target_count": len(targets), "aws_resource_changes": 0, "address_moves": 0,
                                             "completed_at": datetime.now(timezone.utc).isoformat()})
-        print("State registration and post-import verification completed.")
+        print("State registration/address migration and post-plan verification completed.")
     else:
         print("Plan verified. Re-run with --apply to collect a fresh plan and register it after checks.")
     print(f"Private run directory: {run}")
@@ -98,7 +100,7 @@ def execute(state_dir, apply=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", type=Path, required=True)
-    parser.add_argument("--apply", action="store_true", help="Import only after the complete no-change plan passes; verify again afterward")
+    parser.add_argument("--apply", action="store_true", help="Apply verified imports or declared state moves without AWS changes; verify again afterward")
     args = parser.parse_args()
     previous_umask = os.umask(0o077)
     try:
