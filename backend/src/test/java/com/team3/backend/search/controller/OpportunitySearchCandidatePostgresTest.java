@@ -160,6 +160,34 @@ class OpportunitySearchCandidatePostgresTest {
     }
 
     @Test
+    void trainingTargetsAreMatchedOnDatabaseNormalizedValuesAndNewValuesApplyImmediately() throws Exception {
+        Opportunity fullWidth = opportunity("웹 개발 실무", OpportunityType.VOCATIONAL_TRAINING);
+        trainingDetail(fullWidth, "Ｋ－디지털　트레이닝", null);
+        Opportunity hyphen = opportunity("데이터 분석 실무", OpportunityType.VOCATIONAL_TRAINING);
+        trainingDetail(hyphen, "K-디지털 기초역량훈련", null);
+        Opportunity noTarget = opportunity("클라우드 실무", OpportunityType.VOCATIONAL_TRAINING);
+        trainingDetail(noTarget, null, null);
+        Opportunity policy = opportunity("디지털 역량 지원", OpportunityType.YOUTH_POLICY);
+        policyDetail(policy, null);
+        flush();
+
+        // 원문 표기가 달라도 DB 정규화 값(k디지털트레이닝, k디지털기초역량훈련)으로 판정한다
+        assertThat(ids(search("k디지털"))).containsExactly(hyphen.getId(), fullWidth.getId());
+        assertThat(ids(search("K-디지털 트레이닝"))).containsExactly(fullWidth.getId());
+        assertThat(ids(search("기초역량훈련 실무"))).containsExactly(hyphen.getId());
+        // 범용어(훈련)·4자 미만(디지털) 표기는 훈련구분으로 비교하지 않는다. 정책은 훈련구분 비교 대상이 아니다
+        assertThat(ids(search("훈련"))).isEmpty();
+        assertThat(ids(search("디지털"))).containsExactly(policy.getId());
+
+        // 훈련구분 값 목록을 캐시하지 않으므로 새 값은 다음 검색부터 바로 반영된다
+        assertThat(ids(search("혼합훈련"))).isEmpty();
+        Opportunity added = opportunity("빅데이터 실무", OpportunityType.VOCATIONAL_TRAINING);
+        trainingDetail(added, "스마트혼합훈련", null);
+        flush();
+        assertThat(ids(search("혼합훈련"))).containsExactly(added.getId());
+    }
+
+    @Test
     void phraseModeAndSpecialCharacters() throws Exception {
         Opportunity phrase = opportunity("데이터분석 실무과정 온라인수료 특강", OpportunityType.VOCATIONAL_TRAINING);
         Opportunity reordered = opportunity("온라인 수료 데이터 분석 실무 과정", OpportunityType.VOCATIONAL_TRAINING);

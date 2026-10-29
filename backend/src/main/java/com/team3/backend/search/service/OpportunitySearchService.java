@@ -53,6 +53,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.BiPredicate;
 
 /** 정규화된 공고를 검색하고 현재 페이지의 신청 가능성·저장 상태를 표시한다. */
 @Service
@@ -67,6 +68,7 @@ public class OpportunitySearchService {
     private final PreferenceService preferenceService;
     private final EntityManager entityManager;
     private final SearchTitleColumns searchTitleColumns;
+    private final DetailValueNames detailValueNames;
 
     /** PostgreSQL 여부는 한 번만 확인하고 재사용한다. */
     private volatile Boolean postgres;
@@ -110,9 +112,22 @@ public class OpportunitySearchService {
         SearchKeyword searchKeyword = SearchKeyword.parse(keyword);
         // 후보 확장(B1)은 생성 컬럼이 있는 PostgreSQL에서만 한다. H2 등은 기존 제목 부분 일치만 쓴다.
         boolean expandCandidates = searchKeyword != null && searchKeyword.hasTokens() && isPostgres();
+        Map<String, String> trainingTargets = Map.of();
+        Map<String, String> policyKeywords = Map.of();
         if (expandCandidates) {
             searchTitleColumns.verify();
+            // 목록과 COUNT 질의가 같은 값 목록을 쓰도록 Specification 밖에서 한 번만 읽는다.
+            if (!searchKeyword.phraseMode()) {
+                if (searchKeyword.tokens().stream().anyMatch(token -> !token.trainingTargetVariants().isEmpty())) {
+                    trainingTargets = detailValueNames.trainingTargets();
+                }
+                if (searchKeyword.tokens().stream().anyMatch(token -> !token.policyKeywordVariants().isEmpty())) {
+                    policyKeywords = detailValueNames.policyKeywords();
+                }
+            }
         }
+        Map<String, String> normalizedTrainingTargets = trainingTargets;
+        Map<String, String> normalizedPolicyKeywords = policyKeywords;
 
         Specification<Opportunity> filters = (root, query, criteriaBuilder) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -121,7 +136,8 @@ public class OpportunitySearchService {
                 Predicate titleContains = criteriaBuilder.like(
                         criteriaBuilder.lower(root.get("title")), searchKeyword.titleContainsPattern(), '\\');
                 predicates.add(expandCandidates
-                        ? criteriaBuilder.or(titleContains, keywordCandidates(root, query, criteriaBuilder, searchKeyword))
+                        ? criteriaBuilder.or(titleContains, keywordCandidates(root, query, criteriaBuilder,
+                                searchKeyword, normalizedPolicyKeywords, normalizedTrainingTargets))
                         : titleContains);
             }
             if (type != null) {
@@ -255,10 +271,13 @@ public class OpportunitySearchService {
      *  - 훈련구분: 부분 일치 (4자 이상, 범용어 제외).
      * 토큰이 MAX_TOKENS를 넘으면 문장형 검색어로 보고 공백을 무시한 전체 구문의 제목 일치만 더한다.
      * NCS 분류는 후보 조건에 쓰지 않는다.
+     *
+     * 정책 keywords·훈련구분은 값 종류별로 DB가 정규화한 목록(DetailValueNames)에서 맞는 원문 값을 먼저 고르고
+     * SQL에서는 원문 값으로 비교한다. 행마다 정규화하던 것과 판정은 같고, 맞는 값이 없으면 그 비교를 뺀다.
      */
     private static Predicate keywordCandidates(
-            Root<Opportunity> root, CriteriaQuery<?> query,
-            CriteriaBuilder criteriaBuilder, SearchKeyword keyword
+            Root<Opportunity> root, CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder, SearchKeyword keyword,
+            Map<String, String> normalizedPolicyKeywords, Map<String, String> normalizedTrainingTargets
     ) {
         if (keyword.phraseMode()) {
             return criteriaBuilder.like(root.get("searchTitleStrip"), SearchKeyword.contains(keyword.phrase()), '\\');
@@ -269,11 +288,19 @@ public class OpportunitySearchService {
             for (String variant : token.variants()) {
                 fields.add(titleMatches(root, criteriaBuilder, variant));
             }
-            if (!token.policyKeywordVariants().isEmpty()) {
-                fields.add(policyKeywordsMatch(root, query, criteriaBuilder, token.policyKeywordVariants()));
+            // search_strip(keywords)를 앞에 쉼표를 붙여 '%,표기%'로 비교하던 것과 같다 (항목 시작에서만 일치)
+            List<String> policyKeywords = matchingValues(normalizedPolicyKeywords, token.policyKeywordVariants(),
+                    (normalized, variant) -> ("," + normalized).contains("," + variant));
+            if (!policyKeywords.isEmpty()) {
+                fields.add(detailValueIn(root, query, criteriaBuilder, OpportunityType.YOUTH_POLICY,
+                        YouthPolicyDetail.class, "keywords", policyKeywords));
             }
-            if (!token.trainingTargetVariants().isEmpty()) {
-                fields.add(trainingTargetMatches(root, query, criteriaBuilder, token.trainingTargetVariants()));
+            // search_strip(training_target_name)을 '%표기%'로 비교하던 것과 같다
+            List<String> trainingTargets = matchingValues(normalizedTrainingTargets, token.trainingTargetVariants(),
+                    String::contains);
+            if (!trainingTargets.isEmpty()) {
+                fields.add(detailValueIn(root, query, criteriaBuilder, OpportunityType.VOCATIONAL_TRAINING,
+                        TrainingCourseDetail.class, "trainingTargetName", trainingTargets));
             }
             tokens.add(criteriaBuilder.or(fields.toArray(Predicate[]::new)));
         }
@@ -290,42 +317,35 @@ public class OpportunitySearchService {
     }
 
     /**
-     * 정책 keywords는 쉼표 구분 목록이다. 앞에 쉼표를 붙여 항목 시작에서만 일치시킨다.
-     *
-     * 상세는 버전당 한 행이다. 현재 버전 ID를 상관 EXISTS 대신 비상관 IN으로 비교한다. 결과는 같지만,
-     * OR 안의 EXISTS는 병렬 불가 SubPlan이 되어 공고 전수 스캔이 단일 프로세스로 고정된다
-     * (실험 DB '청년 월세' COUNT 143ms -> 90ms). 훈련구분도 같은 형태다.
+     * 정규화 값이 표기 중 하나와 맞는 원문 값.
+     * 표기가 없거나(범용어·최소 길이 미만) 맞는 값이 없으면 빈 목록이고, 그 토큰은 이 컬럼으로 비교하지 않는다.
      */
-    private static Predicate policyKeywordsMatch(
-            Root<Opportunity> root, CriteriaQuery<?> query,
-            CriteriaBuilder criteriaBuilder, List<String> variants
-    ) {
-        Subquery<Long> subquery = query.subquery(Long.class);
-        Root<YouthPolicyDetail> detail = subquery.from(YouthPolicyDetail.class);
-        Expression<String> keywords = criteriaBuilder.concat(",",
-                criteriaBuilder.function(SearchSqlFunctions.STRIP, String.class, detail.get("keywords")));
-        subquery.select(detail.get("version").get("id")).where(criteriaBuilder.or(variants.stream()
-                .map(variant -> criteriaBuilder.like(
-                        keywords, "%," + SearchKeyword.escapeLike(variant) + "%", '\\'))
-                .toArray(Predicate[]::new)));
-        return criteriaBuilder.and(
-                criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.YOUTH_POLICY),
-                root.get("currentVersion").get("id").in(subquery));
+    private static List<String> matchingValues(Map<String, String> normalizedByValue, List<String> variants,
+                                               BiPredicate<String, String> matches) {
+        if (variants.isEmpty()) {
+            return List.of();
+        }
+        return normalizedByValue.entrySet().stream()
+                .filter(entry -> variants.stream().anyMatch(variant -> matches.test(entry.getValue(), variant)))
+                .map(Map.Entry::getKey)
+                .toList();
     }
 
-    private static Predicate trainingTargetMatches(
-            Root<Opportunity> root, CriteriaQuery<?> query,
-            CriteriaBuilder criteriaBuilder, List<String> variants
+    /**
+     * 현재 버전의 상세 컬럼 원문이 values 중 하나인 공고.
+     *
+     * 상세는 버전당 한 행이다. 현재 버전 ID를 상관 EXISTS 대신 비상관 IN으로 비교한다. 결과는 같지만,
+     * OR 안의 EXISTS는 병렬 불가 SubPlan이 되어 공고 전수 스캔이 단일 프로세스로 고정된다.
+     */
+    private static <D> Predicate detailValueIn(
+            Root<Opportunity> root, CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder,
+            OpportunityType type, Class<D> detailType, String attribute, List<String> values
     ) {
         Subquery<Long> subquery = query.subquery(Long.class);
-        Root<TrainingCourseDetail> detail = subquery.from(TrainingCourseDetail.class);
-        Expression<String> target = criteriaBuilder.function(
-                SearchSqlFunctions.STRIP, String.class, detail.get("trainingTargetName"));
-        subquery.select(detail.get("version").get("id")).where(criteriaBuilder.or(variants.stream()
-                .map(variant -> criteriaBuilder.like(target, SearchKeyword.contains(variant), '\\'))
-                .toArray(Predicate[]::new)));
+        Root<D> detail = subquery.from(detailType);
+        subquery.select(detail.get("version").get("id")).where(detail.get(attribute).in(values));
         return criteriaBuilder.and(
-                criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.VOCATIONAL_TRAINING),
+                criteriaBuilder.equal(root.get("opportunityType"), type),
                 root.get("currentVersion").get("id").in(subquery));
     }
 

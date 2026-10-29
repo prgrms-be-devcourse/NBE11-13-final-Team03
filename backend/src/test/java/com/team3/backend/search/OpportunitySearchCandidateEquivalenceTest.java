@@ -61,6 +61,12 @@ class OpportunitySearchCandidateEquivalenceTest {
                 continue;
             }
             String[] parts = row.split("\t", 2);
+            if (System.getenv("YON_SEARCH_EQUIVALENCE_CAPTURE") != null) {
+                // SQL 로그 수집용: 측정과 같은 첫 페이지(20건)만 한 번 호출한다
+                searchService.search(parts[1], null, null, null, null, null, null, null, null, null, null, null,
+                        null, OpportunitySearchSort.LATEST, 0, 20);
+                continue;
+            }
             long total = -1;
             int collected = 0;
             for (int page = 0; ; page++) {
