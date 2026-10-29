@@ -3,6 +3,7 @@ package com.team3.backend.search.controller;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.service.EligibilityResultService;
+import com.team3.backend.eligibility.support.EligibilityResultFixtures;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.region.directory.RegionDirectory;
@@ -246,7 +247,7 @@ class OpportunityDetailControllerTest {
         profile(other, seoul);
         UserOpportunityPreference preference = UserOpportunityPreference.builder()
                 .user(owner).opportunity(policy).build();
-        preference.markSaved();
+        preference.markSaved(policy.getCurrentVersion().getId());
         preference.markHidden();
         entityManager.persist(preference);
         result(owner, policy, EligibilityStatus.UNKNOWN, EligibilityResultService.RULE_VERSION,
@@ -377,7 +378,7 @@ class OpportunityDetailControllerTest {
     private void result(User account, Opportunity opportunity, EligibilityStatus status,
                         String ruleVersion, LocalDate validUntil) {
         entityManager.persist(EligibilityResult.builder().userId(account.getId())
-                .opportunityId(opportunity.getId()).opportunityVersionId(opportunity.getCurrentVersion().getId())
+                .conditionSetId(EligibilityResultFixtures.conditionSetOf(entityManager, opportunity.getCurrentVersion()))
                 .profileVersion(1L).ruleVersion(ruleVersion).eligibilityStatus(status).reason("판정 사유")
                 .conditionResults(List.of(Map.of("type", "AGE", "field", "age", "requirement", "REQUIRED",
                         "result", "MATCHED", "reason", "조건 충족")))

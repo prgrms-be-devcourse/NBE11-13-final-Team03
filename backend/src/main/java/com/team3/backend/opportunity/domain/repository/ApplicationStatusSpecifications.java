@@ -4,8 +4,8 @@ import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import jakarta.persistence.criteria.*;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -50,7 +50,7 @@ public final class ApplicationStatusSpecifications {
     private static Predicate status(ApplicationStatus status, Root<Opportunity> root, CriteriaQuery<?> query,
                                     CriteriaBuilder cb, LocalDate today) {
         Predicate open = exists(root, query, cb, (w, b) -> open(w, b, today));
-        Predicate always = exists(root, query, cb, (w, b) -> b.equal(w.get("periodType"), PeriodType.ALWAYS));
+        Predicate always = exists(root, query, cb, (w, b) -> always(w, b));
         Predicate upcoming = exists(root, query, cb, (w, b) -> upcoming(w, b, today));
         Predicate closed = exists(root, query, cb, (w, b) -> closed(w, b, today));
         return switch (status) {
@@ -62,8 +62,10 @@ public final class ApplicationStatusSpecifications {
         };
     }
 
+    // 아래 신청기간 단위 판정은 검색 관련도 정렬(SearchRelevance)의 모집 상태 우선순위도 함께 쓴다.
+
     /** FIXED 기간이 오늘을 포함 (시작일만 있으면 시작 후 계속, 종료일만 있으면 종료일까지). 두 날짜가 모두 없으면 제외 */
-    private static Predicate open(Root<ApplicationWindow> w, CriteriaBuilder cb, LocalDate today) {
+    public static Predicate open(Root<ApplicationWindow> w, CriteriaBuilder cb, LocalDate today) {
         Path<LocalDate> start = w.get("startDate");
         Path<LocalDate> end = w.get("endDate");
         return cb.and(
@@ -73,14 +75,19 @@ public final class ApplicationStatusSpecifications {
                 cb.or(end.isNull(), cb.greaterThanOrEqualTo(end, today)));
     }
 
+    /** 상시 모집 기간 */
+    public static Predicate always(Root<ApplicationWindow> w, CriteriaBuilder cb) {
+        return cb.equal(w.get("periodType"), PeriodType.ALWAYS);
+    }
+
     /** FIXED 기간의 시작일이 오늘 이후 (Calculator는 시작 전 여부를 종료 여부보다 먼저 본다) */
-    private static Predicate upcoming(Root<ApplicationWindow> w, CriteriaBuilder cb, LocalDate today) {
+    public static Predicate upcoming(Root<ApplicationWindow> w, CriteriaBuilder cb, LocalDate today) {
         Path<LocalDate> start = w.get("startDate");
         return cb.and(cb.equal(w.get("periodType"), PeriodType.FIXED), start.isNotNull(), cb.greaterThan(start, today));
     }
 
     /** CLOSED 기간, 또는 이미 시작했고(시작일 없음 포함) 종료일이 지난 FIXED 기간 */
-    private static Predicate closed(Root<ApplicationWindow> w, CriteriaBuilder cb, LocalDate today) {
+    public static Predicate closed(Root<ApplicationWindow> w, CriteriaBuilder cb, LocalDate today) {
         Path<LocalDate> start = w.get("startDate");
         Path<LocalDate> end = w.get("endDate");
         return cb.or(

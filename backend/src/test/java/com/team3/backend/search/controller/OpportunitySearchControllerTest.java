@@ -3,10 +3,10 @@ package com.team3.backend.search.controller;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
-import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.domain.entity.EmploymentStatus;
 import com.team3.backend.eligibility.service.EligibilityResultService;
+import com.team3.backend.eligibility.support.EligibilityResultFixtures;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
@@ -20,7 +20,7 @@ import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
@@ -661,12 +661,8 @@ class OpportunitySearchControllerTest {
     }
 
     private void addEligibilityResult(Long userId, Opportunity opportunity, EligibilityStatus status) {
-        entityManager.persist(EligibilityResult.builder()
-                .userId(userId).opportunityId(opportunity.getId())
-                .opportunityVersionId(opportunity.getCurrentVersion().getId())
-                .profileVersion(1L).ruleVersion(EligibilityResultService.RULE_VERSION)
-                .eligibilityStatus(status).conditionResults(java.util.List.of())
-                .evaluatedAt(LocalDateTime.now()).build());
+        EligibilityResultFixtures.result(entityManager, userId, opportunity, status, 1L,
+                EligibilityResultService.RULE_VERSION, null);
     }
 
     @Test
@@ -754,6 +750,60 @@ class OpportunitySearchControllerTest {
     }
 
     @Test
+    void detailCategoryCombinesWithClassificationsAndKeepsPolicyWithoutFilter() throws Exception {
+        Opportunity first = createOpportunity("detail-category training first", OpportunityType.VOCATIONAL_TRAINING,
+                "교육･직업훈련", "정보통신", true);
+        Opportunity second = createOpportunity("detail-category training second", OpportunityType.VOCATIONAL_TRAINING,
+                "교육･직업훈련", "정보통신", true);
+        Opportunity otherDetail = createOpportunity("detail-category training other detail", OpportunityType.VOCATIONAL_TRAINING,
+                "교육･직업훈련", "정보통신", true);
+        Opportunity otherSub = createOpportunity("detail-category training other sub", OpportunityType.VOCATIONAL_TRAINING,
+                "교육･직업훈련", "기계", true);
+        Opportunity otherCategory = createOpportunity("detail-category training other category", OpportunityType.VOCATIONAL_TRAINING,
+                "기타", "정보통신", true);
+        Opportunity policy = createOpportunity("detail-category policy", OpportunityType.YOUTH_POLICY,
+                "복지", "생활", true);
+        for (Opportunity training : List.of(first, second, otherDetail, otherSub, otherCategory)) {
+            training.updateSummary(training.getTitle(), training.getCategory(), training.getSubCategory(),
+                    training == otherDetail ? "하드웨어" : "소프트웨어", null);
+        }
+        entityManager.flush();
+        entityManager.clear();
+
+        for (int page = 0; page < 2; page++) {
+            mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "detail-category training")
+                            .param("type", "VOCATIONAL_TRAINING")
+                            .param("category", "교육･직업훈련")
+                            .param("subCategory", "정보통신")
+                            .param("detailCategory", "  소프트웨어  ")
+                            .param("page", String.valueOf(page)).param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].opportunityId").value(page == 0 ? second.getId() : first.getId()))
+                    .andExpect(jsonPath("$.content[0].detailCategory").value("소프트웨어"))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andExpect(jsonPath("$.hasNext").value(page == 0));
+        }
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "detail-category training").param("type", "VOCATIONAL_TRAINING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(5));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "detail-category training").param("detailCategory", "  "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(5));
+        MvcResult policyResult = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "detail-category policy").param("type", "YOUTH_POLICY"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andReturn();
+        Map<String, Object> policyItem = JsonPath.read(policyResult.getResponse().getContentAsString(), "$.content[0]");
+        assertTrue(policyItem.containsKey("detailCategory"));
+        assertEquals(null, policyItem.get("detailCategory"));
+    }
+
+    @Test
     void pagesUseCreatedAtThenIdAndReportExactTotals() throws Exception {
         Opportunity first = createOpportunity("V1-1 paging first", OpportunityType.YOUTH_POLICY,
                 null, null, true);
@@ -828,7 +878,7 @@ class OpportunitySearchControllerTest {
 
         List<String> searchParameters = JsonPath.read(document,
                 "$['paths']['/api/opportunities']['get']['parameters'][*]['name']");
-        assertEquals(Set.of("keyword", "type", "category", "subCategory", "region",
+        assertEquals(Set.of("keyword", "type", "category", "subCategory", "detailCategory", "region",
                         "applicationStatus", "eligibilityStatuses", "deadlineFrom", "deadlineTo",
                         "startDateFrom", "startDateTo", "sort", "page", "size"),
                 Set.copyOf(searchParameters));
@@ -837,16 +887,27 @@ class OpportunitySearchControllerTest {
         assertFalse(searchOperation.containsKey("security"));
         assertEquals(List.of("array"), JsonPath.read(document,
                 "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == 'eligibilityStatuses')]['schema']['type']"));
-        for (String[] expected : new String[][]{{"sort", "LATEST"}, {"page", "0"}, {"size", "20"}}) {
+        for (String[] expected : new String[][]{{"page", "0"}, {"size", "20"}}) {
             List<Object> defaults = JsonPath.read(document,
                     "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == '"
                             + expected[0] + "')]['schema']['default']");
             assertEquals(expected[1], String.valueOf(defaults.getFirst()));
         }
+        // 정렬 기본값은 검색어 유무로 정해지므로(있으면 RELEVANCE, 없으면 LATEST) 고정 기본값을 문서에 두지 않는다
+        assertTrue(JsonPath.<List<Object>>read(document,
+                "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == 'sort')]['schema']['default']")
+                .isEmpty());
+        assertEquals(List.of("RELEVANCE", "LATEST", "OLDEST", "DEADLINE_PRIORITY", "START_DATE_ASC"),
+                JsonPath.<List<List<String>>>read(document,
+                        "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == 'sort')]['schema']['enum']")
+                        .getFirst());
         assertEquals("boolean", JsonPath.read(document,
                 "$.components.schemas.OpportunitySearchItemDto.properties.saved.type"));
         assertTrue(JsonPath.<Map<String, Object>>read(document,
                 "$.components.schemas.OpportunitySearchItemDto.properties.eligibilityStatus")
+                .containsKey("description"));
+        assertTrue(JsonPath.<Map<String, Object>>read(document,
+                "$.components.schemas.OpportunitySearchItemDto.properties.detailCategory")
                 .containsKey("description"));
 
         for (String path : List.of("/api/opportunities/{id}/save", "/api/opportunities/{id}/hide")) {

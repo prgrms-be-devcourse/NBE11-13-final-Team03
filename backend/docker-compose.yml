@@ -7,8 +7,14 @@ services:
       POSTGRES_USER: ${DB_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-1234}
       POSTGRES_DB: ${DB_NAME:-yon}
+      # Used only by the init scripts below to set the two boundary login passwords.
+      APPLICATION_DB_PASSWORD: ${APPLICATION_DB_PASSWORD:?Set APPLICATION_DB_PASSWORD in backend/.env}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?Set NOTIFICATION_DB_PASSWORD in backend/.env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # Init scripts run only when the data volume is empty (see docs/database-boundaries.md).
+      - ../database/scripts/database-boundaries.sql:/docker-entrypoint-initdb.d/01-database-boundaries.sql:ro
+      - ../database/local/02-set-local-passwords.sh:/docker-entrypoint-initdb.d/02-set-local-passwords.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-yon}"]
       interval: 5s

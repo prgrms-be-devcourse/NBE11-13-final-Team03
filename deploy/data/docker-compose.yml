@@ -1,0 +1,26 @@
+# 데이터 서버(EC2)용 compose: 수집·원본 저장·정규화·조건 묶음 (data-service).
+# GitHub Actions(.github/workflows/deploy.yml)가 배포 때마다 데이터 서버의 배포 폴더로 복사한다.
+#
+# 배포 폴더에 필요한 파일
+#   .env        운영 환경변수 (deploy/data/.env.example 참고, 직접 만든다. git에 올리지 않는다)
+#   deploy.env  DATA_SERVICE_IMAGE=<GHCR 이미지> (Actions가 쓴다)
+#
+# 실행: docker compose -f docker-compose.yml --env-file .env --env-file deploy.env up -d data-service
+name: yon-data
+
+services:
+  data-service:
+    image: ${DATA_SERVICE_IMAGE:-data-service-not-deployed}
+    env_file: .env
+    environment:
+      JAVA_TOOL_OPTIONS: ${DATA_SERVICE_JAVA_OPTS:--XX:MaxRAMPercentage=70.0}
+    # 내부 전용 (Spring Security 없음). 보안 그룹에서 9092는 메인 서버의 보안 그룹에만 연다 (0.0.0.0/0 금지)
+    # DATA_SERVICE_BIND_IP에 이 서버의 사설 IP를 넣으면 공개 IP로는 열리지 않는다 (보안 그룹 실수 대비)
+    ports:
+      - "${DATA_SERVICE_BIND_IP:?Set DATA_SERVICE_BIND_IP to the private IP}:9092:9092"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadNetworkImportDependenciesInSeoul",
+      "Effect": "Allow",
+      "Action": ["ec2:DescribeNetworkAcls", "ec2:DescribeTags"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {"aws:RequestedRegion": "ap-northeast-2"}
+      }
+    },
+    {
+      "Sid": "ReadYonVpcAttributes",
+      "Effect": "Allow",
+      "Action": ["ec2:DescribeVpcAttribute"],
+      "Resource": "arn:aws:ec2:ap-northeast-2:174170816230:vpc/vpc-032bd9d88d5c97147",
+      "Condition": {
+        "StringEquals": {"aws:RequestedRegion": "ap-northeast-2"}
+      }
+    }
+  ]
+}

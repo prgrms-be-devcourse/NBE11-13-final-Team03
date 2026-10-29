@@ -1,0 +1,177 @@
+import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
+import fs from 'node:fs'
+import { test } from 'node:test'
+import ts from 'typescript'
+
+const require = createRequire(import.meta.url)
+require.extensions['.svg'] = (module, filename) => { module.exports = filename }
+require.extensions['.css'] = (module) => { module.exports = { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) } }
+for (const extension of ['.ts', '.tsx']) require.extensions[extension] = (module, filename) => {
+  module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename)
+}
+const React = require('react'), element = React.createElement
+const { renderToStaticMarkup } = require('react-dom/server')
+const { MemoryRouter } = require('react-router-dom')
+const { QueryClient, QueryClientProvider } = require('@tanstack/react-query')
+const AppRoutes = require('../src/routes/AppRoutes.tsx').default
+const AuthControls = require('../src/layouts/AuthControls.tsx').default
+const { AuthContext } = require('../src/auth/AuthContext.ts')
+const { ApiError } = require('../src/api/ApiError.ts')
+const user = { id: 11, nickname: '테스트 회원', email: 'test-only@example.org', role: 'USER' }
+
+function render({ path = '/', auth, authError, recommendations } = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, gcTime: Infinity } } })
+  if (auth !== undefined) client.setQueryData(['auth', 'user'], auth)
+  if (authError) client.getQueryCache().build(client, { queryKey: ['auth', 'user'] }).setState({ status: 'error', error: authError, fetchStatus: 'idle' })
+  client.setQueryData(['home', 'opportunities', 'size=6'], { content: [], page: 0, size: 6, totalElements: 0, totalPages: 0, hasNext: false })
+  if (recommendations) client.setQueryData(['recommendations', user.id], recommendations)
+  try { return renderToStaticMarkup(element(QueryClientProvider, { client }, element(MemoryRouter, { initialEntries: [path] }, element(AppRoutes)))) }
+  finally { client.clear() }
+}
+
+test('header distinguishes checking, anonymous, authenticated and verification error without forcing public route login', () => {
+  assert.match(render(), /로그인 상태 확인 중/)
+  const anonymous = render({ auth: null })
+  assert.match(anonymous, /href="\/login\?returnTo=%2F"/)
+  assert.match(anonymous, /최근 등록된 기회/)
+  const authenticated = render({ auth: user, recommendations: [] })
+  assert.match(authenticated, /테스트 회원님/)
+  assert.match(authenticated, /로그아웃/)
+  assert.doesNotMatch(authenticated, /test-only@example.org/)
+  assert.match(authenticated, /아직 보여드릴 추천 결과가 없어요/)
+  const failure = render({ authError: new ApiError('network', 'private internal') })
+  assert.match(failure, /인증 확인 실패/)
+  assert.match(failure, /다시 확인/)
+  assert.match(failure, /인증 상태를 확인하지 못했어요/)
+  assert.doesNotMatch(failure, /private internal|카카오로 로그인하기/)
+})
+
+test('login page exposes actual OAuth entry, privacy information and public navigation with accessible title', () => {
+  const html = render({ path: '/login?returnTo=%2Fopportunities%3Fpage%3D2', auth: null })
+  assert.match(html, /<h1 id="login-title">/)
+  assert.match(html, /href="\/oauth2\/authorization\/kakao"/)
+  assert.match(html, /<img[^>]*src="[^"]*kakao_login_kr_large\.svg"[^>]*alt="카카오로 로그인"[^>]*width="336" height="46"/)
+  assert.match(html, /카카오로 로그인/)
+  assert.match(html, /닉네임·이메일/)
+  assert.match(html, /로그인 없이 기회 탐색하기/)
+  assert.doesNotMatch(html, /type="password"/)
+})
+
+test('legal documents are public during anonymous and failed authentication states and disclose draft limits', () => {
+  for (const path of ['/privacy', '/terms']) {
+    for (const state of [{ auth: null }, { authError: new ApiError('network', 'private internal') }]) {
+      const html = render({ path, ...state })
+      assert.match(html, /<article[^>]*aria-labelledby="legal-title"/)
+      const document = html.match(/<article[\s\S]*?<\/article>/)?.[0]
+      assert.ok(document)
+      assert.doesNotMatch(document, /href="\/(privacy|terms)"|aria-label="관련 문서"/)
+      assert.match(html, /<h1 id="legal-title">/)
+      assert.match(html, /공개 전 확인이 필요한 초안/)
+      assert.match(html, /책임자·문의처·시행일 미정/)
+      assert.match(html, /서비스 Y:ON · 운영팀 기웃기웃/)
+      assert.doesNotMatch(html, /Y(?!:ON)[의에는]|서비스명: Y \/|서비스 Y ·/)
+      assert.equal((html.match(/<h2 id="legal-section-/g) || []).length, 11)
+      assert.doesNotMatch(html, /private internal|404 ·/)
+      for (let index = 1; index <= 11; index++) {
+        assert.match(html, new RegExp(`href="#legal-section-${index}"`))
+      }
+    }
+  }
+  const privacy = render({ path: '/privacy', auth: null })
+  assert.match(privacy, /삭제는 비동기로/)
+  assert.match(privacy, /메시지 처리 기록/)
+  assert.match(privacy, /민감한 정보/)
+  assert.match(privacy, /국외 이전 여부는 코드만으로 확정할 수 없습니다/)
+  assert.match(privacy, /회원 탈퇴는 마이페이지의 계정 관리에서 확인 절차를 거쳐 요청할 수 있습니다/)
+  assert.doesNotMatch(privacy, /탈퇴 화면은 아직 제공하지 않습니다/)
+  const terms = render({ path: '/terms', auth: null })
+  assert.match(terms, /실제 신청 자격이나 최종 선정 결과를 보장하지 않습니다/)
+  assert.match(terms, /제공 기관의 공식 공고/)
+  assert.match(terms, /법적 책임을 포괄적으로 면제/)
+})
+
+test('legal links remain in common footer only, without adding agreement or changing OAuth entry', () => {
+  const login = render({ path: '/login', auth: null })
+  const card = login.match(/<section[^>]*aria-labelledby="login-title"[\s\S]*?<\/section>/)?.[0]
+  assert.ok(card)
+  assert.doesNotMatch(card, /href="\/(privacy|terms)"|로그인 관련 정책/)
+  assert.match(login, /href="\/oauth2\/authorization\/kakao"/)
+  assert.doesNotMatch(login, /type="checkbox"/)
+  for (const path of ['/', '/login', '/privacy', '/terms', '/opportunities', '/saved']) {
+    const footer = render({ path, auth: null }).match(/<footer[\s\S]*?<\/footer>/)?.[0]
+    assert.ok(footer)
+    assert.match(footer, /aria-label="서비스 정책"/)
+    assert.match(footer, /href="\/privacy"/)
+    assert.match(footer, /href="\/terms"/)
+    assert.match(footer, /Y:ON · 기웃기웃/)
+    assert.doesNotMatch(footer, /초안|공개 전 확인/)
+  }
+})
+
+test('OAuth success URL only displays server verification, while failure has retry and public links', () => {
+  const success = render({ path: '/login-success.html', auth: user })
+  assert.match(success, /서버에서 로그인 상태를 확인하고 있어요/)
+  assert.doesNotMatch(success, /테스트 회원님|로그인되어 있어요/)
+  const failure = render({ path: '/login-failure.html', auth: null })
+  assert.match(failure, /로그인을 완료하지 못했어요/)
+  assert.match(failure, /카카오 로그인 다시 진행/)
+  assert.match(failure, /공개 기회 탐색하기/)
+})
+
+test('logout pending disables duplicate button; uncertain completion and explicit failure have separate alerts', () => {
+  const base = { status: 'authenticated', user, logoutPending: false, logoutError: null, retry: () => {}, completeOAuth: async () => {}, logout: async () => {} }
+  const controls = (patch) => renderToStaticMarkup(element(MemoryRouter, null, element(AuthContext.Provider, { value: { ...base, ...patch } }, element(AuthControls))))
+  assert.match(controls({ logoutPending: true, status: 'checking' }), /disabled="" aria-busy="true">로그아웃 중/)
+  assert.match(controls({ logoutError: new ApiError('network', 'private') }), /서버 로그아웃 완료 여부를 확인하지 못했어요/)
+  assert.match(controls({ logoutError: new ApiError('http', 'private', 401) }), /로그아웃 요청이 완료되지 않았어요/)
+  assert.match(controls({ logoutError: new ApiError('http', 'private', 403) }), /role="alert"/)
+  // 오류는 헤더 메뉴 안이 아니라 별도 팝업으로, 모바일 메뉴가 닫혀 있어도 보인다.
+  const closedMenu = renderToStaticMarkup(element(MemoryRouter, null, element(AuthContext.Provider, { value: { ...base, logoutError: new ApiError('http', 'private', 401) } }, element(AuthControls, { menuOpen: false }))))
+  assert.match(closedMenu, /<div class="authError" role="alert"><div class="authErrorText"><p class="authErrorTitle">로그아웃하지 못했어요<\/p>/)
+  assert.match(closedMenu, /<div class="authErrorActions"><button[^>]*>로그인 상태 다시 확인<\/button><button[^>]*>닫기<\/button><\/div>/)
+  assert.doesNotMatch(closedMenu, /authErrorOpen/)
+  const css = fs.readFileSync(new URL('../src/layouts/Header.module.css', import.meta.url), 'utf8')
+  // 헤더 오른쪽 로그인 링크는 메뉴 탭 모양을 따르지 않고 네 모서리를 같게 둥글린다.
+  assert.match(css, /\.auth > a \{[^}]*border-radius: var\(--radius-sm\);/)
+  assert.match(css, /\.authError \{ position: fixed;[^}]*inset-block-end: calc\(var\(--space-4\) \+ env\(safe-area-inset-bottom, 0px\)\);[^}]*max-inline-size: 26rem;/)
+})
+
+test('OAuth completion error offers the page-owned retry instead of a header user-query retry', () => {
+  const auth = { status: 'error', logoutPending: false, logoutError: null, retry: undefined, completeOAuth: async () => {}, logout: async () => {} }
+  const html = renderToStaticMarkup(element(MemoryRouter, null, element(AuthContext.Provider, { value: auth }, element(AuthControls))))
+  assert.match(html, /로그인 완료 화면에서 다시 확인해 주세요/)
+  assert.doesNotMatch(html, /<button/)
+})
+
+test('public search/detail remain accessible during auth errors and login return preserves search context', () => {
+  const error = new ApiError('http', 'private', 503)
+  const search = render({ path: '/opportunities?keyword=test&page=2', authError: error })
+  assert.match(search, /통합 기회 탐색/)
+  const detail = render({ path: '/opportunities/42', auth: null })
+  assert.match(detail, /기회 상세를 불러오는 중이에요/)
+  const anonymousSearch = render({ path: '/opportunities?keyword=test&page=2', auth: null })
+  assert.match(anonymousSearch, /returnTo=%2Fopportunities%3Fkeyword%3Dtest%26page%3D2/)
+})
+
+test('header keeps the existing five destinations and marks the parent menu active on nested pages', () => {
+  for (const [path, label] of [['/', '홈'], ['/opportunities/42', '기회 탐색'], ['/saved', '저장한 기회'], ['/notifications', '알림'], ['/mypage/profile', '마이페이지']]) {
+    const header = render({ path, auth: user }).match(/<header[\s\S]*?<\/header>/)[0]
+    assert.equal((header.match(/aria-current="page"/g) || []).length, 1)
+    const badge = label === '알림' ? '(?:<span[^>]*aria-label="미읽음 알림[^"\\n]*"[^>]*>[^<]*</span>)?' : ''
+    assert.match(header, new RegExp(`<a[^>]*aria-current="page"[^>]*>(?:<svg[\\s\\S]*?</svg>)?${label}${badge}</a>`))
+    for (const destination of ['/', '/opportunities', '/saved', '/notifications', '/mypage']) assert.ok(header.includes(`href="${destination}"`))
+    assert.match(header, /aria-label="Y:ON 홈"/)
+  }
+})
+
+test('header separates primary navigation from authentication while keeping a named collapsed mobile menu', () => {
+  const header = render({ path: '/opportunities?page=2', auth: null }).match(/<header[\s\S]*?<\/header>/)[0]
+  assert.match(header, /<button[^>]*type="button"[^>]*aria-expanded="false"[^>]*aria-controls="primary-navigation"/)
+  assert.match(header, /메뉴 열기/)
+  assert.match(header, /<nav id="primary-navigation"/)
+  const nav = header.match(/<nav[\s\S]*?<\/nav>/)[0]
+  assert.match(nav, /aria-label="주요 메뉴"/)
+  assert.doesNotMatch(nav, /로그인|로그아웃/)
+  assert.match(header.slice(header.indexOf('</nav>')), /returnTo=%2Fopportunities%3Fpage%3D2/)
+})

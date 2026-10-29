@@ -1,0 +1,38 @@
+import { useCallback, useEffect, useMemo } from 'react'
+import type { ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AuthContext } from './AuthContext'
+import { authObservationOptions, authStatus, authTransitionKey, createAuthActions, observeAuthLoss } from './session'
+import type { AuthTransitionKind } from './session'
+import PushBridge from '../push/PushBridge'
+
+// 사용자 정보는 Query가 소유한다. Provider는 앱 전체 인증 전환·중복 로그아웃을 한 곳에서 조율한다.
+function AuthProvider({ children }: { children: ReactNode }) {
+  const client = useQueryClient()
+  const location = useLocation()
+  const actions = useMemo(() => createAuthActions(client), [client])
+  // 공개 조회가 재발급 실패로 익명 전환되면 같은 인증 Query로 상태를 다시 확인한다.
+  useEffect(() => observeAuthLoss(client), [client])
+  const transition = useMutation({ mutationKey: authTransitionKey, mutationFn: (kind: AuthTransitionKind) => kind === 'oauth' ? actions.completeOAuth() : kind === 'withdraw' ? actions.withdraw() : actions.logout() })
+  const oauthPage = location.pathname === '/login-success.html'
+  const query = useQuery(authObservationOptions(client, transition, oauthPage))
+  const mutate = transition.mutateAsync
+  const completeOAuth = useCallback(async () => { await mutate('oauth') }, [mutate])
+  const logout = useCallback(async () => { await mutate('logout') }, [mutate])
+  const withdraw = useCallback(async () => { await mutate('withdraw') }, [mutate])
+  const status = authStatus(query, transition, oauthPage)
+  return <AuthContext.Provider value={{
+    status, user: status === 'authenticated' ? query.data ?? undefined : undefined,
+    logoutPending: transition.isPending && transition.variables === 'logout',
+    logoutError: transition.variables === 'logout' ? transition.error : null,
+    withdrawPending: transition.isPending && transition.variables === 'withdraw',
+    withdrawError: transition.variables === 'withdraw' ? transition.error : null,
+    withdrawn: transition.isSuccess && transition.variables === 'withdraw',
+    withdraw,
+    // 완료 페이지는 전용 재시도로 사용자 확인→복구 초기화→복귀까지 수행한다.
+    retry: oauthPage ? undefined : () => { void query.refetch() }, completeOAuth, logout,
+  }}><PushBridge />{children}</AuthContext.Provider>
+}
+
+export default AuthProvider

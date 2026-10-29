@@ -1,0 +1,168 @@
+package com.team3.dataservice.collection.service;
+
+import com.team3.dataservice.collection.domain.CollectionSource;
+import com.team3.dataservice.collection.domain.entity.SyncHistory;
+import com.team3.dataservice.collection.domain.SyncJobStatus;
+import com.team3.dataservice.collection.domain.RecordProcessStatus;
+import com.team3.dataservice.collection.dto.response.Employment24PageFailureResponse;
+import com.team3.dataservice.collection.dto.response.SyncJobResponse;
+import com.team3.dataservice.collection.dto.response.SyncPageFailureResponse;
+import com.team3.dataservice.collection.dto.response.SyncRecordResultResponse;
+import com.team3.dataservice.collection.dto.response.SyncStartResponse;
+import com.team3.dataservice.collection.domain.repository.ExternalSourceRepository;
+import com.team3.dataservice.collection.domain.repository.SyncHistoryRepository;
+import jakarta.persistence.EntityNotFoundException;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+public class SyncJobService {
+    private static final List<SyncJobStatus> ACTIVE = List.of(SyncJobStatus.PENDING, SyncJobStatus.RUNNING);
+    private final ExternalSourceRepository sources;
+    private final SyncHistoryRepository histories;
+    private final CollectionCompletionOutbox completionOutbox;
+    private final OffsetDateTime applicationStartedAt = OffsetDateTime.now();
+
+    @Value("${collection.youth-policy.url}")
+    private String youthPolicyUrl;
+
+    @Value("${collection.employment24.url}")
+    private String employment24Url;
+
+    @Transactional
+    public SyncStartResponse create(CollectionSource sourceType) {
+        return create(sourceType, "MANUAL");
+    }
+
+    @Transactional
+    public SyncStartResponse createScheduled(CollectionSource sourceType) {
+        return create(sourceType, "SCHEDULED");
+    }
+
+    @Transactional
+    public SyncStartResponse createRetry(Long jobId) {
+        if (jobId == null || jobId < 1) {
+            throw new IllegalArgumentException("수집 실행 ID는 1 이상이어야 합니다.");
+        }
+        var previous = histories.findById(jobId)
+                .orElseThrow(() -> new EntityNotFoundException("수집 실행을 찾을 수 없습니다."));
+        if (!List.of(SyncJobStatus.FAILED, SyncJobStatus.PARTIAL_SUCCESS, SyncJobStatus.INTERRUPTED)
+                .contains(previous.getStatus())) {
+            throw new IllegalStateException("실패·부분 성공·중단된 수집만 재시도할 수 있습니다.");
+        }
+        return create(CollectionSource.valueOf(previous.getSource().getSourceCode()), "MANUAL_RETRY");
+    }
+
+    private SyncStartResponse create(CollectionSource sourceType, String syncType) {
+        boolean youth = sourceType == CollectionSource.YOUTH_POLICY;
+        sources.registerIfAbsent(sourceType.name(), youth ? "온통청년" : "고용24",
+                youth ? youthPolicyUrl : employment24Url);
+        var registered = sources.findBySourceCode(sourceType.name()).orElseThrow();
+        var source = sources.findByIdForUpdate(registered.getId()).orElseThrow();
+        if (!source.isEnabled()) {
+            throw new IllegalStateException("사용 중지된 출처는 최신화할 수 없습니다.");
+        }
+        if (histories.existsBySourceIdAndStatusIn(source.getId(), ACTIVE)) {
+            throw new IllegalStateException("해당 출처의 최신화가 이미 대기 중이거나 실행 중입니다.");
+        }
+        var history = histories.save(SyncHistory.pending(source, syncType, OffsetDateTime.now()));
+        return new SyncStartResponse(history.getId(), sourceType.name(), history.getStatus(),
+                switch (syncType) {
+                    case "MANUAL" -> "수동 최신화 요청을 접수했습니다.";
+                    case "MANUAL_RETRY" -> "전체 수집 재시도 요청을 접수했습니다.";
+                    default -> "정기 최신화 요청을 접수했습니다.";
+                });
+    }
+
+    @Transactional(readOnly = true)
+    public SyncJobResponse get(Long jobId) {
+        if (jobId == null || jobId < 1) {
+            throw new IllegalArgumentException("수집 실행 ID는 1 이상이어야 합니다.");
+        }
+        return SyncJobResponse.from(histories.findById(jobId)
+                .orElseThrow(() -> new EntityNotFoundException("수집 실행을 찾을 수 없습니다.")));
+    }
+
+    @Transactional(readOnly = true)
+    public List<SyncJobResponse> listByDate(LocalDate date) {
+        // ISO 날짜 파서가 허용하는 큰 연도로 DB timestamp 범위 오류가 발생하지 않도록 제한한다.
+        if (date == null || date.getYear() < 1 || date.getYear() > 9999) {
+            throw new IllegalArgumentException("조회 날짜는 yyyy-MM-dd 형식의 유효한 날짜여야 합니다.");
+        }
+        var zone = ZoneId.of("Asia/Seoul");
+        var from = date.atStartOfDay(zone).toOffsetDateTime();
+        var until = date.plusDays(1).atStartOfDay(zone).toOffsetDateTime();
+        return histories.findByStartedAtGreaterThanEqualAndStartedAtLessThanOrderByStartedAtDescIdDesc(from, until)
+                .stream().map(SyncJobResponse::from).toList();
+    }
+
+    @Transactional
+    public void start(Long jobId) {
+        locked(jobId).start();
+    }
+
+    @Transactional
+    public void recordFetchedPage(Long jobId, int count) {
+        locked(jobId).recordFetchedPage(count);
+    }
+
+    @Transactional
+    public void recordCollection(Long jobId, int count, List<SyncPageFailureResponse> pageFailures,
+                                 List<Employment24PageFailureResponse> employment24PageFailures,
+                                 List<String> incompleteNcsCodes) {
+        locked(jobId).recordCollection(count, pageFailures, employment24PageFailures, incompleteNcsCodes);
+    }
+
+    @Transactional
+    public void recordFailure(Long jobId, int itemIndex, String externalId, String errorCode) {
+        locked(jobId).recordFailure(new SyncRecordResultResponse(null, externalId, null, itemIndex, null,
+                RecordProcessStatus.FAILED, null, errorCode, "원본 항목 처리에 실패했습니다.", OffsetDateTime.now()));
+    }
+
+    @Transactional
+    public void complete(Long jobId, boolean completed) {
+        var history = locked(jobId);
+        if (history.getStatus() != SyncJobStatus.RUNNING) return;
+        // PostgreSQL timestamps have microsecond precision; keep occurredAt identical to finished_at.
+        history.finish(completed, OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS));
+        completionOutbox.recordIfCompletion(history);
+    }
+
+    @Transactional
+    public void fail(Long jobId, String safeReason, boolean interrupted) {
+        var history = locked(jobId);
+        if (!ACTIVE.contains(history.getStatus())) {
+            return;
+        }
+        history.fail(safeReason, interrupted, OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS));
+        completionOutbox.recordIfCompletion(history);
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    @Order(0)
+    @Transactional
+    public void recoverInterrupted() {
+        // ponytail: 단일 앱 인스턴스의 재시작 복구다. 다중 인스턴스 전환 시 소유권·임대 기반 복구가 필요하다.
+        for (var history : histories.findByStatusInAndStartedAtBefore(ACTIVE, applicationStartedAt)) {
+            history.fail("애플리케이션 재시작으로 수집 실행이 중단되었습니다.", true,
+                    OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS));
+            completionOutbox.recordIfCompletion(history);
+        }
+    }
+
+    private SyncHistory locked(Long jobId) {
+        return histories.findByIdForUpdate(jobId)
+                .orElseThrow(() -> new EntityNotFoundException("수집 실행을 찾을 수 없습니다."));
+    }
+}

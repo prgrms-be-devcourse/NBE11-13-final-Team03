@@ -1,14 +1,12 @@
 package com.team3.backend.collection.dto.response;
 
-import com.team3.backend.collection.domain.SyncJobStatus;
-import com.team3.backend.collection.domain.entity.SyncHistory;
 import java.time.OffsetDateTime;
 import java.util.List;
 
 public record SyncJobResponse(
         Long jobId,
         String source,
-        SyncJobStatus status,
+        String status,
         OffsetDateTime startedAt,
         OffsetDateTime completedAt,
         Integer totalCount,
@@ -33,13 +31,4 @@ public record SyncJobResponse(
         recordFailures = List.copyOf(recordFailures);
     }
 
-    public static SyncJobResponse from(SyncHistory history) {
-        return new SyncJobResponse(history.getId(), history.getSource().getSourceCode(), history.getStatus(),
-                history.getStartedAt(), history.getFinishedAt(), null, history.getCollectedCount(),
-                history.successCount(), history.getFailedCount(), history.pendingCount(), history.failedPageCount(),
-                history.getNewCount(), history.getUpdatedCount(), history.getUnchangedCount(),
-                history.getPageFailures(), history.getEmployment24PageFailures(), history.getIncompleteNcsCodes(),
-                history.getRecordFailures(), history.getFailureReason());
-    }
 }
-

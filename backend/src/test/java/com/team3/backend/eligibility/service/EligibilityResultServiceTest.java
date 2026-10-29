@@ -1,11 +1,14 @@
 package com.team3.backend.eligibility.service;
 
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
+import com.team3.backend.eligibility.domain.repository.EligibilityResultUpsertRepository;
+import com.team3.backend.eligibility.dto.OpportunityEligibility;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.NormalizationResult;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.*;
 import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
 import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;
@@ -39,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 판정 결과 저장·재사용을 실제 PostgreSQL로 검증한다. 일회용 DB를 YON_TEST_DB_URL로 지정할 것 (ddl-auto=create-drop).
+ * 판정 결과는 (사용자 × 조건 묶음) 단위다. 이 테스트의 정책은 거주지역(강남 11680 / 마포 11440)과 최대 나이로 묶음이 나뉜다.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -49,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
-@Import({EligibilityResultService.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
+@Import({EligibilityResultService.class, EligibilityBatchRefresher.class, EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class,
         YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
         YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
@@ -62,6 +66,8 @@ class EligibilityResultServiceTest {
     private EligibilityResultService service;
     @Autowired
     private EligibilityResultRepository resultRepository;
+    @Autowired
+    private EligibilityBatchRefresher batchRefresher;
     @Autowired
     private YouthPolicyNormalizationService normalizationService;
     @Autowired
@@ -130,19 +136,58 @@ class EligibilityResultServiceTest {
     }
 
     @Test
-    void 새_정책_버전이_생긴_기회만_다시_판정한다() {
+    void 조건이_바뀐_새_버전만_다시_판정한다() {
         Long changed = normalizePolicy("R2026-1", "11680", "34");
         normalizePolicy("R2026-2", "11440", "34");
         persistProfile(gangnam);
         service.refreshAll(USER, NOW);
+        Long oldSetId = currentConditionSetId(changed);
 
         normalizePolicy("R2026-1", "11680", "39");
-        Long newVersionId = em.createQuery("select o.currentVersion.id from Opportunity o where o.id = :id", Long.class)
-                .setParameter("id", changed).getSingleResult();
+        Long newVersionId = currentVersionId(changed);
 
+        assertThat(currentConditionSetId(changed)).isNotEqualTo(oldSetId);
         assertThat(service.refreshAll(USER, NOW)).isEqualTo(1);
-        assertThat(resultRepository.findByUserIdAndOpportunityIdIn(USER, List.of(changed))).singleElement()
-                .extracting(EligibilityResult::getOpportunityVersionId).isEqualTo(newVersionId);
+        assertThat(resultRepository.findByOpportunities(USER, List.of(changed))).singleElement().satisfies(e -> {
+            assertThat(e.opportunityVersionId()).isEqualTo(newVersionId);
+            assertThat(e.result().getConditionSetId()).isEqualTo(currentConditionSetId(changed));
+        });
+    }
+
+    @Test
+    void 조건이_같은_새_버전은_다시_판정하지_않고_기존_결과를_쓴다() {
+        Long policy = normalizePolicy("R2026-1", "11680", "34");
+        persistProfile(gangnam);
+        service.refreshAll(USER, NOW);
+        Long oldVersionId = currentVersionId(policy);
+        Long setId = currentConditionSetId(policy);
+
+        normalizePolicy("R2026-1", "청년 월세 지원 (제목 수정)", "11680", "34");
+
+        assertThat(currentVersionId(policy)).isNotEqualTo(oldVersionId);
+        assertThat(currentConditionSetId(policy)).isEqualTo(setId);
+        assertThat(service.refreshAll(USER, NOW)).isZero();
+        assertThat(resultRepository.findFresh(USER, policy, EligibilityResultService.RULE_VERSION, NOW.toLocalDate()))
+                .hasValueSatisfying(e -> assertThat(e.opportunityVersionId()).isEqualTo(currentVersionId(policy)));
+    }
+
+    @Test
+    void 조건이_같은_기회들은_한_번만_판정해_결과_하나를_함께_쓴다() {
+        Long first = normalizePolicy("R2026-1", "11680", "34");
+        Long second = normalizePolicy("R2026-3", "11680", "34");
+        Long mapoPolicy = normalizePolicy("R2026-2", "11440", "34");
+        persistProfile(gangnam);
+
+        assertThat(currentConditionSetId(first)).isEqualTo(currentConditionSetId(second));
+        assertThat(service.refreshAll(USER, NOW)).isEqualTo(2);
+        assertThat(resultRepository.count()).isEqualTo(2);
+        List<OpportunityEligibility> results = resultRepository.findByOpportunities(USER,
+                List.of(first, second, mapoPolicy));
+        assertThat(results).extracting(OpportunityEligibility::opportunityId)
+                .containsExactlyInAnyOrder(first, second, mapoPolicy);
+        assertThat(results).filteredOn(e -> !e.opportunityId().equals(mapoPolicy))
+                .extracting(e -> e.result().getId()).hasSize(2).containsOnly(results.stream()
+                        .filter(e -> e.opportunityId().equals(first)).findFirst().orElseThrow().result().getId());
     }
 
     @Test
@@ -152,10 +197,10 @@ class EligibilityResultServiceTest {
         persistProfile(gangnam);
         service.refreshAll(USER, NOW);
 
-        assertThat(resultRepository.findByUserIdAndEligibilityStatusIn(USER,
+        assertThat(resultRepository.findByStatuses(USER,
                         List.of(EligibilityStatus.ELIGIBLE, EligibilityStatus.POSSIBLY_ELIGIBLE), PageRequest.of(0, 10))
                 .getContent())
-                .singleElement().extracting(EligibilityResult::getOpportunityId).isEqualTo(gangnamPolicy);
+                .singleElement().extracting(OpportunityEligibility::opportunityId).isEqualTo(gangnamPolicy);
     }
 
     @Test
@@ -164,9 +209,12 @@ class EligibilityResultServiceTest {
         normalizePolicy("R2026-2", "11440", "34");
         persistProfile(gangnam);
 
-        List<EligibilityResult> results = service.refresh(USER, List.of(gangnamPolicy, 999_999L), NOW);
+        List<OpportunityEligibility> results = service.refresh(USER, List.of(gangnamPolicy, 999_999L), NOW);
 
-        assertThat(results).singleElement().satisfies(r -> {
+        assertThat(results).singleElement().satisfies(e -> {
+            assertThat(e.opportunityId()).isEqualTo(gangnamPolicy);
+            assertThat(e.opportunityVersionId()).isEqualTo(currentVersionId(gangnamPolicy));
+            EligibilityResult r = e.result();
             assertThat(r.getEligibilityStatus()).isEqualTo(EligibilityStatus.ELIGIBLE);
             assertThat(r.getRuleVersion()).isEqualTo(EligibilityResultService.RULE_VERSION);
             assertThat(r.getProfileVersion()).isEqualTo(1L);
@@ -183,19 +231,39 @@ class EligibilityResultServiceTest {
     }
 
     @Test
+    void 조건별_결과_수를_상태별_개수로_함께_저장한다() {
+        normalizePolicy("R2026-1", "11680", "34");
+        normalizePolicy("R2026-2", "11440", "34");
+        persistProfile(gangnam);
+        service.refreshAll(USER, NOW);
+        em.clear();
+
+        assertThat(resultRepository.findAll()).hasSize(2).allSatisfy(r -> {
+            assertThat(r.getMatchedCount()).isEqualTo(countOf(r, ConditionMatchResult.MATCHED));
+            assertThat(r.getNotMatchedCount()).isEqualTo(countOf(r, ConditionMatchResult.NOT_MATCHED));
+            assertThat(r.getUserInfoMissingCount()).isEqualTo(countOf(r, ConditionMatchResult.USER_INFO_MISSING));
+            assertThat(r.getCheckRequiredCount()).isEqualTo(countOf(r, ConditionMatchResult.CHECK_REQUIRED));
+            assertThat(r.getDataUnclearCount()).isEqualTo(countOf(r, ConditionMatchResult.DATA_UNCLEAR));
+        });
+        assertThat(resultRepository.findAll()).extracting(EligibilityResult::getNotMatchedCount).contains(0)
+                .anyMatch(count -> count > 0);
+    }
+
+    @Test
     void 규칙_버전이_바뀐_결과는_다시_판정해_같은_행을_갱신한다() {
         normalizePolicy("R2026-1", "11680", "34");
         normalizePolicy("R2026-2", "11440", "34");
         persistProfile(gangnam);
         service.refreshAll(USER, NOW);
-        List<Long> ids = jdbc.queryForList("SELECT id FROM eligibility_results ORDER BY opportunity_id", Long.class);
+        List<Long> ids = jdbc.queryForList("SELECT id FROM eligibility_set_results ORDER BY condition_set_id",
+                Long.class);
 
-        jdbc.update("UPDATE eligibility_results SET rule_version = '0'");
+        jdbc.update("UPDATE eligibility_set_results SET rule_version = '0'");
 
         assertThat(service.refreshAll(USER, NOW)).isEqualTo(2);
-        assertThat(jdbc.queryForList("SELECT id FROM eligibility_results ORDER BY opportunity_id", Long.class))
+        assertThat(jdbc.queryForList("SELECT id FROM eligibility_set_results ORDER BY condition_set_id", Long.class))
                 .isEqualTo(ids);
-        assertThat(jdbc.queryForList("SELECT DISTINCT rule_version FROM eligibility_results", String.class))
+        assertThat(jdbc.queryForList("SELECT DISTINCT rule_version FROM eligibility_set_results", String.class))
                 .containsExactly(EligibilityResultService.RULE_VERSION);
     }
 
@@ -208,7 +276,7 @@ class EligibilityResultServiceTest {
         service.refreshAll(USER, NOW);
         List<Map<String, Object>> byDefault = dumpResults();
 
-        jdbc.update("DELETE FROM eligibility_results");
+        jdbc.update("DELETE FROM eligibility_set_results");
         EligibilityResultService target = AopTestUtils.getTargetObject(service);
         ReflectionTestUtils.setField(target, "writeBatchSize", 1);
         try {
@@ -224,7 +292,7 @@ class EligibilityResultServiceTest {
         Long gangnamPolicy = normalizePolicy("R2026-1", "11680", "34");
         persistProfile(gangnam);
         assertThat(service.refresh(USER, List.of(gangnamPolicy), NOW)).singleElement()
-                .extracting(EligibilityResult::getEligibilityStatus).isEqualTo(EligibilityStatus.ELIGIBLE);
+                .extracting(e -> e.result().getEligibilityStatus()).isEqualTo(EligibilityStatus.ELIGIBLE);
 
         em.createQuery("update EligibilityProfile p set p.residenceRegion = :region, "
                         + "p.profileVersion = p.profileVersion + 1 where p.userId = :userId")
@@ -233,10 +301,103 @@ class EligibilityResultServiceTest {
                 .executeUpdate();
         em.clear();
 
-        assertThat(service.refresh(USER, List.of(gangnamPolicy), NOW)).singleElement().satisfies(r -> {
-            assertThat(r.getEligibilityStatus()).isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
-            assertThat(r.getProfileVersion()).isEqualTo(2L);
+        assertThat(service.refresh(USER, List.of(gangnamPolicy), NOW)).singleElement().satisfies(e -> {
+            assertThat(e.result().getEligibilityStatus()).isEqualTo(EligibilityStatus.NOT_ELIGIBLE);
+            assertThat(e.result().getProfileVersion()).isEqualTo(2L);
         });
+    }
+
+    @Test
+    void 오래된_결과만_고르는_최신화는_새_조건_묶음만_판정한다() {
+        Long changed = normalizePolicy("R2026-1", "11680", "34");
+        normalizePolicy("R2026-2", "11440", "34");
+        persistProfile(gangnam);
+        assertThat(service.refreshStale(USER, NOW)).isEqualTo(2);
+        assertThat(service.refreshStale(USER, NOW)).isZero();
+
+        // 새 기회는 기존 묶음(강남·34세)과 같아 판정하지 않고, 조건이 바뀐 기회만 새 묶음으로 판정한다
+        Long added = normalizePolicy("R2026-3", "11680", "34");
+        normalizePolicy("R2026-1", "11680", "39");
+        Long newVersionId = currentVersionId(changed);
+
+        assertThat(service.refreshStale(USER, NOW)).isEqualTo(1);
+        assertThat(service.refreshStale(USER, NOW)).isZero();
+        assertThat(resultRepository.count()).isEqualTo(3);
+        assertThat(resultRepository.findByOpportunities(USER, List.of(changed))).singleElement()
+                .extracting(OpportunityEligibility::opportunityVersionId).isEqualTo(newVersionId);
+        assertThat(resultRepository.findByOpportunities(USER, List.of(added))).hasSize(1);
+    }
+
+    @Test
+    void 오래된_결과만_고르는_최신화는_프로필_변경과_생일을_반영하고_프로필이_없으면_0() {
+        assertThat(service.refreshStale(USER, NOW)).isZero();
+
+        normalizePolicy("R2026-1", "11680", "34");
+        normalizePolicy("R2026-2", "11440", "34");
+        persistProfile(gangnam);
+        service.refreshStale(USER, NOW);
+
+        assertThat(service.refreshStale(USER, OffsetDateTime.parse("2027-05-14T10:00:00+09:00"))).isZero();
+        assertThat(service.refreshStale(USER, OffsetDateTime.parse("2027-05-15T10:00:00+09:00"))).isEqualTo(2);
+
+        em.createQuery("update EligibilityProfile p set p.profileVersion = p.profileVersion + 1 where p.userId = :userId")
+                .setParameter("userId", USER)
+                .executeUpdate();
+        em.clear();
+        assertThat(service.refreshStale(USER, NOW)).isEqualTo(2);
+    }
+
+    @Test
+    void 배치는_프로필이_있는_사용자마다_오래된_결과만_판정한다() {
+        normalizePolicy("R2026-1", "11680", "34");
+        normalizePolicy("R2026-2", "11440", "34");
+        persistProfile(USER, gangnam);
+        persistProfile(2L, mapo);
+
+        assertThat(batchRefresher.refreshAllUsers(NOW)).isEqualTo(4);
+        assertThat(batchRefresher.refreshAllUsers(NOW)).isZero();
+
+        normalizePolicy("R2026-3", "11680", "34");
+        assertThat(batchRefresher.refreshAllUsers(NOW)).isZero();
+
+        normalizePolicy("R2026-4", "11680", "39");
+        assertThat(batchRefresher.refreshAllUsers(NOW)).isEqualTo(2);
+        assertThat(resultRepository.count()).isEqualTo(6);
+    }
+
+    @Test
+    void 늦게_끝난_옛_프로필_판정은_새_프로필_결과를_덮어쓰지_않는다() {
+        Long opportunityId = normalizePolicy("R2026-1", "11680", "34");
+        persistProfile(gangnam);
+        service.refreshStale(USER, NOW);
+        em.createQuery("update EligibilityProfile p set p.profileVersion = p.profileVersion + 1 where p.userId = :userId")
+                .setParameter("userId", USER)
+                .executeUpdate();
+        em.clear();
+        assertThat(service.refreshStale(USER, NOW)).isEqualTo(1);
+
+        int written = resultRepository.upsert(USER, 1L, EligibilityResultService.RULE_VERSION,
+                LocalDateTime.of(2026, 10, 15, 10, 0), List.of(new EligibilityResultUpsertRepository.UpsertRow(
+                        currentConditionSetId(opportunityId), EligibilityStatus.NOT_ELIGIBLE, "옛 프로필 판정",
+                        List.of(), null)));
+        em.clear();
+
+        assertThat(written).isZero();
+        assertThat(resultRepository.findAll()).singleElement().satisfies(r -> {
+            assertThat(r.getProfileVersion()).isEqualTo(2L);
+            assertThat(r.getEligibilityStatus()).isEqualTo(EligibilityStatus.ELIGIBLE);
+        });
+    }
+
+    @Test
+    void 결과_테이블_통계가_없으면_분석해서_만든다() {
+        normalizePolicy("R2026-1", "11680", "34");
+        persistProfile(gangnam);
+        service.refreshStale(USER, NOW);
+
+        resultRepository.analyze();
+
+        assertThat(resultRepository.lacksStatistics()).isFalse();
     }
 
     @Test
@@ -249,18 +410,38 @@ class EligibilityResultServiceTest {
     }
 
     private List<Map<String, Object>> dumpResults() {
-        return jdbc.queryForList("SELECT opportunity_id, opportunity_version_id, profile_version, rule_version, "
-                + "eligibility_status, reason, condition_results::text AS c, valid_until, evaluated_at "
-                + "FROM eligibility_results ORDER BY opportunity_id");
+        return jdbc.queryForList("SELECT condition_set_id, profile_version, rule_version, "
+                + "eligibility_status, reason, condition_results::text AS c, matched_count, not_matched_count, "
+                + "user_info_missing_count, check_required_count, data_unclear_count, valid_until, evaluated_at "
+                + "FROM eligibility_set_results ORDER BY condition_set_id");
     }
 
     private EligibilityStatus statusOf(Long opportunityId) {
-        return resultRepository.findByUserIdAndOpportunityIdIn(USER, List.of(opportunityId)).getFirst().getEligibilityStatus();
+        return resultRepository.findByOpportunities(USER, List.of(opportunityId)).getFirst().result()
+                .getEligibilityStatus();
+    }
+
+    private static int countOf(EligibilityResult r, ConditionMatchResult result) {
+        return (int) r.getConditionResults().stream().filter(m -> result.name().equals(m.get("result"))).count();
+    }
+
+    private Long currentConditionSetId(Long opportunityId) {
+        return em.createQuery("select o.currentVersion.conditionSetId from Opportunity o where o.id = :id", Long.class)
+                .setParameter("id", opportunityId).getSingleResult();
+    }
+
+    private Long currentVersionId(Long opportunityId) {
+        return em.createQuery("select o.currentVersion.id from Opportunity o where o.id = :id", Long.class)
+                .setParameter("id", opportunityId).getSingleResult();
     }
 
     private Long normalizePolicy(String plcyNo, String zipCd, String maxAge) {
+        return normalizePolicy(plcyNo, "청년 월세 지원", zipCd, maxAge);
+    }
+
+    private Long normalizePolicy(String plcyNo, String title, String zipCd, String maxAge) {
         YouthPolicyRaw raw = YouthPolicyRaw.builder()
-                .plcyNo(plcyNo).plcyNm("청년 월세 지원")
+                .plcyNo(plcyNo).plcyNm(title)
                 .sprtTrgtMinAge("19").sprtTrgtMaxAge(maxAge).sprtTrgtAgeLmtYn("Y")
                 .aplyPrdSeCd("0057001").aplyYmd("20261001 ~ 20261031")
                 .zipCd(zipCd)
@@ -273,8 +454,12 @@ class EligibilityResultServiceTest {
     }
 
     private void persistProfile(Region residence) {
+        persistProfile(USER, residence);
+    }
+
+    private void persistProfile(Long userId, Region residence) {
         em.persist(EligibilityProfile.builder()
-                .userId(USER)
+                .userId(userId)
                 .birthDate(LocalDate.of(1998, 5, 15))
                 .residenceRegion(em.getReference(Region.class, residence.getRegionCode()))
                 .employmentStatus(EmploymentStatus.UNEMPLOYED)

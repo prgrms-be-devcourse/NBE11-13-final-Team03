@@ -1,0 +1,6 @@
+.section { display: grid; gap: var(--space-3); min-inline-size: 0; }
+.section h2 { margin: 0; font-size: 1.125rem; line-height: 1.5; }
+.section p { margin: 0; }
+.status { display: grid; gap: var(--space-1); font-weight: 600; }
+.note { color: var(--color-text-secondary); font-size: 0.8125rem; line-height: var(--line-height-small); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }

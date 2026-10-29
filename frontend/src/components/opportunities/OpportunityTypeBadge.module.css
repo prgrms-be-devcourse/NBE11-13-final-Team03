@@ -1,0 +1,20 @@
+.typeBadge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-2);
+  /* 상세의 모집 상태·신청 가능성 배지(1px 테두리)와 높이를 맞춘다. */
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.typeBadge[data-opportunity-type='VOCATIONAL_TRAINING'] {
+  background: var(--color-accent-blue);
+  color: var(--color-status-info-text);
+}

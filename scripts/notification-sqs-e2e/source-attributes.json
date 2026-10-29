@@ -1,0 +1,5 @@
+{
+  "VisibilityTimeout": "120",
+  "MessageRetentionPeriod": "345600",
+  "RedrivePolicy": "{\"deadLetterTargetArn\":\"arn:aws:sqs:ap-northeast-2:000000000000:yon-sqs-e2e-notifications-dlq\",\"maxReceiveCount\":\"5\"}"
+}

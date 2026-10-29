@@ -1,6 +1,9 @@
 package com.team3.backend.preference.controller;
 
 import com.team3.backend.auth.security.CustomUserDetails;
+import com.team3.backend.behavior.domain.entity.UserBehaviorEventType;
+import com.team3.backend.behavior.domain.entity.UserBehaviorSource;
+import com.team3.backend.behavior.service.PreferenceBehaviorRecorder;
 import com.team3.backend.preference.dto.SavedOpportunitiesResponseDto;
 import com.team3.backend.preference.service.PreferenceService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -28,9 +31,10 @@ import org.springframework.web.bind.annotation.RestController;
 public class PreferenceController {
 
     private final PreferenceService preferenceService;
+    private final PreferenceBehaviorRecorder behaviorRecorder;
 
     /** 공고를 저장하고 본문 없이 응답한다. */
-    @Operation(summary = "공고 저장", description = "이미 저장된 공고도 멱등하게 처리한다. 숨김 상태는 변경하지 않는다.")
+    @Operation(summary = "공고 저장", description = "이미 저장된 공고도 멱등하게 처리한다. 숨김 상태는 변경하지 않는다. 저장 상태가 false에서 true로 변경될 때만 SAVE 행동 이벤트를 기록한다.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "저장 성공, 응답 본문 없음", content = @Content),
             @ApiResponse(responseCode = "400", description = "공고 ID 형식 오류 (COMMON_002)"),
@@ -40,14 +44,19 @@ public class PreferenceController {
     @PostMapping("/api/opportunities/{id}/save")
     public ResponseEntity<Void> save(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @Parameter(description = "저장할 공고 ID") @PathVariable Long id
+            @Parameter(description = "저장할 공고 ID") @PathVariable Long id,
+            @Parameter(description = "행동 출처, 생략 시 OTHER")
+            @RequestParam(defaultValue = "OTHER") UserBehaviorSource source
     ) {
-        preferenceService.save(userDetails.getUserId(), id);
+        Long userId = userDetails.getUserId();
+        if (preferenceService.save(userId, id)) {
+            behaviorRecorder.record(userId, id, UserBehaviorEventType.SAVE, source);
+        }
         return ResponseEntity.noContent().build();
     }
 
     /** 공고 저장을 해제하고 본문 없이 응답한다. */
-    @Operation(summary = "공고 저장 해제", description = "저장하지 않은 공고도 멱등하게 처리한다. 숨김 상태는 변경하지 않는다.")
+    @Operation(summary = "공고 저장 해제", description = "저장하지 않은 공고도 멱등하게 처리한다. 숨김 상태는 변경하지 않는다. 저장 해제 행동 이벤트는 V1에서 기록하지 않는다.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "저장 해제 성공, 응답 본문 없음", content = @Content),
             @ApiResponse(responseCode = "400", description = "공고 ID 형식 오류 (COMMON_002)"),
@@ -64,7 +73,7 @@ public class PreferenceController {
     }
 
     /** 공고를 숨기고 본문 없이 응답한다. */
-    @Operation(summary = "공고 숨김", description = "이미 숨긴 공고도 멱등하게 처리한다. 저장 상태는 변경하지 않는다.")
+    @Operation(summary = "공고 숨김", description = "이미 숨긴 공고도 멱등하게 처리한다. 저장 상태는 변경하지 않는다. 숨김 상태가 false에서 true로 변경될 때만 HIDE 행동 이벤트를 기록한다.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "숨김 성공, 응답 본문 없음", content = @Content),
             @ApiResponse(responseCode = "400", description = "공고 ID 형식 오류 (COMMON_002)"),
@@ -74,14 +83,19 @@ public class PreferenceController {
     @PostMapping("/api/opportunities/{id}/hide")
     public ResponseEntity<Void> hide(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @Parameter(description = "숨길 공고 ID") @PathVariable Long id
+            @Parameter(description = "숨길 공고 ID") @PathVariable Long id,
+            @Parameter(description = "행동 출처, 생략 시 OTHER")
+            @RequestParam(defaultValue = "OTHER") UserBehaviorSource source
     ) {
-        preferenceService.hide(userDetails.getUserId(), id);
+        Long userId = userDetails.getUserId();
+        if (preferenceService.hide(userId, id)) {
+            behaviorRecorder.record(userId, id, UserBehaviorEventType.HIDE, source);
+        }
         return ResponseEntity.noContent().build();
     }
 
     /** 공고 숨김을 해제하고 본문 없이 응답한다. */
-    @Operation(summary = "공고 숨김 해제", description = "숨기지 않은 공고도 멱등하게 처리한다. 저장 상태는 변경하지 않는다.")
+    @Operation(summary = "공고 숨김 해제", description = "숨기지 않은 공고도 멱등하게 처리한다. 저장 상태는 변경하지 않는다. 숨김 해제 행동 이벤트는 V1에서 기록하지 않는다.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "숨김 해제 성공, 응답 본문 없음", content = @Content),
             @ApiResponse(responseCode = "400", description = "공고 ID 형식 오류 (COMMON_002)"),

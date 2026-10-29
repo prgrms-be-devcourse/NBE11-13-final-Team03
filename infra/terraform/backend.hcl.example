@@ -1,0 +1,2 @@
+# Operator-only absolute path outside the checkout; adapt for the chosen host.
+path = "/home/ubuntu/yon-terraform-state/terraform.tfstate"

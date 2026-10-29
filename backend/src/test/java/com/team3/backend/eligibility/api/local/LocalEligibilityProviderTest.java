@@ -1,19 +1,20 @@
 package com.team3.backend.eligibility.api.local;
 
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.eligibility.api.EligibilityProvider;
 import com.team3.backend.eligibility.api.dto.ConditionResult;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshot;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshotPage;
 import com.team3.backend.eligibility.api.dto.OpportunityInfo;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.eligibility.exception.EligibilityErrorCode;
 import com.team3.backend.eligibility.service.EligibilityEvaluator;
 import com.team3.backend.eligibility.service.EligibilityResultService;
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.*;
 import com.team3.backend.opportunity.normalization.official.AgeEvidenceExtractor;
 import com.team3.backend.opportunity.normalization.official.OfficialSupplementer;
@@ -110,6 +111,21 @@ class LocalEligibilityProviderTest {
                 .filteredOn(c -> "REGION".equals(c.type()))
                 .singleElement()
                 .extracting(ConditionResult::result).isEqualTo(ConditionMatchResult.MATCHED);
+    }
+
+    @Test
+    void 조건이_같은_기회는_판정_결과_하나를_함께_쓰고_기회별로_돌려준다() {
+        Long first = normalizePolicy("R2026-1", "11680");
+        Long second = normalizePolicy("R2026-3", "11680");
+        persistProfile();
+
+        List<EligibilitySnapshot> snapshots = provider.getEligibilities(USER, List.of(first, second));
+
+        assertThat(snapshots).extracting(EligibilitySnapshot::opportunityId).containsExactly(first, second);
+        assertThat(snapshots).extracting(EligibilitySnapshot::status).containsOnly(EligibilityStatus.ELIGIBLE);
+        assertThat(snapshots.get(0).opportunityVersionId()).isNotEqualTo(snapshots.get(1).opportunityVersionId());
+        assertThat(em.createQuery("select count(r) from EligibilityResult r", Long.class).getSingleResult())
+                .isEqualTo(1L);
     }
 
     @Test

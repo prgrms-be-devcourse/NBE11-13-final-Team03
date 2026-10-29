@@ -5,7 +5,7 @@ import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.search.dto.OpportunitySearchResponseDto;
 import com.team3.backend.search.dto.OpportunitySearchSort;
 import com.team3.backend.search.service.OpportunitySearchService;
@@ -61,6 +61,8 @@ public class OpportunitySearchController {
             @RequestParam(required = false) String category,
             @Parameter(description = "중분류, 정확히 일치한다")
             @RequestParam(required = false) String subCategory,
+            @Parameter(description = "세 번째 분류 (직업훈련: NCS 중분류)")
+            @RequestParam(required = false) String detailCategory,
             @Parameter(description = "지역 코드. 정책은 거주 자격 지역과 전국 대상, 훈련은 실제 교육 지역을 조회한다. 시·도 선택은 하위 지역을 포함한다")
             @RequestParam(required = false) String region,
             @Parameter(description = "모집 상태: UPCOMING, OPEN, ALWAYS_OPEN, CLOSED, UNKNOWN. 훈련 OPEN은 개강 예정 검색 규칙을 적용한다")
@@ -75,8 +77,8 @@ public class OpportunitySearchController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDateFrom,
             @Parameter(description = "직업훈련 교육 시작일 끝(포함), YYYY-MM-DD. type=VOCATIONAL_TRAINING 필수다")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDateTo,
-            @Parameter(description = "LATEST(기본, 최초 등록일 최신순), OLDEST(오래된순), DEADLINE_PRIORITY(정책 마감 임박순: OPEN, UPCOMING, ALWAYS_OPEN, CLOSED, UNKNOWN 순), START_DATE_ASC(훈련 시작일순). 전용 정렬에는 해당 type이 필수다")
-            @RequestParam(defaultValue = "LATEST") OpportunitySearchSort sort,
+            @Parameter(description = "RELEVANCE(검색어 관련도순), LATEST(최초 등록일 최신순), OLDEST(오래된순), DEADLINE_PRIORITY(정책 마감 임박순: OPEN, UPCOMING, ALWAYS_OPEN, CLOSED, UNKNOWN 순), START_DATE_ASC(훈련 시작일순). 생략하면 검색어가 있을 때 RELEVANCE, 없을 때 LATEST다. 검색어 없이 RELEVANCE를 지정하면 LATEST로 처리한다. 전용 정렬에는 해당 type이 필수다")
+            @RequestParam(required = false) OpportunitySearchSort sort,
             @Parameter(description = "0부터 시작하는 페이지 번호")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기, 1~100")
@@ -86,7 +88,7 @@ public class OpportunitySearchController {
             throw new BusinessException(AuthErrorCode.ACCESS_TOKEN_NOT_FOUND);
         }
         return ResponseEntity.ok(searchService.search(
-                keyword, type, category, subCategory, region, applicationStatus,
+                keyword, type, category, subCategory, detailCategory, region, applicationStatus,
                 userDetails == null ? null : userDetails.getUserId(), eligibilityStatuses,
                 deadlineFrom, deadlineTo, startDateFrom, startDateTo, sort, page, size));
     }

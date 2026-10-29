@@ -2,8 +2,8 @@ package com.team3.backend.eligibility.benchmark;
 
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.service.YouthPolicyNormalizationService;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
@@ -240,8 +240,8 @@ class BenchmarkData {
             cloneSql("INSERT INTO opportunities (id, opportunity_type, title, category, detail_url, current_version_id, created_at, updated_at) "
                     + "SELECT x.id, o.opportunity_type, o.title || ' #' || x.id, o.category, o.detail_url, NULL, now(), now() "
                     + "FROM opportunities o, unnest(?::bigint[]) AS x(id) WHERE o.id = ?", cloneIds, t.opportunityId());
-            cloneSql("INSERT INTO opportunity_versions (id, opportunity_id, version_no, normalized_snapshot, personalization_status, normalization_version, created_at) "
-                    + "SELECT x.id, x.id, v.version_no, v.normalized_snapshot, v.personalization_status, v.normalization_version, now() "
+            cloneSql("INSERT INTO opportunity_versions (id, opportunity_id, version_no, normalized_snapshot, personalization_status, normalization_version, condition_set_id, created_at) "
+                    + "SELECT x.id, x.id, v.version_no, v.normalized_snapshot, v.personalization_status, v.normalization_version, v.condition_set_id, now() "
                     + "FROM opportunity_versions v, unnest(?::bigint[]) AS x(id) WHERE v.id = ?", cloneIds, t.versionId());
             cloneSql("INSERT INTO opportunity_conditions (version_id, condition_type, requirement_type, condition_field, expression, evidence, validation_status, created_at) "
                     + "SELECT x.id, c.condition_type, c.requirement_type, c.condition_field, c.expression, c.evidence, c.validation_status, now() "

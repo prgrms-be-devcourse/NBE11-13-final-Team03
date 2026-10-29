@@ -2,9 +2,9 @@ package com.team3.backend.opportunity.service;
 
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.*;
-import com.team3.backend.opportunity.dto.NormalizationCommand;
-import com.team3.backend.opportunity.dto.NormalizationResult;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.AgeNormalizer;
 import com.team3.backend.opportunity.normalization.ApplicationPeriodNormalizer;
 import com.team3.backend.opportunity.normalization.CodeConditionNormalizer;
@@ -161,6 +161,28 @@ class YouthPolicyNormalizationServiceTest {
     }
 
     @Test
+    void API_자유텍스트로만_보완한_연령은_UNVERIFIED로_저장하고_개인화하지_않는다() {
+        YouthPolicyRaw raw = YouthPolicyRaw.builder()
+                .plcyNo("R2026-1").plcyNm("청년 월세 지원")
+                .sprtTrgtMinAge("0").sprtTrgtMaxAge("0").sprtTrgtAgeLmtYn("N")
+                .addAplyQlfcCndCn("공고일 기준 만 19세 이상 34세 이하 무주택 청년")
+                .aplyPrdSeCd("0057001").aplyYmd("20261001 ~ 20261031")
+                .lclsfNm("주거").mclsfNm("주거지원")
+                .build();
+
+        NormalizationResult result = service.normalize(command(raw, DAY1, List.of()));
+        flushAndClear();
+
+        assertThat(result.ageOutcome()).isEqualTo(SupplementOutcome.FILLED);
+        OpportunityCondition age = condition(result.versionId(), ConditionType.AGE);
+        assertThat(age.getValidationStatus()).isEqualTo(ValidationStatus.UNVERIFIED);
+        assertThat(age.getExpression()).containsEntry("min", 19).containsEntry("max", 34);
+        assertThat(age.getEvidence()).containsEntry("sourceType", "API_TEXT");
+        assertThat(em.find(OpportunityVersion.class, result.versionId()).getPersonalizationStatus())
+                .isEqualTo(PersonalizationStatus.UNKNOWN);
+    }
+
+    @Test
     void zipCd를_지역_사전으로_매핑해_거주지_조건과_지역_행을_저장한다() {
         Region seoul = Region.builder().regionCode("1100000000").regionName("서울특별시").build();
         Region gyeonggi = Region.builder().regionCode("4100000000").regionName("경기도").build();
@@ -287,6 +309,59 @@ class YouthPolicyNormalizationServiceTest {
         assertThat(YouthPolicyNormalizationService.parseDate("2026")).isNull();
         assertThat(YouthPolicyNormalizationService.parseDate("20261332")).isNull();
         assertThat(YouthPolicyNormalizationService.parseDate(null)).isNull();
+    }
+
+    @Test
+    void 판정_입력이_같은_정책은_같은_조건_묶음이고_거주지역이_다르면_다른_묶음이다() {
+        Region seoul = Region.builder().regionCode("1100000000").regionName("서울특별시").build();
+        em.persist(seoul);
+        em.persist(Region.builder().regionCode("1144000000").regionName("마포구").parent(seoul).build());
+        em.persist(Region.builder().regionCode("1168000000").regionName("강남구").parent(seoul).build());
+        em.flush();
+        regionDirectory.refresh();
+
+        Long gangnamA = setOf(service.normalize(command(policy("SET-1", "강남 정책 A", "11680"), DAY1, List.of())));
+        Long gangnamB = setOf(service.normalize(command(policy("SET-2", "강남 정책 B", "11680"), DAY1, List.of())));
+        Long mapo = setOf(service.normalize(command(policy("SET-3", "마포 정책", "11440"), DAY1, List.of())));
+        regionDirectory.refresh();
+
+        assertThat(gangnamA).isNotNull().isEqualTo(gangnamB);
+        assertThat(mapo).isNotNull().isNotEqualTo(gangnamA);
+    }
+
+    @Test
+    void 판정과_무관한_내용만_바뀐_새_버전은_같은_조건_묶음을_유지한다() {
+        NormalizationResult first = service.normalize(command(detailRaw("월 최대 20만 원"), DAY1, List.of()));
+        flushAndClear();
+        NormalizationResult changed = service.normalize(command(detailRaw("월 최대 30만 원"), DAY2, List.of()));
+        flushAndClear();
+
+        assertThat(changed.newVersion()).isTrue();
+        assertThat(setOf(changed)).isNotNull().isEqualTo(setOf(first));
+    }
+
+    @Test
+    void 자격_조건이_바뀐_새_버전은_다른_조건_묶음이다() {
+        NormalizationResult first = service.normalize(command(raw("19", "34", "20261001 ~ 20261031"), DAY1, List.of()));
+        flushAndClear();
+        NormalizationResult changed = service.normalize(command(raw("19", "39", "20261001 ~ 20261031"), DAY2, List.of()));
+        flushAndClear();
+
+        assertThat(setOf(changed)).isNotNull().isNotEqualTo(setOf(first));
+    }
+
+    private Long setOf(NormalizationResult result) {
+        em.flush();
+        return versionRepository.findById(result.versionId()).orElseThrow().getConditionSetId();
+    }
+
+    private static YouthPolicyRaw policy(String plcyNo, String title, String zipCd) {
+        return YouthPolicyRaw.builder()
+                .plcyNo(plcyNo).plcyNm(title)
+                .sprtTrgtMinAge("19").sprtTrgtMaxAge("34").sprtTrgtAgeLmtYn("Y")
+                .aplyPrdSeCd("0057001").aplyYmd("20261001 ~ 20261031")
+                .lclsfNm("주거").mclsfNm("주거지원").zipCd(zipCd)
+                .build();
     }
 
     private OpportunityCondition condition(Long versionId, ConditionType type) {

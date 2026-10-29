@@ -1,0 +1,13 @@
+.page { max-inline-size: 36rem; margin: clamp(0rem, 5vw, 4rem) auto; min-inline-size: 0; }
+.card { padding: var(--space-4); text-align: center; border-radius: var(--radius-lg); }
+.eyebrow { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-primary); font-weight: 700; margin-block-end: var(--space-4); }
+.eyebrow img { inline-size: 2rem; block-size: 2rem; object-fit: contain; }
+.card h1 { margin-block: var(--space-3); font-size: clamp(1.5rem, 3vw, 2rem); letter-spacing: -0.04em; }
+.card p + p { margin-block-start: var(--space-3); }
+.link { display: flex; align-items: center; justify-content: center; min-block-size: 2.75rem; padding: var(--space-2); margin-block-start: var(--space-3); border-radius: var(--radius-sm); overflow-wrap: anywhere; font-size: var(--font-size-small); text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.kakao { display: flex; align-items: center; justify-content: center; inline-size: 100%; max-inline-size: 336px; min-block-size: 2.75rem; margin: var(--space-5) auto; text-decoration: none; }
+.kakao img { display: block; inline-size: 100%; block-size: auto; }
+.help { padding-block-start: var(--space-4); border-block-start: 1px solid var(--color-border); font-size: var(--font-size-small); text-align: start; color: var(--color-text-secondary); }
+.notice { padding: var(--space-3); background: var(--color-primary-soft); border-radius: var(--radius-sm); text-align: start; }
+@media (min-width: 768px) { .card { padding: var(--space-6); } }

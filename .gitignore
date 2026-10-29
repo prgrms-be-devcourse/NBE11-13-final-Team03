@@ -2,3 +2,10 @@
 .env
 .env.*
 !.env.example
+.validation/
+
+# Local performance test data
+/perf-data/
+
+# Local search performance test environment
+/docker/compose.search-perf.yaml

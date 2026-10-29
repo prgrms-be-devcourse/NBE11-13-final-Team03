@@ -16,11 +16,12 @@ class UserOpportunityPreferenceTest {
                 .updatedAt(createdAt)
                 .build();
 
-        preference.markSaved();
+        preference.markSaved(11L);
 
         assertTrue(preference.isSaved());
         assertFalse(preference.isHidden());
         assertNotNull(preference.getSavedAt());
+        assertEquals(11L, preference.getSavedVersionId());
         assertNull(preference.getHiddenAt());
         assertEquals(preference.getSavedAt(), preference.getUpdatedAt());
         assertEquals(createdAt, preference.getCreatedAt());
@@ -28,13 +29,15 @@ class UserOpportunityPreferenceTest {
 
         LocalDateTime savedAt = preference.getSavedAt();
         LocalDateTime updatedAt = preference.getUpdatedAt();
-        preference.markSaved();
+        preference.markSaved(12L);
         assertEquals(savedAt, preference.getSavedAt());
+        assertEquals(11L, preference.getSavedVersionId());
         assertEquals(updatedAt, preference.getUpdatedAt());
 
         preference.clearSaved();
         assertFalse(preference.isSaved());
         assertNull(preference.getSavedAt());
+        assertNull(preference.getSavedVersionId());
         assertTrue(preference.getUpdatedAt().isAfter(updatedAt));
         assertTrue(preference.isInactive());
         assertEquals(createdAt, preference.getCreatedAt());
@@ -42,6 +45,9 @@ class UserOpportunityPreferenceTest {
         updatedAt = preference.getUpdatedAt();
         preference.clearSaved();
         assertEquals(updatedAt, preference.getUpdatedAt());
+
+        preference.markSaved(12L);
+        assertEquals(12L, preference.getSavedVersionId());
     }
 
     @Test
@@ -80,7 +86,7 @@ class UserOpportunityPreferenceTest {
         UserOpportunityPreference preference =
                 UserOpportunityPreference.builder().build();
 
-        preference.markSaved();
+        preference.markSaved(null);
         LocalDateTime savedAt = preference.getSavedAt();
         preference.markHidden();
         LocalDateTime hiddenAt = preference.getHiddenAt();
@@ -96,7 +102,7 @@ class UserOpportunityPreferenceTest {
         assertEquals(hiddenAt, preference.getHiddenAt());
         assertFalse(preference.isInactive());
 
-        preference.markSaved();
+        preference.markSaved(null);
         LocalDateTime newSavedAt = preference.getSavedAt();
         preference.clearHidden();
         assertTrue(preference.isSaved());

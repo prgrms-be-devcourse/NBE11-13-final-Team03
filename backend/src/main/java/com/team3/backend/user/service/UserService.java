@@ -8,6 +8,9 @@ import com.team3.backend.user.domain.entity.User;
 import com.team3.backend.user.domain.repository.UserRepository;
 import com.team3.backend.user.dto.UserMeResponseDto;
 import com.team3.backend.user.exception.UserErrorCode;
+import com.team3.backend.outbox.domain.entity.OutboxEvent;
+import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
+import java.time.Clock;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -24,6 +27,8 @@ public class UserService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final EligibilityResultRepository eligibilityResultRepository;
     private final EligibilityProfileRepository eligibilityProfileRepository;
+    private final OutboxEventRepository outboxRepository;
+    private final Clock clock;
 
 
     @Operation(
@@ -58,11 +63,17 @@ public class UserService {
 
     @Transactional
     public void withdraw(Long userId) {
-        if (!userRepository.existsById(userId)) {
-            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
-        }
+        // Serialize with preference writes and fan-out; cancellation must see every committed user Outbox.
+        userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
 
-        // User를 참조하는 FK 데이터부터 삭제
+        outboxRepository.cancelPendingNotifications(userId);
+        outboxRepository.saveAndFlush(OutboxEvent.userWithdrawn(userId, clock.instant()));
+
+        // User를 직접 참조하는 데이터부터 삭제한다.
+        // user_interests, user_opportunity_preferences, user_behavior_events,
+        // eligibility_event_assessments와 notification_match_pairs는 사용자 삭제 시 DB ON DELETE CASCADE로 삭제된다.
+        // notification_match_candidates는 쌍(notification_match_pairs) 삭제에 이어 CASCADE로 삭제된다.
         refreshTokenRepository.deleteAllByUserId(userId);
 
         // 사용자별 정책 판정 데이터 삭제

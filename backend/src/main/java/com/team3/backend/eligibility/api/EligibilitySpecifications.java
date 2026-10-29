@@ -17,11 +17,11 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * 신청 가능성 검색 필터. 저장된 최신 판정 결과(eligibility_results)로만 거르고, 재판정은 하지 않는다 (DB 조회 전용).
+ * 신청 가능성 검색 필터. 저장된 최신 판정 결과(eligibility_set_results, 사용자 × 조건 묶음)로만 거르고, 재판정은 하지 않는다 (DB 조회 전용).
  * 검색 조건과 AND로 묶어 정렬·페이지네이션·전체 건수를 DB에서 정확히 내기 위해 Specification으로 제공한다.
  *
  * 최신 판정 결과 기준은 EligibilityResultFreshness.isFresh와 같다. 아래를 모두 만족하는 결과만 포함한다.
- * - 판정한 기회 버전 = 기회의 현재 버전 (현재 버전이 없는 기회는 제외)
+ * - 판정한 조건 묶음 = 기회 현재 버전의 조건 묶음 (현재 버전이나 조건 묶음이 없는 기회는 제외)
  * - 판정한 프로필 버전 = 사용자 판정 프로필의 현재 버전 (프로필이 없으면 제외)
  * - 규칙 버전 = EligibilityResultService.RULE_VERSION
  * - validUntil이 없거나 오늘보다 뒤
@@ -58,8 +58,7 @@ public final class EligibilitySpecifications {
             Path<LocalDate> validUntil = r.get("validUntil");
             result.select(r.get("id")).where(
                     cb.equal(r.get("userId"), userId),
-                    cb.equal(r.get("opportunityId"), root.get("id")),
-                    cb.equal(r.get("opportunityVersionId"), root.get("currentVersion").get("id")),
+                    cb.equal(r.get("conditionSetId"), root.get("currentVersion").get("conditionSetId")),
                     cb.equal(r.get("profileVersion"), currentProfileVersion),
                     cb.equal(r.get("ruleVersion"), EligibilityResultService.RULE_VERSION),
                     cb.or(validUntil.isNull(), cb.greaterThan(validUntil, today)),

@@ -5,11 +5,11 @@ import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.eligibility.service.EligibilityEvaluator;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.repository.*;
-import com.team3.backend.opportunity.dto.TrainingCourseRaw;
-import com.team3.backend.opportunity.dto.TrainingNormalizationCommand;
-import com.team3.backend.opportunity.dto.TrainingNormalizationResult;
-import com.team3.backend.opportunity.normalization.ApplicationStatus;
-import com.team3.backend.opportunity.normalization.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.normalization.dto.TrainingCourseRaw;
+import com.team3.backend.opportunity.normalization.dto.TrainingNormalizationCommand;
+import com.team3.backend.opportunity.normalization.dto.TrainingNormalizationResult;
+import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.opportunity.normalization.RegionNormalizer;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
@@ -94,7 +94,8 @@ class TrainingCourseNormalizationServiceTest {
         assertThat(opportunity.getOpportunityType()).isEqualTo(OpportunityType.VOCATIONAL_TRAINING);
         assertThat(opportunity.getTitle()).isEqualTo("소형(3톤미만) 굴삭기(굴착기) 면허취득과정");
         assertThat(opportunity.getCategory()).isEqualTo("교육･직업훈련");
-        assertThat(opportunity.getSubCategory()).isEqualTo("직업훈련");
+        assertThat(opportunity.getSubCategory()).isEqualTo("건설"); // NCS 14070106 → 대분류 14
+        assertThat(opportunity.getDetailCategory()).isEqualTo("건설기계운전·정비"); // → 중분류 1407
         assertThat(opportunity.getDetailUrl()).startsWith("https://www.work24.go.kr/");
 
         Long versionId = opportunity.getCurrentVersion().getId();
@@ -121,6 +122,48 @@ class TrainingCourseNormalizationServiceTest {
         });
         assertThat(windowRepository.findByVersionId(versionId)).singleElement()
                 .extracting(ApplicationWindow::getPeriodType).isEqualTo(PeriodType.UNKNOWN);
+    }
+
+    @Test
+    void 분류는_NCS_대분류이고_코드가_없거나_표에_없으면_직업훈련이다() {
+        TrainingCourseRaw it = TrainingCourseRaw.builder().trprId("NCS-IT").trprDegr("1").title("자바 백엔드 과정")
+                .subTitle("훈련기관").traStartDate("2026-10-19").traEndDate("2027-03-30")
+                .trainTarget("국민내일배움카드(일반)").trainTargetCd("C0061").trngAreaCd("41650")
+                .ncsCd("20010202").build();
+        TrainingCourseRaw noCode = withTarget("NCS-NONE", "국민내일배움카드(일반)", "C0061");
+        TrainingCourseRaw unknownCode = TrainingCourseRaw.builder().trprId("NCS-99").trprDegr("1").title("미분류 과정")
+                .subTitle("훈련기관").traStartDate("2026-10-19").traEndDate("2027-03-30")
+                .trainTarget("국민내일배움카드(일반)").trainTargetCd("C0061").trngAreaCd("41650")
+                .ncsCd("99010101").build();
+
+        service.normalizePage(page(DAY1, it, noCode, unknownCode));
+        flushAndClear();
+
+        assertThat(opportunityOf("NCS-IT:1").getCategory()).isEqualTo("교육･직업훈련");
+        assertThat(opportunityOf("NCS-IT:1").getSubCategory()).isEqualTo("정보통신");
+        assertThat(opportunityOf("NCS-IT:1").getDetailCategory()).isEqualTo("정보기술");
+        assertThat(opportunityOf("NCS-NONE:1").getSubCategory()).isEqualTo("직업훈련");
+        assertThat(opportunityOf("NCS-NONE:1").getDetailCategory()).isNull();
+        assertThat(opportunityOf("NCS-99:1").getSubCategory()).isEqualTo("직업훈련");
+    }
+
+    @Test
+    void 원본이_같아도_분류는_다시_맞춘다() {
+        service.normalizePage(page(DAY1, wallpaper()));
+        flushAndClear();
+        Opportunity before = opportunityOf("AIG20250000536091:8");
+        Long versionId = before.getCurrentVersion().getId();
+        em.createQuery("update Opportunity o set o.subCategory = '직업훈련' where o.id = :id")
+                .setParameter("id", before.getId()).executeUpdate();
+        em.clear();
+
+        service.normalizePage(page(DAY1.plusDays(1), wallpaper()));
+        flushAndClear();
+
+        Opportunity after = opportunityOf("AIG20250000536091:8");
+        assertThat(after.getSubCategory()).isEqualTo("건설"); // NCS 14030209 → 대분류 14
+        assertThat(after.getDetailCategory()).isEqualTo("건축"); // → 중분류 1403
+        assertThat(after.getCurrentVersion().getId()).isEqualTo(versionId);
     }
 
     @Test
@@ -255,6 +298,28 @@ class TrainingCourseNormalizationServiceTest {
         assertThat(judgement.evaluation().conditions()).singleElement()
                 .satisfies(c -> assertThat(c.result()).isEqualTo(ConditionMatchResult.USER_INFO_MISSING));
         assertThat(judgement.applicationStatus()).isEqualTo(ApplicationStatus.UNKNOWN);
+    }
+
+    @Test
+    void 조건_묶음은_훈련유형으로만_나뉘고_훈련_지역과_무관하다() {
+        service.normalizePage(page(DAY1,
+                withTarget("C1", "국민내일배움카드(주 훈련대상 : 구직자)", "C0061S"),
+                withTarget("C2", "국민내일배움카드(일반)", "C0061"),
+                withTarget("K1", "K-디지털 트레이닝", "C0104"),
+                withTarget("O1", "실업자원격훈련", "C0055"),
+                withTarget("O2", "과정평가형", "C0055C"),
+                TrainingCourseRaw.builder().trprId("C3").trprDegr("1").title("훈련과정 C3").subTitle("훈련기관")
+                        .traStartDate("2026-10-19").traEndDate("2027-03-30")
+                        .trainTarget("국민내일배움카드(일반)").trainTargetCd("C0061").trngAreaCd("41630").build()));
+        flushAndClear();
+
+        assertThat(setOf("C1:1")).isNotNull().isEqualTo(setOf("C2:1")).isEqualTo(setOf("C3:1"));
+        assertThat(setOf("O1:1")).isNotNull().isEqualTo(setOf("O2:1"));
+        assertThat(java.util.Set.of(setOf("C1:1"), setOf("K1:1"), setOf("O1:1"))).hasSize(3);
+    }
+
+    private Long setOf(String externalId) {
+        return opportunityOf(externalId).getCurrentVersion().getConditionSetId();
     }
 
     private EligibilityProfile.EligibilityProfileBuilder profileBuilder() {

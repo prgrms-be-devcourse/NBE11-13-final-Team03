@@ -11,11 +11,46 @@ import org.springframework.stereotype.Repository;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 
 /** 사용자별 공고 상태와 저장 목록·공고별 저장 사용자를 조회한다. */
 @Repository
 public interface UserOpportunityPreferenceRepository
         extends JpaRepository<UserOpportunityPreference, Long> {
+
+    /** Version changes only: compare per-policy version numbers, never globally generated IDs. */
+    @Query("""
+            select p.user.id from UserOpportunityPreference p
+            where p.opportunity.id = :opportunityId and p.isSaved = true and p.user.id > :afterUserId
+              and exists (select v.id from OpportunityVersion v where v.id = p.savedVersionId
+                  and v.opportunity.id = :opportunityId and v.versionNo < :eventVersionNo)
+            order by p.user.id
+            """)
+    List<Long> findSavedUserIdsForVersionChangeAfter(@Param("opportunityId") Long opportunityId,
+            @Param("eventVersionNo") Integer eventVersionNo, @Param("afterUserId") Long afterUserId, Pageable pageable);
+
+    /** Repeat the save-version condition while locking the current save state (including re-save races). */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("""
+            select p from UserOpportunityPreference p join fetch p.user
+            where p.opportunity.id = :opportunityId and p.isSaved = true and p.user.id in :userIds
+              and exists (select v.id from OpportunityVersion v where v.id = p.savedVersionId
+                  and v.opportunity.id = :opportunityId and v.versionNo < :eventVersionNo)
+            order by p.user.id
+            """)
+    List<UserOpportunityPreference> lockSavedBeforeVersionForNotification(@Param("opportunityId") Long opportunityId,
+            @Param("eventVersionNo") Integer eventVersionNo, @Param("userIds") Collection<Long> userIds);
+
+    /** Revalidate saved state and keep it stable until the Outbox batch commits; hidden is irrelevant. */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("""
+            select p from UserOpportunityPreference p join fetch p.user
+            where p.opportunity.id = :opportunityId and p.user.id in :userIds and p.isSaved = true
+            order by p.user.id
+            """)
+    List<UserOpportunityPreference> lockSavedForNotification(@Param("opportunityId") Long opportunityId,
+                                                            @Param("userIds") Collection<Long> userIds);
 
     /** 사용자와 공고의 현재 저장·숨김 상태를 조회한다. */
     Optional<UserOpportunityPreference> findByUserIdAndOpportunityId(
@@ -46,6 +81,19 @@ public interface UserOpportunityPreferenceRepository
           and preference.isSaved = true
         """)
     List<Long> findSavedOpportunityIds(
+            @Param("userId") Long userId,
+            @Param("opportunityIds") Collection<Long> opportunityIds
+    );
+
+    /** 지정한 공고 중 저장 여부와 관계없이 숨긴 공고 ID만 조회한다. */
+    @Query("""
+        select preference.opportunity.id
+        from UserOpportunityPreference preference
+        where preference.user.id = :userId
+          and preference.opportunity.id in :opportunityIds
+          and preference.isHidden = true
+        """)
+    List<Long> findHiddenOpportunityIds(
             @Param("userId") Long userId,
             @Param("opportunityIds") Collection<Long> opportunityIds
     );

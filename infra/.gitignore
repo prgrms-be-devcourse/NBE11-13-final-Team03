@@ -1,0 +1,9 @@
+inventory/raw/
+**/__pycache__/
+terraform/.terraform/
+terraform/*.tfstate*
+terraform/*.tfplan
+terraform/*.tfvars
+terraform/*.tfvars.json
+terraform/backend.hcl
+terraform/crash.log

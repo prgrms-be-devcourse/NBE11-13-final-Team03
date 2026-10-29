@@ -14,6 +14,9 @@ import com.team3.backend.region.domain.repository.RegionRepository;
 import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
 import com.team3.backend.user.domain.repository.UserRepository;
+import com.team3.backend.interest.domain.entity.InterestType;
+import com.team3.backend.interest.domain.entity.UserInterest;
+import com.team3.backend.interest.domain.repository.UserInterestRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -91,6 +94,9 @@ class UserWithdrawalIntegrationTest {
     @Autowired
     private RegionRepository regionRepository;
 
+    @Autowired
+    private UserInterestRepository userInterestRepository;
+
     @Test
     void 회원_탈퇴시_사용자와_연결된_데이터를_실제_DB에서_삭제한다() {
         Region seoul = regionRepository.saveAndFlush(
@@ -118,6 +124,22 @@ class UserWithdrawalIntegrationTest {
         );
 
         Long userId = user.getId();
+
+        userInterestRepository.saveAndFlush(
+                UserInterest.create(
+                        user,
+                        InterestType.CATEGORY,
+                        "일자리"
+                )
+        );
+
+        userInterestRepository.saveAndFlush(
+                UserInterest.create(
+                        user,
+                        InterestType.NCS,
+                        "20010101"
+                )
+        );
 
         refreshTokenRepository.saveAndFlush(
                 RefreshToken.builder()
@@ -151,8 +173,7 @@ class UserWithdrawalIntegrationTest {
         resultRepository.saveAndFlush(
                 EligibilityResult.builder()
                         .userId(userId)
-                        .opportunityId(100L)
-                        .opportunityVersionId(200L)
+                        .conditionSetId(300L)
                         .profileVersion(1L)
                         .ruleVersion("v1")
                         .eligibilityStatus(
@@ -182,10 +203,15 @@ class UserWithdrawalIntegrationTest {
         ).isEmpty();
 
         assertThat(
-                resultRepository.findByUserIdAndOpportunityIdIn(
+                resultRepository.findFreshness(
                         userId,
-                        List.of(100L)
+                        List.of(300L)
                 )
+        ).isEmpty();
+
+        assertThat(
+                userInterestRepository
+                        .findAllByUserIdOrderByInterestTypeAscInterestCodeAsc(userId)
         ).isEmpty();
     }
 }

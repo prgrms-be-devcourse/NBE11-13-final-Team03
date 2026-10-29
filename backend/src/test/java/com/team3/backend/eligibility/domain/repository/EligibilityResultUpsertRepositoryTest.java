@@ -59,25 +59,27 @@ class EligibilityResultUpsertRepositoryTest {
     @BeforeEach
     void setUp() {
         tx = new TransactionTemplate(transactionManager);
-        jdbc.update("DELETE FROM eligibility_results");
+        jdbc.update("DELETE FROM eligibility_set_results");
     }
 
     @AfterEach
     void tearDown() {
-        jdbc.update("DELETE FROM eligibility_results");
+        jdbc.update("DELETE FROM eligibility_set_results");
     }
 
     @Test
     void 처음_저장하면_모든_행을_넣는다() {
-        assertThat(upsert(1L, rows(3, 10L, EligibilityStatus.ELIGIBLE), AT)).isEqualTo(3);
+        assertThat(upsert(1L, rows(3, EligibilityStatus.ELIGIBLE), AT)).isEqualTo(3);
 
-        assertThat(jdbc.queryForList("SELECT opportunity_id, opportunity_version_id, profile_version, rule_version, "
-                + "eligibility_status, reason, condition_results::text AS c, valid_until, evaluated_at "
-                + "FROM eligibility_results ORDER BY opportunity_id"))
+        assertThat(jdbc.queryForList("SELECT condition_set_id, profile_version, rule_version, "
+                + "eligibility_status, reason, condition_results::text AS c, matched_count, not_matched_count, "
+                + "user_info_missing_count, check_required_count, data_unclear_count, valid_until, evaluated_at "
+                + "FROM eligibility_set_results ORDER BY condition_set_id"))
                 .hasSize(3)
                 .first().satisfies(r -> {
-                    assertThat(r.get("opportunity_id")).isEqualTo(1L);
-                    assertThat(r.get("opportunity_version_id")).isEqualTo(10L);
+                    assertThat(r.get("condition_set_id")).isEqualTo(1L);
+                    assertThat(r.get("matched_count")).isEqualTo(1);
+                    assertThat(r.get("not_matched_count")).isEqualTo(0);
                     assertThat(r.get("profile_version")).isEqualTo(1L);
                     assertThat(r.get("rule_version")).isEqualTo(RULE);
                     assertThat(r.get("eligibility_status")).isEqualTo("ELIGIBLE");
@@ -87,60 +89,78 @@ class EligibilityResultUpsertRepositoryTest {
                     assertThat(r.get("evaluated_at")).isEqualTo(java.sql.Timestamp.valueOf(AT));
                 });
         // 저장한 jsonb를 엔티티로 읽을 수 있다
-        assertThat(repository.findByUserIdAndOpportunityIdIn(USER, List.of(1L))).singleElement()
+        assertThat(repository.findAll()).filteredOn(r -> r.getConditionSetId() == 1L).singleElement()
                 .satisfies(r -> assertThat(r.getConditionResults()).singleElement()
                         .satisfies(m -> assertThat(m).containsEntry("result", "MATCHED").containsEntry("expected", 34)));
     }
 
     @Test
     void 같은_내용을_다시_저장하면_쓰지_않는다() {
-        upsert(1L, rows(3, 10L, EligibilityStatus.ELIGIBLE), AT);
+        upsert(1L, rows(3, EligibilityStatus.ELIGIBLE), AT);
         List<Map<String, Object>> before = dump();
 
-        assertThat(upsert(1L, rows(3, 10L, EligibilityStatus.ELIGIBLE), AT.plusHours(1))).isZero();
+        assertThat(upsert(1L, rows(3, EligibilityStatus.ELIGIBLE), AT.plusHours(1))).isZero();
         assertThat(dump()).isEqualTo(before);
     }
 
     @Test
-    void 정책_버전이_바뀌면_같은_행을_갱신한다() {
-        upsert(1L, rows(2, 10L, EligibilityStatus.ELIGIBLE), AT);
-        List<Long> ids = jdbc.queryForList("SELECT id FROM eligibility_results ORDER BY opportunity_id", Long.class);
+    void 판정이_바뀌면_같은_행을_갱신하고_개수도_다시_센다() {
+        upsert(1L, rows(2, EligibilityStatus.ELIGIBLE), AT);
+        List<Long> ids = jdbc.queryForList("SELECT id FROM eligibility_set_results ORDER BY condition_set_id", Long.class);
 
-        assertThat(upsert(1L, rows(2, 11L, EligibilityStatus.NOT_ELIGIBLE), AT.plusHours(1))).isEqualTo(2);
-        assertThat(jdbc.queryForList("SELECT id FROM eligibility_results ORDER BY opportunity_id", Long.class))
+        List<UpsertRow> changed = LongStream.rangeClosed(1, 2)
+                .mapToObj(i -> new UpsertRow(i, EligibilityStatus.NOT_ELIGIBLE, "사유 " + i, List.of(
+                        Map.of("type", "AGE", "result", "NOT_MATCHED"),
+                        Map.of("type", "REGION", "result", "MATCHED"),
+                        Map.of("type", "INCOME", "result", "CHECK_REQUIRED")), VALID_UNTIL))
+                .toList();
+        assertThat(upsert(1L, changed, AT.plusHours(1))).isEqualTo(2);
+        assertThat(jdbc.queryForList("SELECT id FROM eligibility_set_results ORDER BY condition_set_id", Long.class))
                 .isEqualTo(ids);
-        assertThat(jdbc.queryForList("SELECT DISTINCT opportunity_version_id || ':' || eligibility_status "
-                + "|| ':' || evaluated_at FROM eligibility_results", String.class))
-                .containsExactly("11:NOT_ELIGIBLE:" + "2026-10-15 11:00:00");
+        assertThat(jdbc.queryForList("SELECT DISTINCT eligibility_status || ':' || matched_count || ':' "
+                + "|| not_matched_count || ':' || check_required_count || ':' || evaluated_at "
+                + "FROM eligibility_set_results", String.class))
+                .containsExactly("NOT_ELIGIBLE:1:1:1:" + "2026-10-15 11:00:00");
+    }
+
+    @Test
+    void 사용자가_다르면_같은_조건_묶음이라도_따로_저장한다() {
+        upsert(1L, rows(2, EligibilityStatus.ELIGIBLE), AT);
+
+        Integer written = tx.execute(s -> repository.upsert(2L, 1L, RULE, AT, rows(2, EligibilityStatus.NOT_ELIGIBLE)));
+        assertThat(written).isEqualTo(2);
+        assertThat(jdbc.queryForList("SELECT user_id || ':' || condition_set_id || ':' || eligibility_status "
+                + "FROM eligibility_set_results ORDER BY user_id, condition_set_id", String.class))
+                .containsExactly("1:1:ELIGIBLE", "1:2:ELIGIBLE", "2:1:NOT_ELIGIBLE", "2:2:NOT_ELIGIBLE");
     }
 
     @Test
     void 프로필_버전이_오르면_갱신하고_더_낮은_버전은_덮어쓰지_않는다() {
-        upsert(1L, rows(2, 10L, EligibilityStatus.ELIGIBLE), AT);
-        assertThat(upsert(2L, rows(2, 10L, EligibilityStatus.NOT_ELIGIBLE), AT.plusHours(1))).isEqualTo(2);
+        upsert(1L, rows(2, EligibilityStatus.ELIGIBLE), AT);
+        assertThat(upsert(2L, rows(2, EligibilityStatus.NOT_ELIGIBLE), AT.plusHours(1))).isEqualTo(2);
 
         // 늦게 끝난 버전 1 계산
-        assertThat(upsert(1L, rows(2, 10L, EligibilityStatus.ELIGIBLE), AT.plusHours(2))).isZero();
+        assertThat(upsert(1L, rows(2, EligibilityStatus.ELIGIBLE), AT.plusHours(2))).isZero();
         assertThat(jdbc.queryForList("SELECT DISTINCT profile_version || ':' || eligibility_status "
-                + "FROM eligibility_results", String.class)).containsExactly("2:NOT_ELIGIBLE");
+                + "FROM eligibility_set_results", String.class)).containsExactly("2:NOT_ELIGIBLE");
     }
 
     @Test
     void 규칙_버전이_바뀌면_갱신한다() {
-        upsert(1L, rows(2, 10L, EligibilityStatus.ELIGIBLE), AT);
+        upsert(1L, rows(2, EligibilityStatus.ELIGIBLE), AT);
 
-        Integer written = tx.execute(s -> repository.upsert(USER, 1L, "2", AT, rows(2, 10L, EligibilityStatus.ELIGIBLE)));
+        Integer written = tx.execute(s -> repository.upsert(USER, 1L, "2", AT, rows(2, EligibilityStatus.ELIGIBLE)));
         assertThat(written).isEqualTo(2);
-        assertThat(jdbc.queryForList("SELECT DISTINCT rule_version FROM eligibility_results", String.class))
+        assertThat(jdbc.queryForList("SELECT DISTINCT rule_version FROM eligibility_set_results", String.class))
                 .containsExactly("2");
     }
 
     @Test
     void 이유와_유효기한이_없어도_저장한다() {
-        List<UpsertRow> rows = List.of(new UpsertRow(1L, 10L, EligibilityStatus.UNKNOWN, null, List.of(), null));
+        List<UpsertRow> rows = List.of(new UpsertRow(1L, EligibilityStatus.UNKNOWN, null, List.of(), null));
 
         assertThat(upsert(1L, rows, AT)).isEqualTo(1);
-        assertThat(jdbc.queryForMap("SELECT reason, valid_until, condition_results::text AS c FROM eligibility_results"))
+        assertThat(jdbc.queryForMap("SELECT reason, valid_until, condition_results::text AS c FROM eligibility_set_results"))
                 .containsEntry("reason", null).containsEntry("valid_until", null).containsEntry("c", "[]");
     }
 
@@ -152,7 +172,7 @@ class EligibilityResultUpsertRepositoryTest {
         try {
             Callable<Integer> save = () -> {
                 barrier.await(5, TimeUnit.SECONDS);
-                return upsert(1L, rows(n, 10L, EligibilityStatus.ELIGIBLE), AT);
+                return upsert(1L, rows(n, EligibilityStatus.ELIGIBLE), AT);
             };
             Future<Integer> a = pool.submit(save);
             Future<Integer> b = pool.submit(save);
@@ -161,25 +181,25 @@ class EligibilityResultUpsertRepositoryTest {
         } finally {
             pool.shutdownNow();
         }
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM eligibility_results", Long.class)).isEqualTo(n);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM eligibility_set_results", Long.class)).isEqualTo(n);
     }
 
     @Test
     void 오래된_계산이_먼저_잠그고_늦게_커밋해도_최신_결과가_남는다() throws Exception {
         int n = 200;
-        upsert(1L, rows(n, 10L, EligibilityStatus.ELIGIBLE), AT);
+        upsert(1L, rows(n, EligibilityStatus.ELIGIBLE), AT);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         CountDownLatch newerCommitted = new CountDownLatch(1);
         try {
             // 버전 2 계산이 먼저 커밋되고, 그 뒤 버전 1 계산이 쓰려고 하는 순서 역전
             Future<Integer> newer = pool.submit(() -> {
-                int written = upsert(2L, rows(n, 10L, EligibilityStatus.NOT_ELIGIBLE), AT.plusHours(1));
+                int written = upsert(2L, rows(n, EligibilityStatus.NOT_ELIGIBLE), AT.plusHours(1));
                 newerCommitted.countDown();
                 return written;
             });
             Future<Integer> older = pool.submit(() -> {
                 newerCommitted.await(10, TimeUnit.SECONDS);
-                return upsert(1L, rows(n, 10L, EligibilityStatus.POSSIBLY_ELIGIBLE), AT.plusHours(2));
+                return upsert(1L, rows(n, EligibilityStatus.POSSIBLY_ELIGIBLE), AT.plusHours(2));
             });
 
             assertThat(newer.get(30, TimeUnit.SECONDS)).isEqualTo(n);
@@ -188,27 +208,27 @@ class EligibilityResultUpsertRepositoryTest {
             pool.shutdownNow();
         }
         assertThat(jdbc.queryForList("SELECT DISTINCT profile_version || ':' || eligibility_status "
-                + "FROM eligibility_results", String.class)).containsExactly("2:NOT_ELIGIBLE");
+                + "FROM eligibility_set_results", String.class)).containsExactly("2:NOT_ELIGIBLE");
     }
 
     @Test
     void 최신_계산이_잠금을_잡은_동안_오래된_계산은_기다렸다가_건너뛴다() throws Exception {
         int n = 200;
-        upsert(1L, rows(n, 10L, EligibilityStatus.ELIGIBLE), AT);
+        upsert(1L, rows(n, EligibilityStatus.ELIGIBLE), AT);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         CountDownLatch newerWritten = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         try {
             Future<Integer> newer = pool.submit(() -> tx.execute(s -> {
                 int written = repository.upsert(USER, 2L, RULE, AT.plusHours(1),
-                        rows(n, 10L, EligibilityStatus.NOT_ELIGIBLE));
+                        rows(n, EligibilityStatus.NOT_ELIGIBLE));
                 newerWritten.countDown();
                 await(release);
                 return written;
             }));
             assertThat(newerWritten.await(10, TimeUnit.SECONDS)).isTrue();
             Future<Integer> older = pool.submit(() ->
-                    upsert(1L, rows(n, 10L, EligibilityStatus.POSSIBLY_ELIGIBLE), AT.plusHours(2)));
+                    upsert(1L, rows(n, EligibilityStatus.POSSIBLY_ELIGIBLE), AT.plusHours(2)));
             Thread.sleep(300);
             assertThat(older.isDone()).as("커밋 전 잠긴 행을 기다린다").isFalse();
             release.countDown();
@@ -220,25 +240,25 @@ class EligibilityResultUpsertRepositoryTest {
             pool.shutdownNow();
         }
         assertThat(jdbc.queryForList("SELECT DISTINCT profile_version || ':' || eligibility_status "
-                + "FROM eligibility_results", String.class)).containsExactly("2:NOT_ELIGIBLE");
+                + "FROM eligibility_set_results", String.class)).containsExactly("2:NOT_ELIGIBLE");
     }
 
     @Test
     void 묶음_하나가_실패하면_같은_트랜잭션의_앞_묶음도_저장되지_않는다() {
-        List<UpsertRow> bad = List.of(new UpsertRow(9L, 10L, EligibilityStatus.ELIGIBLE, "가".repeat(501), List.of(),
+        List<UpsertRow> bad = List.of(new UpsertRow(9L, EligibilityStatus.ELIGIBLE, "가".repeat(501), List.of(),
                 VALID_UNTIL));
 
         assertThatThrownBy(() -> tx.executeWithoutResult(s -> {
-            repository.upsert(USER, 1L, RULE, AT, rows(3, 10L, EligibilityStatus.ELIGIBLE));
+            repository.upsert(USER, 1L, RULE, AT, rows(3, EligibilityStatus.ELIGIBLE));
             repository.upsert(USER, 1L, RULE, AT, bad);
         })).isInstanceOf(RuntimeException.class);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM eligibility_results", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM eligibility_set_results", Long.class)).isZero();
     }
 
     @Test
     void 천_행을_SQL_한_번에_저장한다() {
-        assertThat(upsert(1L, rows(1_000, 10L, EligibilityStatus.ELIGIBLE), AT)).isEqualTo(1_000);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM eligibility_results", Long.class)).isEqualTo(1_000);
+        assertThat(upsert(1L, rows(1_000, EligibilityStatus.ELIGIBLE), AT)).isEqualTo(1_000);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM eligibility_set_results", Long.class)).isEqualTo(1_000);
     }
 
     private int upsert(Long profileVersion, List<UpsertRow> rows, LocalDateTime at) {
@@ -246,15 +266,16 @@ class EligibilityResultUpsertRepositoryTest {
         return written == null ? 0 : written;
     }
 
-    private static List<UpsertRow> rows(int n, Long versionId, EligibilityStatus status) {
+    /** 조건 묶음 1..n */
+    private static List<UpsertRow> rows(int n, EligibilityStatus status) {
         return LongStream.rangeClosed(1, n)
-                .mapToObj(i -> new UpsertRow(i, versionId, status, "사유 " + i,
+                .mapToObj(i -> new UpsertRow(i, status, "사유 " + i,
                         List.of(Map.of("type", "AGE", "result", "MATCHED", "expected", 34)), VALID_UNTIL))
                 .toList();
     }
 
     private List<Map<String, Object>> dump() {
-        return jdbc.queryForList("SELECT * FROM eligibility_results ORDER BY opportunity_id");
+        return jdbc.queryForList("SELECT * FROM eligibility_set_results ORDER BY condition_set_id");
     }
 
     private static void await(CountDownLatch latch) {

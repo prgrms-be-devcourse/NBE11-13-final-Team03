@@ -1,8 +1,9 @@
 package com.team3.backend.opportunity.normalization.official;
 
+import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 import com.team3.backend.opportunity.domain.entity.PeriodType;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
-import com.team3.backend.opportunity.dto.YouthPolicyRaw;
+import com.team3.backend.opportunity.normalization.dto.YouthPolicyRaw;
 import com.team3.backend.opportunity.normalization.*;
 import org.junit.jupiter.api.Test;
 
@@ -77,6 +78,38 @@ class OfficialSupplementerTest {
         assertThat(result.evidence().sourceType()).isEqualTo(SourceType.API_TEXT);
         assertThat(result.evidence().confidence()).isEqualTo(Confidence.MEDIUM);
         assertThat(result.evidence().evidenceText()).startsWith("[addAplyQlfcCndCn]");
+        assertThat(result.result().validationStatus()).isEqualTo(ValidationStatus.UNVERIFIED);
+    }
+
+    @Test
+    void API_텍스트로_채운_값은_공식_공고로_다시_채우면_VALID가_된다() {
+        YouthPolicyRaw raw = new YouthPolicyRaw("P1", "청년 월세 지원", "0", "0", "Y", null,
+                "공고일 기준 만 19세 이상 34세 이하 무주택 청년", null, null, null, null, null);
+        AgeNormalization fromText = supplementer.supplementAgeFromApiText(raw, ageNormalizer.normalize(raw)).result();
+
+        SupplementedAge official = supplementer.supplementAge(raw, fromText,
+                doc(SourceType.OFFICIAL_NOTICE, "청년 월세 지원\n지원대상: 만 19세 이상 39세 이하"));
+
+        assertThat(official.outcome()).isEqualTo(SupplementOutcome.FILLED);
+        assertThat(official.result().max()).isEqualTo(39);
+        assertThat(official.result().validationStatus()).isEqualTo(ValidationStatus.VALID);
+    }
+
+    @Test
+    void API_텍스트로_채운_값은_공식이_아닌_출처로_VALID나_NEEDS_REVIEW가_되지_않는다() {
+        YouthPolicyRaw raw = new YouthPolicyRaw("P1", "청년 월세 지원", "0", "0", "Y", null,
+                "공고일 기준 만 19세 이상 34세 이하 무주택 청년", null, null, null, null, null);
+        AgeNormalization fromText = supplementer.supplementAgeFromApiText(raw, ageNormalizer.normalize(raw)).result();
+
+        SupplementedAge detail = supplementer.supplementAge(raw, fromText,
+                doc(SourceType.YOUTH_CENTER_DETAIL, "청년 월세 지원\n지원대상: 만 19세 이상 34세 이하"));
+        SupplementedAge split = supplementer.supplementAge(raw, fromText,
+                doc(SourceType.OFFICIAL_NOTICE, "청년 월세 지원\n지원대상: 대학생 만 19~34세, 창업자 만 19~39세"));
+
+        assertThat(detail.result().validationStatus()).isEqualTo(ValidationStatus.UNVERIFIED);
+        assertThat(split.outcome()).isEqualTo(SupplementOutcome.NEEDS_REVIEW);
+        assertThat(split.result().validationStatus()).isEqualTo(ValidationStatus.UNVERIFIED);
+        assertThat(split.result().max()).isEqualTo(34);
     }
 
     @Test

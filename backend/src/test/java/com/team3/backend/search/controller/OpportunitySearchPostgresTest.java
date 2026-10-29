@@ -3,10 +3,10 @@ package com.team3.backend.search.controller;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
-import com.team3.backend.eligibility.domain.entity.EligibilityResult;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.domain.entity.EmploymentStatus;
 import com.team3.backend.eligibility.service.EligibilityResultService;
+import com.team3.backend.eligibility.support.EligibilityResultFixtures;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
@@ -20,6 +20,10 @@ import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
+import com.team3.backend.opportunity.domain.repository.OpportunitySourceRepository;
+import com.team3.backend.opportunity.normalization.dto.TrainingCourseRaw;
+import com.team3.backend.opportunity.normalization.dto.TrainingNormalizationCommand;
+import com.team3.backend.opportunity.service.TrainingCourseNormalizationService;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
@@ -39,7 +43,10 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -82,6 +89,12 @@ class OpportunitySearchPostgresTest {
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.datasource.driver-class-name", postgres::getDriverClassName);
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "create");
+        // 키워드 검색의 후보 확장은 제목 생성 컬럼이 있어야 한다. 스키마 생성 직후 생성 컬럼으로 바꾼다
+        registry.add("spring.jpa.properties.hibernate.hbm2ddl.import_files",
+                () -> "search-title-columns-hibernate-create.sql");
+        registry.add("spring.jpa.properties.hibernate.hbm2ddl.halt_on_error", () -> "true");
+        // import 파일은 기본 문자셋으로 읽힌다. 정규식의 가운뎃점(·・‧ᆞ)이 깨지지 않게 명시한다
+        registry.add("spring.jpa.properties.hibernate.hbm2ddl.charset_name", () -> "UTF-8");
     }
 
     @Autowired
@@ -94,7 +107,16 @@ class OpportunitySearchPostgresTest {
     private EntityManagerFactory entityManagerFactory;
 
     @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Autowired
     private RegionDirectory regionDirectory;
+
+    @Autowired
+    private TrainingCourseNormalizationService trainingCourseNormalizationService;
+
+    @Autowired
+    private OpportunitySourceRepository opportunitySourceRepository;
 
     @Test
     void combinedPolicyFiltersSortAndPageWithoutExcludingSavedHiddenOpportunity() throws Exception {
@@ -135,11 +157,11 @@ class OpportunitySearchPostgresTest {
             window(policy, PeriodType.FIXED, start, end, ValidationStatus.VALID);
             eligibilityResult(userId, policy,
                     policy == possible ? EligibilityStatus.POSSIBLY_ELIGIBLE : EligibilityStatus.ELIGIBLE,
-                    null, 1L, EligibilityResultService.RULE_VERSION, null);
+                    false, 1L, EligibilityResultService.RULE_VERSION, null);
         }
         UserOpportunityPreference preference = UserOpportunityPreference.builder()
                 .user(account).opportunity(near).build();
-        preference.markSaved();
+        preference.markSaved(near.getCurrentVersion().getId());
         preference.markHidden();
         entityManager.persist(preference);
         entityManager.flush();
@@ -178,6 +200,98 @@ class OpportunitySearchPostgresTest {
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andReturn();
         assertEquals(List.of(near.getId()), opportunityIds(publicSearch));
+    }
+
+    @Test
+    void detailCategoryFiltersBeforePostgresPagination() throws Exception {
+        Opportunity first = opportunity("PG detail category first", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity second = opportunity("PG detail category second", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity otherDetail = opportunity("PG detail category other", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity policy = opportunity("PG detail category policy", OpportunityType.YOUTH_POLICY);
+        for (Opportunity training : List.of(first, second, otherDetail)) {
+            training.updateSummary(training.getTitle(), "교육･직업훈련", "정보통신",
+                    training == otherDetail ? "하드웨어" : "소프트웨어", null);
+        }
+        policy.updateSummary(policy.getTitle(), "복지", "생활", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Long> actualIds = new ArrayList<>();
+        for (int page = 0; page < 2; page++) {
+            MvcResult result = mockMvc.perform(get("/api/opportunities")
+                            .param("keyword", "PG detail category")
+                            .param("type", "VOCATIONAL_TRAINING")
+                            .param("category", "교육･직업훈련")
+                            .param("subCategory", "정보통신")
+                            .param("detailCategory", "소프트웨어")
+                            .param("page", String.valueOf(page)).param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].detailCategory").value("소프트웨어"))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andReturn();
+            actualIds.addAll(opportunityIds(result));
+        }
+        assertEquals(List.of(second.getId(), first.getId()), actualIds);
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG detail category").param("type", "VOCATIONAL_TRAINING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3));
+        mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG detail category policy").param("type", "YOUTH_POLICY"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void normalizedNcsCategoriesArePersistedAndSearchable() throws Exception {
+        Long sourceId = 990002L;
+        TrainingCourseRaw informationTechnology = TrainingCourseRaw.builder()
+                .trprId("PG-NCS-IT").trprDegr("1").title("PG NCS integration IT")
+                .ncsCd("20010202").build();
+        TrainingCourseRaw communicationTechnology = TrainingCourseRaw.builder()
+                .trprId("PG-NCS-COMM").trprDegr("1").title("PG NCS integration communication")
+                .ncsCd("20020101").build();
+
+        assertEquals(2, trainingCourseNormalizationService.normalizePage(new TrainingNormalizationCommand(
+                sourceId, List.of(informationTechnology, communicationTechnology), LocalDateTime.now())).created());
+        entityManager.flush();
+        entityManager.clear();
+
+        Opportunity informationOpportunity = opportunitySourceRepository
+                .findBySourceIdAndExternalId(sourceId, "PG-NCS-IT:1").orElseThrow().getOpportunity();
+        Opportunity communicationOpportunity = opportunitySourceRepository
+                .findBySourceIdAndExternalId(sourceId, "PG-NCS-COMM:1").orElseThrow().getOpportunity();
+        assertEquals("교육･직업훈련", informationOpportunity.getCategory());
+        assertEquals("정보통신", informationOpportunity.getSubCategory());
+        assertEquals("정보기술", informationOpportunity.getDetailCategory());
+        assertEquals("교육･직업훈련", communicationOpportunity.getCategory());
+        assertEquals("정보통신", communicationOpportunity.getSubCategory());
+        assertEquals("통신기술", communicationOpportunity.getDetailCategory());
+
+        MvcResult sameMajor = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG NCS integration")
+                        .param("type", "VOCATIONAL_TRAINING")
+                        .param("category", "교육･직업훈련")
+                        .param("subCategory", "정보통신"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andReturn();
+        assertEquals(Set.of(informationOpportunity.getId(), communicationOpportunity.getId()),
+                Set.copyOf(opportunityIds(sameMajor)));
+
+        MvcResult filtered = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG NCS integration")
+                        .param("type", "VOCATIONAL_TRAINING")
+                        .param("category", "교육･직업훈련")
+                        .param("subCategory", "정보통신")
+                        .param("detailCategory", "정보기술"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].opportunityId").value(informationOpportunity.getId()))
+                .andExpect(jsonPath("$.content[0].detailCategory").value("정보기술"))
+                .andReturn();
+        assertEquals(List.of(informationOpportunity.getId()), opportunityIds(filtered));
     }
 
     @Test
@@ -220,28 +334,28 @@ class OpportunitySearchPostgresTest {
         trainingDetail(trainingToday, today);
         trainingDetail(trainingPast, today.minusDays(1));
 
-        eligibilityResult(userId, eligible, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, eligible, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, possible, EligibilityStatus.POSSIBLY_ELIGIBLE, null, 1L,
+        eligibilityResult(userId, possible, EligibilityStatus.POSSIBLY_ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, today.plusDays(1));
-        eligibilityResult(userId, notEligible, EligibilityStatus.NOT_ELIGIBLE, null, 1L,
+        eligibilityResult(userId, notEligible, EligibilityStatus.NOT_ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, unknown, EligibilityStatus.UNKNOWN, null, 1L,
+        eligibilityResult(userId, unknown, EligibilityStatus.UNKNOWN, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
         eligibilityResult(userId, staleOpportunity, EligibilityStatus.ELIGIBLE,
-                staleOpportunity.getCurrentVersion().getId() + 1000, 1L,
+                true, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, staleProfile, EligibilityStatus.ELIGIBLE, null, 2L,
+        eligibilityResult(userId, staleProfile, EligibilityStatus.ELIGIBLE, false, 2L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, staleRule, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, staleRule, EligibilityStatus.ELIGIBLE, false, 1L,
                 "old-rule", null);
-        eligibilityResult(userId, expired, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, expired, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, today);
-        eligibilityResult(otherUserId, otherOnly, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(otherUserId, otherOnly, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, trainingToday, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, trainingToday, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(userId, trainingPast, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(userId, trainingPast, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
         entityManager.flush();
         entityManager.clear();
@@ -345,15 +459,13 @@ class OpportunitySearchPostgresTest {
     }
 
     private void eligibilityResult(Long userId, Opportunity opportunity, EligibilityStatus status,
-                                   Long opportunityVersionId, Long profileVersion, String ruleVersion,
+                                   boolean staleConditionSet, Long profileVersion, String ruleVersion,
                                    LocalDate validUntil) {
-        entityManager.persist(EligibilityResult.builder()
-                .userId(userId).opportunityId(opportunity.getId())
-                .opportunityVersionId(opportunityVersionId == null
-                        ? opportunity.getCurrentVersion().getId() : opportunityVersionId)
-                .profileVersion(profileVersion).ruleVersion(ruleVersion)
-                .eligibilityStatus(status).conditionResults(List.of())
-                .validUntil(validUntil).evaluatedAt(LocalDateTime.now()).build());
+        Long conditionSetId = staleConditionSet
+                ? EligibilityResultFixtures.newConditionSet(entityManager)
+                : EligibilityResultFixtures.conditionSetOf(entityManager, opportunity.getCurrentVersion());
+        EligibilityResultFixtures.result(entityManager, userId, conditionSetId, status, profileVersion, ruleVersion,
+                validUntil);
     }
 
     @Test
@@ -383,42 +495,42 @@ class OpportunitySearchPostgresTest {
         Opportunity staleRule = opportunity("PG display stale rule", OpportunityType.YOUTH_POLICY);
         Opportunity expired = opportunity("PG display expired", OpportunityType.YOUTH_POLICY);
         Opportunity noResult = opportunity("PG display no result", OpportunityType.YOUTH_POLICY);
-        eligibilityResult(account.getId(), eligible, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), eligible, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), possible, EligibilityStatus.POSSIBLY_ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), possible, EligibilityStatus.POSSIBLY_ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), notEligible, EligibilityStatus.NOT_ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), notEligible, EligibilityStatus.NOT_ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), unknown, EligibilityStatus.UNKNOWN, null, 1L,
+        eligibilityResult(account.getId(), unknown, EligibilityStatus.UNKNOWN, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
         eligibilityResult(account.getId(), staleVersion, EligibilityStatus.ELIGIBLE,
-                staleVersion.getCurrentVersion().getId() + 1000, 1L,
+                true, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), staleProfile, EligibilityStatus.ELIGIBLE, null, 2L,
+        eligibilityResult(account.getId(), staleProfile, EligibilityStatus.ELIGIBLE, false, 2L,
                 EligibilityResultService.RULE_VERSION, null);
-        eligibilityResult(account.getId(), staleRule, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), staleRule, EligibilityStatus.ELIGIBLE, false, 1L,
                 "old-rule", null);
-        eligibilityResult(account.getId(), expired, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(account.getId(), expired, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, today);
-        eligibilityResult(otherAccount.getId(), noResult, EligibilityStatus.ELIGIBLE, null, 1L,
+        eligibilityResult(otherAccount.getId(), noResult, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
 
         UserOpportunityPreference both = UserOpportunityPreference.builder()
                 .user(account).opportunity(eligible).build();
-        both.markSaved();
+        both.markSaved(eligible.getCurrentVersion().getId());
         both.markHidden();
         entityManager.persist(both);
         UserOpportunityPreference saved = UserOpportunityPreference.builder()
                 .user(account).opportunity(unknown).build();
-        saved.markSaved();
+        saved.markSaved(unknown.getCurrentVersion().getId());
         entityManager.persist(saved);
         UserOpportunityPreference otherSaved = UserOpportunityPreference.builder()
                 .user(otherAccount).opportunity(possible).build();
-        otherSaved.markSaved();
+        otherSaved.markSaved(possible.getCurrentVersion().getId());
         entityManager.persist(otherSaved);
         UserOpportunityPreference noProfileSaved = UserOpportunityPreference.builder()
                 .user(noProfileAccount).opportunity(notEligible).build();
-        noProfileSaved.markSaved();
+        noProfileSaved.markSaved(notEligible.getCurrentVersion().getId());
         entityManager.persist(noProfileSaved);
         entityManager.flush();
         entityManager.clear();
@@ -459,7 +571,9 @@ class OpportunitySearchPostgresTest {
                     .andExpect(jsonPath("$.totalElements").value(9))
                     .andExpect(jsonPath("$.content.length()").value(9))
                     .andReturn();
-            assertEquals(3, statistics.getPrepareStatementCount() - beforeLargePage);
+            // 목록 1 + COUNT 1 + 판정·저장 조회 1에 더해, 검색 트랜잭션마다 SET LOCAL jit = off 1문장이 붙는다.
+            // 결과 건수와 무관한 고정 1회라 항목별 추가 질의(N+1)가 없다는 검증 의도는 그대로다.
+            assertEquals(4, statistics.getPrepareStatementCount() - beforeLargePage);
             Map<Long, Map<String, Object>> items = searchItems(largePage);
             assertEquals("ELIGIBLE", items.get(eligible.getId()).get("eligibilityStatus"));
             assertEquals(true, items.get(eligible.getId()).get("saved"));
@@ -1063,8 +1177,10 @@ class OpportunitySearchPostgresTest {
         entityManager.clear();
         regionDirectory.refresh();
 
+        // 검색어가 있으면 기본 정렬이 관련도순이므로 최신순은 명시한다
         MvcResult latest = mockMvc.perform(get("/api/opportunities")
-                        .param("keyword", "PG sort deadline").param("type", "YOUTH_POLICY"))
+                        .param("keyword", "PG sort deadline").param("type", "YOUTH_POLICY")
+                        .param("sort", "LATEST"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(4))
                 .andReturn();
@@ -1178,5 +1294,36 @@ class OpportunitySearchPostgresTest {
                 .version(opportunity.getCurrentVersion())
                 .courseId("PG-date-" + opportunity.getId()).courseRound(1)
                 .trainingStartDate(startDate).build());
+    }
+
+    @Test
+    void searchTurnsOffJitInsideItsOwnTransaction() throws Exception {
+        // 트랜잭션 시작 시점에는 서버 기본값이다.
+        assertEquals("on", showJit());
+
+        mockMvc.perform(get("/api/opportunities").param("size", "1"))
+                .andExpect(status().isOk());
+
+        // 검색 질의와 같은 트랜잭션·커넥션에서 꺼져 있어야 한다.
+        assertEquals("off", showJit());
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void jitSettingDoesNotLeakOutOfTheSearchTransaction() throws Exception {
+        // 검색은 자기 트랜잭션에서 jit을 끈다.
+        mockMvc.perform(get("/api/opportunities").param("size", "1"))
+                .andExpect(status().isOk());
+
+        // SET LOCAL이라 트랜잭션이 끝나면 복원된다.
+        // 풀에서 같은 커넥션을 다시 받더라도 새 트랜잭션은 기본값으로 시작해야 한다.
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        for (int attempt = 0; attempt < 5; attempt++) {
+            assertEquals("on", template.execute(status -> showJit()));
+        }
+    }
+
+    private String showJit() {
+        return (String) entityManager.createNativeQuery("SHOW jit").getSingleResult();
     }
 }

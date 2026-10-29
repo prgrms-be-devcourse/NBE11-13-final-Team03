@@ -1,0 +1,388 @@
+{
+  "schema_version": 1,
+  "observed_on": "2026-10-28",
+  "provenance": "Operator-provided CloudShell export; not a live AWS verification",
+  "account_id": "174170816230",
+  "region": "ap-northeast-2",
+  "vpc": [
+    {
+      "VpcId": "vpc-032bd9d88d5c97147",
+      "CidrBlock": "10.0.0.0/16",
+      "IsDefault": false
+    }
+  ],
+  "subnets": [
+    {
+      "SubnetId": "subnet-084d01b4bc4420dc4",
+      "VpcId": "vpc-032bd9d88d5c97147",
+      "CidrBlock": "10.0.0.0/20",
+      "AvailabilityZone": "ap-northeast-2a",
+      "MapPublicIpOnLaunch": true
+    },
+    {
+      "SubnetId": "subnet-0f2f8345977f304f9",
+      "VpcId": "vpc-032bd9d88d5c97147",
+      "CidrBlock": "10.0.16.0/20",
+      "AvailabilityZone": "ap-northeast-2b",
+      "MapPublicIpOnLaunch": true
+    }
+  ],
+  "instances": [
+    {
+      "name": "yon-main",
+      "InstanceId": "i-05f26052a70059c73",
+      "InstanceType": "t3.small",
+      "PrivateIpAddress": "10.0.0.226",
+      "SubnetId": "subnet-084d01b4bc4420dc4",
+      "instance_profile_arn": "arn:aws:iam::174170816230:instance-profile/team03-main-sqs",
+      "imds": {
+        "HttpTokens": "required",
+        "HttpPutResponseHopLimit": 2
+      }
+    },
+    {
+      "name": "yon-data",
+      "InstanceId": "i-0b48442522e0c3400",
+      "InstanceType": "t3.small",
+      "PrivateIpAddress": "10.0.5.57",
+      "SubnetId": "subnet-084d01b4bc4420dc4",
+      "instance_profile_arn": "arn:aws:iam::174170816230:instance-profile/team03-data-sqs",
+      "imds": {
+        "HttpTokens": "required",
+        "HttpPutResponseHopLimit": 2
+      }
+    },
+    {
+      "name": "yon-db",
+      "InstanceId": "i-08a92649f4f51f8a5",
+      "InstanceType": "t3.small",
+      "PrivateIpAddress": "10.0.0.37",
+      "SubnetId": "subnet-084d01b4bc4420dc4",
+      "instance_profile_arn": null,
+      "imds": {
+        "HttpTokens": "required",
+        "HttpPutResponseHopLimit": 2
+      }
+    },
+    {
+      "name": "yon-db-replica",
+      "InstanceId": "i-0f45b533faf285beb",
+      "InstanceType": "t3.small",
+      "PrivateIpAddress": "10.0.2.203",
+      "SubnetId": "subnet-084d01b4bc4420dc4",
+      "instance_profile_arn": null,
+      "imds": {
+        "HttpTokens": "required",
+        "HttpPutResponseHopLimit": 2
+      }
+    }
+  ],
+  "security_groups": [
+    {
+      "name": "default",
+      "id": "sg-0c70634820f9435d2",
+      "managed_candidate": false,
+      "ingress": [
+        {
+          "IpProtocol": "-1",
+          "UserIdGroupPairs": [
+            {
+              "UserId": "174170816230",
+              "GroupId": "sg-0c70634820f9435d2"
+            }
+          ],
+          "IpRanges": [],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ],
+      "egress": [
+        {
+          "IpProtocol": "-1",
+          "UserIdGroupPairs": [],
+          "IpRanges": [
+            {
+              "CidrIp": "0.0.0.0/0"
+            }
+          ],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ]
+    },
+    {
+      "name": "yon-data",
+      "id": "sg-042c6f59681a7b1bd",
+      "managed_candidate": true,
+      "ingress": [
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 22,
+          "ToPort": 22,
+          "UserIdGroupPairs": [
+            {
+              "Description": "ssh via yon-main",
+              "UserId": "174170816230",
+              "GroupId": "sg-0fbaf2496d1edd1ed"
+            }
+          ],
+          "IpRanges": [],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        },
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 9092,
+          "ToPort": 9092,
+          "UserIdGroupPairs": [
+            {
+              "UserId": "174170816230",
+              "GroupId": "sg-0fbaf2496d1edd1ed"
+            }
+          ],
+          "IpRanges": [],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ],
+      "egress": [
+        {
+          "IpProtocol": "-1",
+          "UserIdGroupPairs": [],
+          "IpRanges": [
+            {
+              "CidrIp": "0.0.0.0/0"
+            }
+          ],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ]
+    },
+    {
+      "name": "yon-db",
+      "id": "sg-03c341b41a4087a48",
+      "managed_candidate": true,
+      "ingress": [
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 5432,
+          "ToPort": 5432,
+          "UserIdGroupPairs": [
+            {
+              "UserId": "174170816230",
+              "GroupId": "sg-0fbaf2496d1edd1ed"
+            },
+            {
+              "UserId": "174170816230",
+              "GroupId": "sg-042c6f59681a7b1bd"
+            },
+            {
+              "UserId": "174170816230",
+              "GroupId": "sg-04b53d2630b9a7ea9"
+            }
+          ],
+          "IpRanges": [],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        },
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 22,
+          "ToPort": 22,
+          "UserIdGroupPairs": [
+            {
+              "UserId": "174170816230",
+              "GroupId": "sg-0fbaf2496d1edd1ed"
+            }
+          ],
+          "IpRanges": [],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ],
+      "egress": [
+        {
+          "IpProtocol": "-1",
+          "UserIdGroupPairs": [],
+          "IpRanges": [
+            {
+              "CidrIp": "0.0.0.0/0"
+            }
+          ],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ]
+    },
+    {
+      "name": "yon-main",
+      "id": "sg-0fbaf2496d1edd1ed",
+      "managed_candidate": true,
+      "ingress": [
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 8080,
+          "ToPort": 8080,
+          "UserIdGroupPairs": [],
+          "IpRanges": [
+            {
+              "CidrIp": "0.0.0.0/0"
+            }
+          ],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        },
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 22,
+          "ToPort": 22,
+          "UserIdGroupPairs": [],
+          "IpRanges": [
+            {
+              "CidrIp": "0.0.0.0/0"
+            }
+          ],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ],
+      "egress": [
+        {
+          "IpProtocol": "-1",
+          "UserIdGroupPairs": [],
+          "IpRanges": [
+            {
+              "CidrIp": "0.0.0.0/0"
+            }
+          ],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ]
+    },
+    {
+      "name": "yon-db-replica",
+      "id": "sg-04b53d2630b9a7ea9",
+      "managed_candidate": true,
+      "ingress": [
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 5432,
+          "ToPort": 5432,
+          "UserIdGroupPairs": [
+            {
+              "UserId": "174170816230",
+              "GroupId": "sg-0fbaf2496d1edd1ed"
+            }
+          ],
+          "IpRanges": [],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        },
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 22,
+          "ToPort": 22,
+          "UserIdGroupPairs": [
+            {
+              "UserId": "174170816230",
+              "GroupId": "sg-0fbaf2496d1edd1ed"
+            }
+          ],
+          "IpRanges": [],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ],
+      "egress": [
+        {
+          "IpProtocol": "-1",
+          "UserIdGroupPairs": [],
+          "IpRanges": [
+            {
+              "CidrIp": "0.0.0.0/0"
+            }
+          ],
+          "Ipv6Ranges": [],
+          "PrefixListIds": []
+        }
+      ]
+    }
+  ],
+  "volumes": [
+    {
+      "VolumeId": "vol-064bba73e99cdd56b",
+      "Size": 30,
+      "VolumeType": "gp3",
+      "Encrypted": false
+    },
+    {
+      "VolumeId": "vol-0a6105586ce01bd75",
+      "Size": 30,
+      "VolumeType": "gp3",
+      "Encrypted": false
+    },
+    {
+      "VolumeId": "vol-00849f0c908ebe376",
+      "Size": 30,
+      "VolumeType": "gp3",
+      "Encrypted": false
+    },
+    {
+      "VolumeId": "vol-0df2b14cf864d2c74",
+      "Size": 30,
+      "VolumeType": "gp3",
+      "Encrypted": false
+    }
+  ],
+  "cloudfront": {
+    "distribution_id": null,
+    "backend_origin": {
+      "id": "yon-backend",
+      "http_port": 8080,
+      "protocol": "http-only",
+      "x_forwarded_proto": "https"
+    },
+    "viewer_certificate": "cloudfront-default",
+    "aliases": [],
+    "oac_id": "E2JJZ8SZNVRWDC",
+    "function_names": [
+      "yon-spa-rewrite"
+    ]
+  },
+  "sqs_owner": "CloudFormation: team03-sqs-user and team03-sqs-admin; Terraform ownership transfer deferred",
+  "server_hours": {
+    "start_kst": "09:00",
+    "stop_kst": "18:00",
+    "source": "User-provided operating hours; scheduler owner and timezone still require lookup"
+  },
+  "unknowns": [
+    "route tables/associations and IGW IDs",
+    "security group rule IDs",
+    "attached and inline IAM policy documents",
+    "CloudFront distribution ID and function source",
+    "S3 policy/access/encryption/versioning",
+    "SQS attributes",
+    "termination protection",
+    "scheduling configuration/owner",
+    "alarms/budgets and Route53 existence vs permission denial"
+  ],
+  "source_sha256": {
+    "cfn-stacks.json": "42728540934a40dbe14c27c4ab518b95697a398b33a0ed5563d7f6618f7bb0ab",
+    "cloudfront.json": "281c4230c8f7c16002d8d095e069a786ee03e737cfc25643c9bd772536e71878",
+    "ec2.json": "598f592cca413f710dad42133c4354e4355402685909bd496ccded0d52062673",
+    "elastic-ips.json": "0545db8f7a50d96960b5b49ec06dd3ce4acc3b5c35514f24c2b699ff116e26cd",
+    "iam-roles.json": "e36c195f6c5254dd2c610302f81c05bfa4050d7df2ebb60e94ff0915ebcfac92",
+    "instance-profiles.json": "ce16c304423ca2ddbdf65dee022d7a3770ae96b14c2afdd96314ff2a0f4cdd70",
+    "key-pairs.json": "ab2ee10262693b7fce0b69adea2ed556e2ec71071aa396ea93ee8745231e5087",
+    "oidc.json": "96d26b5a0468d71fde5e0e8bbd0c6822ef202b9aa471f23acb91b526bc18e924",
+    "s3-buckets.json": "81e6116e4d97a938614d8c1f657ed3feebe1a30f80939dd3e96b4f833f8b66f8",
+    "security-groups.json": "e6d850e7db74debf07ddbe07f08b9e58cad9537ddb1a8cf55e96449b297b9177",
+    "sqs.json": "8ceecfffdfe3aa349e4897db7d14fe97b58700427c165d557f01261ff21b005e",
+    "subnets.json": "a769cb6c294c6e845e3a908572edff28be0238ef63c3c131f245867a7ede6467",
+    "volumes.json": "320addeab83ec26c828668be7e1eed2e303cfb35c0d28b32258f67f8db0c34f0",
+    "vpcs.json": "fa88cb0af274a2ac45096327fa94c37bb8039452934e32a598ffaa83d53b1bc3",
+    "ec2-summary.txt": "418dfc6704a485eae3a0e16ebaed772c3bbc16abe951f053890115338fb4077b"
+  }
+}

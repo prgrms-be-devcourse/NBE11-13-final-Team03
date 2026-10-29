@@ -1,4 +1,9 @@
-# 수집 정제 요청 NOTIFY
+# 수집 메시징 — 정제 요청과 완료 알림
+
+수집 완료 관리자 알림은 정제 요청 NOTIFY와 별도 흐름이다.
+정기 수집 종료 시 data-service 소유 Outbox에 6필드 메시지를 보존하며,
+관리자 큐 SQS Publisher는 기본 비활성이며 notification-service 관리자 소비·Slack 전달은 후속 단계다.
+계약·중복 제거·SQL 적용 순서는 [collection-completed-notifications.md](collection-completed-notifications.md)를 따른다.
 
 ## 역할과 연동 계약
 
@@ -25,7 +30,7 @@ LISTEN·요청 선점·정규화·폴링·대조는 main에 병합된 PR #21의 
 앱 시작 시 DDL을 실행하지 않는다. 테이블 생성 후 배포/초기화 계정으로 별도 적용한다.
 
 ```sh
-psql -v ON_ERROR_STOP=1 -f backend/src/main/resources/db/scripts/normalization-notifications.sql
+psql -v ON_ERROR_STOP=1 -f data-service/src/main/resources/db/scripts/normalization-notifications.sql
 ```
 
 접속 정보는 `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` 및 안전한 인증 설정으로 제공한다.
