@@ -2,7 +2,7 @@ import type { EligibilityStatus } from '../../components/ui/StatusBadge'
 
 export type OpportunityType = 'YOUTH_POLICY' | 'VOCATIONAL_TRAINING'
 export type ApplicationStatus = 'UPCOMING' | 'OPEN' | 'ALWAYS_OPEN' | 'CLOSED' | 'UNKNOWN'
-export type SearchSort = 'LATEST' | 'OLDEST' | 'DEADLINE_PRIORITY' | 'START_DATE_ASC'
+export type SearchSort = 'RELEVANCE' | 'LATEST' | 'OLDEST' | 'DEADLINE_PRIORITY' | 'START_DATE_ASC'
 
 export type SearchParams = {
   keyword: string

@@ -37,8 +37,13 @@ export const statusLabels: Record<ApplicationStatus, string> = {
   CLOSED: '모집 마감', UNKNOWN: '상태 미확인',
 }
 export const sortLabels: Record<SearchSort, string> = {
-  LATEST: '최초 등록일 최신순', OLDEST: '최초 등록일 오래된순',
+  RELEVANCE: '관련도순', LATEST: '최초 등록일 최신순', OLDEST: '최초 등록일 오래된순',
   DEADLINE_PRIORITY: '정책 마감 우선순', START_DATE_ASC: '교육 시작일 빠른순',
+}
+
+// 백엔드 기본 정렬과 같다. sort를 생략하면 검색어가 있을 때 관련도순, 없을 때 최신순이다.
+export function defaultSort(keyword: string): SearchSort {
+  return keyword.trim() ? 'RELEVANCE' : 'LATEST'
 }
 
 export function applicationStatusLabel(status: ApplicationStatus, type: SearchParams['type']): string {
@@ -54,8 +59,10 @@ export function defaultSearchParams(): SearchParams {
   }
 }
 
-export function availableSorts(type: SearchParams['type']): SearchSort[] {
-  return ['LATEST', 'OLDEST', ...(type === 'YOUTH_POLICY' ? ['DEADLINE_PRIORITY' as const] : []),
+// 관련도순은 검색어가 있을 때만 의미가 있다 (백엔드도 검색어 없이 요청하면 최신순으로 처리한다).
+export function availableSorts(type: SearchParams['type'], keyword = ''): SearchSort[] {
+  return [...(keyword.trim() ? ['RELEVANCE' as const] : []), 'LATEST', 'OLDEST',
+    ...(type === 'YOUTH_POLICY' ? ['DEADLINE_PRIORITY' as const] : []),
     ...(type === 'VOCATIONAL_TRAINING' ? ['START_DATE_ASC' as const] : [])]
 }
 
@@ -67,7 +74,7 @@ export function changeSearchType(params: SearchParams, type: SearchParams['type'
     deadlineTo: type === 'YOUTH_POLICY' ? params.deadlineTo : '',
     startDateFrom: type === 'VOCATIONAL_TRAINING' ? params.startDateFrom : '',
     startDateTo: type === 'VOCATIONAL_TRAINING' ? params.startDateTo : '',
-    sort: availableSorts(type).includes(params.sort) ? params.sort : 'LATEST',
+    sort: availableSorts(type, params.keyword).includes(params.sort) ? params.sort : defaultSort(params.keyword),
   }
 }
 
@@ -107,8 +114,10 @@ export function parseSearchParams(url: URLSearchParams): { params: SearchParams;
   if (status && Object.hasOwn(statusLabels, status)) params.applicationStatus = status as ApplicationStatus
   else if (status) invalid()
   const sort = url.get('sort')
-  if (sort && availableSorts(params.type).includes(sort as SearchSort)) params.sort = sort as SearchSort
-  else if (sort) invalid()
+  params.sort = defaultSort(params.keyword)
+  // 검색어 없는 관련도순은 백엔드처럼 최신순으로 처리한다 (오류가 아니다).
+  if (sort && availableSorts(params.type, params.keyword).includes(sort as SearchSort)) params.sort = sort as SearchSort
+  else if (sort && sort !== 'RELEVANCE') invalid()
   for (const [key, minimum, maximum] of [['page', 0, 2147483647], ['size', 1, 100]] as const) {
     const value = url.get(key)
     if (value && /^(0|[1-9]\d*)$/.test(value) && Number(value) >= minimum && Number(value) <= maximum) params[key] = Number(value)
@@ -142,14 +151,21 @@ export function serializeSearchParams(params: SearchParams): URLSearchParams {
   }
   const selected = eligibilityStatuses.filter(status => params.eligibilityStatuses.includes(status))
   if (selected.length) url.set('eligibilityStatuses', selected.join(','))
-  if (params.sort !== 'LATEST') url.set('sort', params.sort)
+  // 기본 정렬과 다를 때만 보낸다. 검색어가 있을 때 최신순은 sort=LATEST로 명시해야 관련도순과 구분된다.
+  const sort = params.sort === 'RELEVANCE' && !params.keyword.trim() ? 'LATEST' : params.sort
+  if (sort !== defaultSort(params.keyword)) url.set('sort', sort)
   if (params.page !== 0) url.set('page', String(params.page))
   if (params.size !== 10) url.set('size', String(params.size))
   return url
 }
 
 export function changeSearchConditions(params: SearchParams, patch: Partial<SearchParams>): SearchParams {
-  return parseSearchParams(serializeSearchParams({ ...params, ...patch, page: 0 })).params
+  const next = { ...params, ...patch, page: 0 }
+  // 기본 정렬을 쓰던 중 검색어가 생기거나 지워지면 새 검색어의 기본 정렬을 따른다. 직접 고른 정렬은 유지한다.
+  if (next.keyword.trim() !== params.keyword.trim() && next.sort === defaultSort(params.keyword)) {
+    next.sort = defaultSort(next.keyword)
+  }
+  return parseSearchParams(serializeSearchParams(next)).params
 }
 
 export function paginationPages(page: number, total: number): number[] {

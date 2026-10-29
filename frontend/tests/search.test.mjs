@@ -21,7 +21,8 @@ function deferred() {
 test('default URL and request params omit blank values and defaults consistently', () => {
   assert.deepEqual(parseSearchParams(new URLSearchParams()).params, defaultSearchParams())
   assert.equal(serializeSearchParams(defaultSearchParams()).toString(), '')
-  assert.equal(serializeSearchParams({ ...defaultSearchParams(), keyword: '  청년  ', category: ' ' }).toString(), 'keyword=%EC%B2%AD%EB%85%84')
+  // 검색어가 있을 때의 기본 정렬은 관련도순이다
+  assert.equal(serializeSearchParams({ ...defaultSearchParams(), keyword: '  청년  ', category: ' ', sort: 'RELEVANCE' }).toString(), 'keyword=%EC%B2%AD%EB%85%84')
 })
 
 test('URL round trip preserves valid filters and 0-based page, including independent category filters', () => {
@@ -74,6 +75,60 @@ test('type changes remove incompatible dates and sorting before sending', () => 
   assert.equal(parsed.params.startDateFrom, '')
   assert.equal(parsed.params.deadlineFrom, '')
   assert.equal(parsed.params.sort, 'LATEST')
+})
+
+test('default sort follows the keyword like the backend and only non-default sorts are serialized', () => {
+  const keyword = parseSearchParams(new URLSearchParams('keyword=청년 월세'))
+  assert.equal(keyword.params.sort, 'RELEVANCE')
+  assert.equal(serializeSearchParams(keyword.params).get('sort'), null)
+  assert.equal(parseSearchParams(new URLSearchParams()).params.sort, 'LATEST')
+  // 검색어가 있을 때 최신순은 명시해야 관련도순과 구분된다
+  const latest = parseSearchParams(new URLSearchParams('keyword=청년&sort=LATEST'))
+  assert.deepEqual(latest.notices, [])
+  assert.equal(latest.params.sort, 'LATEST')
+  assert.equal(serializeSearchParams(latest.params).get('sort'), 'LATEST')
+  assert.deepEqual(parseSearchParams(serializeSearchParams(latest.params)).params, latest.params)
+  // 검색어 없는 관련도순은 백엔드처럼 최신순이며 오류로 보지 않는다
+  const noKeyword = parseSearchParams(new URLSearchParams('sort=RELEVANCE'))
+  assert.equal(noKeyword.params.sort, 'LATEST')
+  assert.deepEqual(noKeyword.notices, [])
+  assert.equal(serializeSearchParams({ ...defaultSearchParams(), sort: 'RELEVANCE' }).get('sort'), null)
+  assert.deepEqual(availableSorts('', '청년'), ['RELEVANCE', 'LATEST', 'OLDEST'])
+  assert.deepEqual(availableSorts('YOUTH_POLICY', '청년'), ['RELEVANCE', 'LATEST', 'OLDEST', 'DEADLINE_PRIORITY'])
+})
+
+test('keyword changes move only the default sort; explicitly chosen sorts are kept', () => {
+  const none = defaultSearchParams()
+  const searched = changeSearchConditions(none, { keyword: '파이썬' })
+  assert.equal(searched.sort, 'RELEVANCE')
+  assert.equal(changeSearchConditions(searched, { keyword: '' }).sort, 'LATEST')
+  const chosenLatest = changeSearchConditions(searched, { sort: 'LATEST' })
+  assert.equal(serializeSearchParams(chosenLatest).get('sort'), 'LATEST')
+  assert.equal(changeSearchConditions(chosenLatest, { keyword: '엑셀' }).sort, 'LATEST')
+  assert.equal(changeSearchConditions(chosenLatest, { keyword: '' }).sort, 'LATEST')
+  const oldest = changeSearchConditions(searched, { sort: 'OLDEST' })
+  assert.equal(changeSearchConditions(oldest, { keyword: '' }).sort, 'OLDEST')
+  // 유형 변경으로 전용 정렬을 쓸 수 없게 되면 검색어 기준 기본 정렬로 돌아간다
+  const deadline = changeSearchConditions({ ...searched, type: 'YOUTH_POLICY' }, { sort: 'DEADLINE_PRIORITY' })
+  assert.equal(changeSearchType(deadline, 'VOCATIONAL_TRAINING').sort, 'RELEVANCE')
+  // 필터 변경·페이지 이동은 정렬을 바꾸지 않는다
+  assert.equal(changeSearchConditions(chosenLatest, { region: '11' }).sort, 'LATEST')
+  assert.equal(parseSearchParams(serializeSearchParams({ ...chosenLatest, page: 2 })).params.sort, 'LATEST')
+})
+
+test('search requests send sort only when it differs from the backend default', async () => {
+  const sent = []
+  apiClient.defaults.adapter = async config => {
+    sent.push(config.params.get('sort'))
+    return response(config, empty())
+  }
+  const keyword = { ...defaultSearchParams(), keyword: '내일배움카드' }
+  for (const sort of ['RELEVANCE', 'LATEST', 'OLDEST']) await searchOpportunities({ ...keyword, sort })
+  await searchOpportunities({ ...keyword, type: 'YOUTH_POLICY', sort: 'DEADLINE_PRIORITY' })
+  await searchOpportunities({ ...keyword, type: 'VOCATIONAL_TRAINING', sort: 'START_DATE_ASC' })
+  await searchOpportunities(defaultSearchParams())
+  await searchOpportunities({ ...defaultSearchParams(), sort: 'OLDEST' })
+  assert.deepEqual(sent, [null, 'LATEST', 'OLDEST', 'DEADLINE_PRIORITY', 'START_DATE_ASC', null, 'OLDEST'])
 })
 
 test('type changes clear incompatible classification descendants and keep original education request values', async () => {
