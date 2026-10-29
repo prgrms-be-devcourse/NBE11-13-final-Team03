@@ -96,8 +96,9 @@ resource "aws_vpc_security_group_ingress_rule" "existing" {
   cidr_ipv4                    = try(each.value.cidr_ipv4, null)
   referenced_security_group_id = try(aws_security_group.service[each.value.referenced_group].id, null)
   description                  = try(each.value.description, null)
-  tags                         = each.value.tags
+  tags                         = length(each.value.tags) > 0 ? each.value.tags : null
 
+  # Imported rules without tags read back as null, so an empty map would plan a tag update.
   lifecycle { prevent_destroy = true }
 }
 
@@ -107,7 +108,7 @@ resource "aws_vpc_security_group_egress_rule" "existing" {
   ip_protocol       = each.value.ip_protocol
   cidr_ipv4         = each.value.cidr_ipv4
   # Protocol -1 must not set from_port/to_port to -1.
-  tags = each.value.tags
+  tags = length(each.value.tags) > 0 ? each.value.tags : null
 
   lifecycle { prevent_destroy = true }
 }
