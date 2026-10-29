@@ -1177,8 +1177,10 @@ class OpportunitySearchPostgresTest {
         entityManager.clear();
         regionDirectory.refresh();
 
+        // 검색어가 있으면 기본 정렬이 관련도순이므로 최신순은 명시한다
         MvcResult latest = mockMvc.perform(get("/api/opportunities")
-                        .param("keyword", "PG sort deadline").param("type", "YOUTH_POLICY"))
+                        .param("keyword", "PG sort deadline").param("type", "YOUTH_POLICY")
+                        .param("sort", "LATEST"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(4))
                 .andReturn();

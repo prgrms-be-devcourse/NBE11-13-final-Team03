@@ -77,8 +77,8 @@ public class OpportunitySearchController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDateFrom,
             @Parameter(description = "직업훈련 교육 시작일 끝(포함), YYYY-MM-DD. type=VOCATIONAL_TRAINING 필수다")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDateTo,
-            @Parameter(description = "LATEST(기본, 최초 등록일 최신순), OLDEST(오래된순), DEADLINE_PRIORITY(정책 마감 임박순: OPEN, UPCOMING, ALWAYS_OPEN, CLOSED, UNKNOWN 순), START_DATE_ASC(훈련 시작일순). 전용 정렬에는 해당 type이 필수다")
-            @RequestParam(defaultValue = "LATEST") OpportunitySearchSort sort,
+            @Parameter(description = "RELEVANCE(검색어 관련도순), LATEST(최초 등록일 최신순), OLDEST(오래된순), DEADLINE_PRIORITY(정책 마감 임박순: OPEN, UPCOMING, ALWAYS_OPEN, CLOSED, UNKNOWN 순), START_DATE_ASC(훈련 시작일순). 생략하면 검색어가 있을 때 RELEVANCE, 없을 때 LATEST다. 검색어 없이 RELEVANCE를 지정하면 LATEST로 처리한다. 전용 정렬에는 해당 type이 필수다")
+            @RequestParam(required = false) OpportunitySearchSort sort,
             @Parameter(description = "0부터 시작하는 페이지 번호")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기, 1~100")

@@ -62,6 +62,12 @@ public class OpportunitySearchService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
+    /** search_strip(keywords)에 앞에 쉼표를 붙여 '%,표기%'로 비교하던 것과 같다 (쉼표 구분 항목의 시작에서만 일치). */
+    static final BiPredicate<String, String> POLICY_KEYWORD_PREFIX =
+            (normalized, variant) -> ("," + normalized).contains("," + variant);
+    /** search_strip(training_target_name)을 '%표기%'로 비교하던 것과 같다. */
+    static final BiPredicate<String, String> TRAINING_TARGET_CONTAINS = String::contains;
+
     private final OpportunitySearchRepository searchRepository;
     private final RegionDirectory regionDirectory;
     private final EligibilityProvider eligibilityProvider;
@@ -112,18 +118,20 @@ public class OpportunitySearchService {
         SearchKeyword searchKeyword = SearchKeyword.parse(keyword);
         // 후보 확장(B1)은 생성 컬럼이 있는 PostgreSQL에서만 한다. H2 등은 기존 제목 부분 일치만 쓴다.
         boolean expandCandidates = searchKeyword != null && searchKeyword.hasTokens() && isPostgres();
+        OpportunitySearchSort effectiveSort = effectiveSort(sort, expandCandidates);
         Map<String, String> trainingTargets = Map.of();
         Map<String, String> policyKeywords = Map.of();
         if (expandCandidates) {
             searchTitleColumns.verify();
             // 목록과 COUNT 질의가 같은 값 목록을 쓰도록 Specification 밖에서 한 번만 읽는다.
-            if (!searchKeyword.phraseMode()) {
-                if (searchKeyword.tokens().stream().anyMatch(token -> !token.trainingTargetVariants().isEmpty())) {
-                    trainingTargets = detailValueNames.trainingTargets();
-                }
-                if (searchKeyword.tokens().stream().anyMatch(token -> !token.policyKeywordVariants().isEmpty())) {
-                    policyKeywords = detailValueNames.policyKeywords();
-                }
+            // 후보 조건은 구문 모드에서 토큰별 비교를 하지 않지만, 관련도 보너스는 앞 토큰들로 계산한다.
+            List<SearchKeyword.Token> valueTokens = !searchKeyword.phraseMode() ? searchKeyword.tokens()
+                    : effectiveSort == OpportunitySearchSort.RELEVANCE ? searchKeyword.bonusTokens() : List.of();
+            if (valueTokens.stream().anyMatch(token -> !token.trainingTargetVariants().isEmpty())) {
+                trainingTargets = detailValueNames.trainingTargets();
+            }
+            if (valueTokens.stream().anyMatch(token -> !token.policyKeywordVariants().isEmpty())) {
+                policyKeywords = detailValueNames.policyKeywords();
             }
         }
         Map<String, String> normalizedTrainingTargets = trainingTargets;
@@ -188,19 +196,28 @@ public class OpportunitySearchService {
                     startDateMatches(root, query, criteriaBuilder, startDateFrom, startDateTo));
         }
 
-        Sort pageSort = switch (sort) {
+        Sort pageSort = switch (effectiveSort) {
             case LATEST -> Sort.by(Sort.Direction.DESC, "createdAt", "id");
             case OLDEST -> Sort.by(Sort.Direction.ASC, "createdAt", "id");
-            case DEADLINE_PRIORITY, START_DATE_ASC -> Sort.unsorted();
+            case RELEVANCE, DEADLINE_PRIORITY, START_DATE_ASC -> Sort.unsorted();
         };
-        if (sort == OpportunitySearchSort.DEADLINE_PRIORITY) {
+        if (effectiveSort == OpportunitySearchSort.RELEVANCE) {
+            // 관련도 식은 목록 질의에만 둔다. COUNT 질의(결과 타입 Long)는 정렬 없이 후보 수만 센다.
+            filters = filters.and((root, query, criteriaBuilder) -> {
+                if (!Long.class.equals(query.getResultType())) {
+                    SearchRelevance.orderBy(root, query, criteriaBuilder, searchKeyword,
+                            normalizedPolicyKeywords, normalizedTrainingTargets, today);
+                }
+                return criteriaBuilder.conjunction();
+            });
+        } else if (effectiveSort == OpportunitySearchSort.DEADLINE_PRIORITY) {
             filters = filters.and((root, query, criteriaBuilder) -> {
                 if (!Long.class.equals(query.getResultType())) {
                     orderByDeadlinePriority(root, query, criteriaBuilder, today);
                 }
                 return criteriaBuilder.conjunction();
             });
-        } else if (sort == OpportunitySearchSort.START_DATE_ASC) {
+        } else if (effectiveSort == OpportunitySearchSort.START_DATE_ASC) {
             filters = filters.and((root, query, criteriaBuilder) -> {
                 if (!Long.class.equals(query.getResultType())) {
                     orderByTrainingStart(root, query, criteriaBuilder);
@@ -231,6 +248,22 @@ public class OpportunitySearchService {
                 items, results.getNumber(), results.getSize(),
                 results.getTotalElements(), results.getTotalPages(), results.hasNext()
         );
+    }
+
+    /**
+     * 실제로 적용할 정렬. 정렬을 지정하지 않으면 검색어가 있을 때 관련도순, 없을 때 최신순이다.
+     * 관련도순은 후보 확장(B1)과 같은 조건(검색어 토큰이 있고 PostgreSQL)에서만 계산할 수 있다.
+     * 그 밖의 경우(검색어 없음, 구분자만 입력, H2)에 관련도순을 요청하면 최신순으로 처리한다.
+     * 사용자가 지정한 다른 정렬은 그대로 따른다.
+     */
+    static OpportunitySearchSort effectiveSort(OpportunitySearchSort requested, boolean relevanceAvailable) {
+        if (requested == null) {
+            return relevanceAvailable ? OpportunitySearchSort.RELEVANCE : OpportunitySearchSort.LATEST;
+        }
+        if (requested == OpportunitySearchSort.RELEVANCE && !relevanceAvailable) {
+            return OpportunitySearchSort.LATEST;
+        }
+        return requested;
     }
 
     /**
@@ -288,16 +321,14 @@ public class OpportunitySearchService {
             for (String variant : token.variants()) {
                 fields.add(titleMatches(root, criteriaBuilder, variant));
             }
-            // search_strip(keywords)를 앞에 쉼표를 붙여 '%,표기%'로 비교하던 것과 같다 (항목 시작에서만 일치)
             List<String> policyKeywords = matchingValues(normalizedPolicyKeywords, token.policyKeywordVariants(),
-                    (normalized, variant) -> ("," + normalized).contains("," + variant));
+                    POLICY_KEYWORD_PREFIX);
             if (!policyKeywords.isEmpty()) {
                 fields.add(detailValueIn(root, query, criteriaBuilder, OpportunityType.YOUTH_POLICY,
                         YouthPolicyDetail.class, "keywords", policyKeywords));
             }
-            // search_strip(training_target_name)을 '%표기%'로 비교하던 것과 같다
             List<String> trainingTargets = matchingValues(normalizedTrainingTargets, token.trainingTargetVariants(),
-                    String::contains);
+                    TRAINING_TARGET_CONTAINS);
             if (!trainingTargets.isEmpty()) {
                 fields.add(detailValueIn(root, query, criteriaBuilder, OpportunityType.VOCATIONAL_TRAINING,
                         TrainingCourseDetail.class, "trainingTargetName", trainingTargets));
@@ -307,7 +338,7 @@ public class OpportunitySearchService {
         return criteriaBuilder.and(tokens.toArray(Predicate[]::new));
     }
 
-    private static Predicate titleMatches(Root<Opportunity> root, CriteriaBuilder criteriaBuilder, String variant) {
+    static Predicate titleMatches(Root<Opportunity> root, CriteriaBuilder criteriaBuilder, String variant) {
         if (SearchKeyword.Token.shortLatin(variant)) {
             return criteriaBuilder.isTrue(criteriaBuilder.function(SearchSqlFunctions.REGEX_MATCH, Boolean.class,
                     root.get("searchTitleNorm"),
@@ -320,8 +351,8 @@ public class OpportunitySearchService {
      * 정규화 값이 표기 중 하나와 맞는 원문 값.
      * 표기가 없거나(범용어·최소 길이 미만) 맞는 값이 없으면 빈 목록이고, 그 토큰은 이 컬럼으로 비교하지 않는다.
      */
-    private static List<String> matchingValues(Map<String, String> normalizedByValue, List<String> variants,
-                                               BiPredicate<String, String> matches) {
+    static List<String> matchingValues(Map<String, String> normalizedByValue, List<String> variants,
+                                       BiPredicate<String, String> matches) {
         if (variants.isEmpty()) {
             return List.of();
         }
@@ -337,7 +368,7 @@ public class OpportunitySearchService {
      * 상세는 버전당 한 행이다. 현재 버전 ID를 상관 EXISTS 대신 비상관 IN으로 비교한다. 결과는 같지만,
      * OR 안의 EXISTS는 병렬 불가 SubPlan이 되어 공고 전수 스캔이 단일 프로세스로 고정된다.
      */
-    private static <D> Predicate detailValueIn(
+    static <D> Predicate detailValueIn(
             Root<Opportunity> root, CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder,
             OpportunityType type, Class<D> detailType, String attribute, List<String> values
     ) {

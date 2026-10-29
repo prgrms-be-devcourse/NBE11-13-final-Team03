@@ -64,15 +64,30 @@ class OpportunitySearchCandidateEquivalenceTest {
             if (System.getenv("YON_SEARCH_EQUIVALENCE_CAPTURE") != null) {
                 // SQL 로그 수집용: 측정과 같은 첫 페이지(20건)만 한 번 호출한다
                 searchService.search(parts[1], null, null, null, null, null, null, null, null, null, null, null,
-                        null, OpportunitySearchSort.LATEST, 0, 20);
+                        null, sort(), 0, 20);
+                continue;
+            }
+            if (System.getenv("YON_SEARCH_EQUIVALENCE_EDGE_PAGES") != null) {
+                // 대표 페이지만: 첫·중간·마지막 페이지 (page|qid|페이지 번호|id)
+                OpportunitySearchResponseDto first = searchService.search(parts[1], null, null, null, null, null,
+                        null, null, null, null, null, null, null, sort(), 0, PAGE_SIZE);
+                int pages = first.totalPages();
+                for (int page : new java.util.TreeSet<>(List.of(0, pages / 2, Math.max(0, pages - 1)))) {
+                    OpportunitySearchResponseDto response = page == 0 ? first : searchService.search(parts[1],
+                            null, null, null, null, null, null, null, null, null, null, null, null, sort(),
+                            page, PAGE_SIZE);
+                    for (OpportunitySearchItemDto item : response.content()) {
+                        lines.add("page|" + parts[0] + "|" + page + "|" + item.opportunityId());
+                    }
+                }
+                counts.add("count|" + parts[0] + "|" + first.totalElements());
                 continue;
             }
             long total = -1;
             int collected = 0;
             for (int page = 0; ; page++) {
                 OpportunitySearchResponseDto response = searchService.search(parts[1], null, null, null, null,
-                        null, null, null, null, null, null, null, null, OpportunitySearchSort.LATEST,
-                        page, PAGE_SIZE);
+                        null, null, null, null, null, null, null, null, sort(), page, PAGE_SIZE);
                 total = response.totalElements();
                 for (OpportunitySearchItemDto item : response.content()) {
                     lines.add(parts[0] + "|" + item.opportunityId());
@@ -92,13 +107,22 @@ class OpportunitySearchCandidateEquivalenceTest {
         Files.write(Path.of(System.getenv("YON_SEARCH_EQUIVALENCE_OUTPUT")), lines, StandardCharsets.UTF_8);
     }
 
+    /** YON_SEARCH_EQUIVALENCE_SORT로 정렬을 고른다 (없으면 LATEST, "DEFAULT"면 생략 = 서비스 기본 정렬) */
+    private static OpportunitySearchSort sort() {
+        String sort = System.getenv("YON_SEARCH_EQUIVALENCE_SORT");
+        if (sort == null || sort.isBlank()) {
+            return OpportunitySearchSort.LATEST;
+        }
+        return "DEFAULT".equals(sort) ? null : OpportunitySearchSort.valueOf(sort);
+    }
+
     /** 첫 페이지(목록 20건 + COUNT) 호출 시간. 예열 2회 뒤 20회의 p50/p95 (ms) */
     private String firstPageMillis(String keyword) {
         List<Long> samples = new ArrayList<>();
         for (int run = 0; run < 22; run++) {
             long start = System.nanoTime();
             searchService.search(keyword, null, null, null, null, null, null, null, null, null, null, null, null,
-                    OpportunitySearchSort.LATEST, 0, 20);
+                    sort(), 0, 20);
             if (run >= 2) {
                 samples.add((System.nanoTime() - start) / 1_000_000);
             }

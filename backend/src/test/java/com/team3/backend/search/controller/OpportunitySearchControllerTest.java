@@ -887,12 +887,20 @@ class OpportunitySearchControllerTest {
         assertFalse(searchOperation.containsKey("security"));
         assertEquals(List.of("array"), JsonPath.read(document,
                 "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == 'eligibilityStatuses')]['schema']['type']"));
-        for (String[] expected : new String[][]{{"sort", "LATEST"}, {"page", "0"}, {"size", "20"}}) {
+        for (String[] expected : new String[][]{{"page", "0"}, {"size", "20"}}) {
             List<Object> defaults = JsonPath.read(document,
                     "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == '"
                             + expected[0] + "')]['schema']['default']");
             assertEquals(expected[1], String.valueOf(defaults.getFirst()));
         }
+        // 정렬 기본값은 검색어 유무로 정해지므로(있으면 RELEVANCE, 없으면 LATEST) 고정 기본값을 문서에 두지 않는다
+        assertTrue(JsonPath.<List<Object>>read(document,
+                "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == 'sort')]['schema']['default']")
+                .isEmpty());
+        assertEquals(List.of("RELEVANCE", "LATEST", "OLDEST", "DEADLINE_PRIORITY", "START_DATE_ASC"),
+                JsonPath.<List<List<String>>>read(document,
+                        "$['paths']['/api/opportunities']['get']['parameters'][?(@.name == 'sort')]['schema']['enum']")
+                        .getFirst());
         assertEquals("boolean", JsonPath.read(document,
                 "$.components.schemas.OpportunitySearchItemDto.properties.saved.type"));
         assertTrue(JsonPath.<Map<String, Object>>read(document,

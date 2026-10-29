@@ -109,6 +109,42 @@ class SearchKeywordTest {
         assertThat(tokens.get(4).trainingTargetVariants()).containsExactly("컴퓨터활용능력");
     }
 
+    @Test
+    void phraseFormsCombineSynonymsInProductOrderUpToEight() {
+        assertThat(SearchKeyword.parse("파이썬 엑셀 기초").phraseForms()).containsExactly(
+                new SearchKeyword.PhraseForm("파이썬 엑셀 기초", "파이썬엑셀기초"),
+                new SearchKeyword.PhraseForm("파이썬 excel 기초", "파이썬excel기초"),
+                new SearchKeyword.PhraseForm("python 엑셀 기초", "python엑셀기초"),
+                new SearchKeyword.PhraseForm("python excel 기초", "pythonexcel기초"));
+        // 조합이 16개라 8개를 넘으면 원래 토큰만 쓴다
+        assertThat(SearchKeyword.parse("컴활 엑셀 파이썬 ppt").phraseForms())
+                .containsExactly(new SearchKeyword.PhraseForm("컴활 엑셀 파이썬 ppt", "컴활엑셀파이썬ppt"));
+    }
+
+    @Test
+    void regexEscapeAndBoundariesMatchThePrototype() {
+        assertThat(SearchKeyword.regexEscape("c++")).isEqualTo("c\\+\\+");
+        assertThat(SearchKeyword.regexEscape("a.b")).isEqualTo("a\\.b");
+        assertThat(SearchKeyword.regexEscape("100%")).isEqualTo("100%");
+        assertThat(SearchKeyword.regexEscape("x-y z")).isEqualTo("x\\-y\\ z");
+        assertThat(SearchKeyword.regexEscape("(일반)")).isEqualTo("\\(일반\\)");
+        assertThat(SearchKeyword.regexEscape("a#b~c&d")).isEqualTo("a\\#b\\~c\\&d");
+
+        SearchKeyword.PhraseForm latinStart = new SearchKeyword.PhraseForm("c++", "c++");
+        assertThat(latinStart.leftBoundary()).isEqualTo("(^|[^a-z0-9])");
+        assertThat(latinStart.rightBoundary()).isEmpty();
+        SearchKeyword.PhraseForm korean = new SearchKeyword.PhraseForm("(일반)", "(일반)");
+        assertThat(korean.leftBoundary()).isEmpty();
+        assertThat(korean.rightBoundary()).isEmpty();
+        assertThat(new SearchKeyword.PhraseForm("a.b", "a.b").rightBoundary()).isEqualTo("([^a-z0-9]|$)");
+    }
+
+    @Test
+    void bonusTokensAreTheFirstFive() {
+        assertThat(SearchKeyword.parse("데이터 분석 실무 과정 온라인 수료").bonusTokens())
+                .extracting(SearchKeyword.Token::value).containsExactly("데이터", "분석", "실무", "과정", "온라인");
+    }
+
     private static List<String> values(String keyword) {
         return SearchKeyword.parse(keyword).tokens().stream().map(SearchKeyword.Token::value).toList();
     }

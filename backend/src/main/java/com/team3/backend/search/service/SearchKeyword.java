@@ -38,6 +38,11 @@ public final class SearchKeyword {
             "[\\s/,·・‧ᆞㆍ|()\\[\\]{}「」『』<>\"'`~!?:;&]", Pattern.UNICODE_CHARACTER_CLASS);
     private static final Pattern WHITESPACE = Pattern.compile("\\s+", Pattern.UNICODE_CHARACTER_CLASS);
     private static final Pattern SHORT_LATIN = Pattern.compile("[a-z0-9]{1,2}");
+    private static final Pattern LATIN_OR_DIGIT = Pattern.compile("[a-z0-9]");
+
+    /** 동의어 표기 조합이 이보다 많으면 관련도 구문 판정에 원래 토큰만 쓴다. */
+    static final int MAX_PHRASE_COMBOS = 8;
+    private static final String REGEX_SPECIAL = "()[]{}?*+-|^$\\.&~# \t\n\r\u000B\f";
 
     private final String text;
     private final List<Token> tokens;
@@ -105,6 +110,79 @@ public final class SearchKeyword {
     /** 구문 모드의 공백 무시 전체 구문. search_title_strip과 비교한다. */
     public String phrase() {
         return String.join("", tokens.stream().map(Token::value).toList());
+    }
+
+    /** 관련도 보너스(정책 keywords·훈련구분·NCS)는 앞의 MAX_TOKENS개 토큰만 센다. 구문 모드도 같다. */
+    public List<Token> bonusTokens() {
+        return tokens.subList(0, Math.min(MAX_TOKENS, tokens.size()));
+    }
+
+    /**
+     * 제목 관련도(tier)의 완전·접두·구문 판정에 쓸 검색어 형태. 토큰마다 동의어 표기 중 하나를 고른 조합이며
+     * 앞 토큰이 천천히 바뀌는 순서다 (itertools.product와 같다). 조합이 MAX_PHRASE_COMBOS개를 넘으면 원래 토큰만 쓴다.
+     */
+    public List<PhraseForm> phraseForms() {
+        long combinations = 1;
+        for (Token token : tokens) {
+            combinations *= token.variants().size();
+        }
+        if (combinations > MAX_PHRASE_COMBOS) {
+            return List.of(PhraseForm.of(tokens.stream().map(Token::value).toList()));
+        }
+        List<List<String>> forms = new ArrayList<>();
+        forms.add(List.of());
+        for (Token token : tokens) {
+            List<List<String>> next = new ArrayList<>();
+            for (List<String> prefix : forms) {
+                for (String variant : token.variants()) {
+                    List<String> form = new ArrayList<>(prefix);
+                    form.add(variant);
+                    next.add(form);
+                }
+            }
+            forms = next;
+        }
+        return forms.stream().map(PhraseForm::of).toList();
+    }
+
+    /**
+     * Python re.escape(3.7+)와 같은 정규식 이스케이프. 관련도 정규식을 검증된 SQL 프로토타입과 같은 문자열로 만든다.
+     * PostgreSQL ARE에서 역슬래시 뒤의 영숫자가 아닌 문자는 그 문자 자체로 해석된다.
+     */
+    public static String regexEscape(String value) {
+        StringBuilder escaped = new StringBuilder();
+        for (char c : value.toCharArray()) {
+            if (REGEX_SPECIAL.indexOf(c) >= 0) {
+                escaped.append('\\');
+            }
+            escaped.append(c);
+        }
+        return escaped.toString();
+    }
+
+    /**
+     * 관련도 판정용 검색어 형태.
+     *
+     * @param spaced 토큰을 공백으로 이은 형태 (제목의 구분자를 공백으로 바꾼 값과 비교)
+     * @param joined 토큰을 붙인 형태 (search_title_strip·앞머리 제거 제목과 비교)
+     */
+    public record PhraseForm(String spaced, String joined) {
+
+        static PhraseForm of(List<String> parts) {
+            return new PhraseForm(String.join(" ", parts), String.join("", parts));
+        }
+
+        /** 검색어 앞이 영문·숫자이면 그 앞에 영문 경계를 요구한다 (java가 javascript에 걸리지 않게). */
+        public String leftBoundary() {
+            return !joined.isEmpty() && LATIN_OR_DIGIT.matcher(joined.substring(0, 1)).matches()
+                    ? "(^|[^a-z0-9])" : "";
+        }
+
+        /** 검색어 끝이 영문·숫자이면 그 뒤에 영문 경계를 요구한다. */
+        public String rightBoundary() {
+            return !joined.isEmpty() && LATIN_OR_DIGIT.matcher(joined.substring(joined.length() - 1)).matches()
+                    ? "([^a-z0-9]|$)" : "";
+        }
     }
 
     /** '%값%' LIKE 패턴. 이스케이프 문자는 '\\'다. */

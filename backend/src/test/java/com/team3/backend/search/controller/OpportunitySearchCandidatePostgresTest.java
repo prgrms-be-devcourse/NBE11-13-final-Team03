@@ -125,7 +125,7 @@ class OpportunitySearchCandidatePostgresTest {
         flush();
 
         // email은 ai를 영문 단어 안에 품고 있어 토큰 조건으로는 걸리지 않는다
-        assertThat(ids(search("ai 마케팅"))).containsExactly(attached.getId(), reordered.getId(), leading.getId());
+        assertThat(ids(search("ai 마케팅").param("sort", "LATEST"))).containsExactly(attached.getId(), reordered.getId(), leading.getId());
         // 기존 제목 부분 일치는 그대로라 단일 검색어 ai에는 email도 남는다
         assertThat(ids(search("ai"))).contains(email.getId());
     }
@@ -198,7 +198,7 @@ class OpportunitySearchCandidatePostgresTest {
 
         // 토큰 6개: 토큰 AND 대신 공백을 무시한 전체 구문만 더한다 (순서가 다른 제목은 제외)
         assertThat(ids(search("데이터 분석 실무 과정 온라인 수료"))).containsExactly(phrase.getId());
-        assertThat(ids(search("데이터 분석 실무 과정 온라인"))).containsExactly(reordered.getId(), phrase.getId());
+        assertThat(ids(search("데이터 분석 실무 과정 온라인").param("sort", "LATEST"))).containsExactly(reordered.getId(), phrase.getId());
         // 구분자만 입력하면 기존 제목 부분 일치만 쓴다
         assertThat(ids(search("!!!"))).containsExactly(bang.getId());
         assertThat(ids(search("100%"))).containsExactly(percent.getId());
@@ -223,7 +223,7 @@ class OpportunitySearchCandidatePostgresTest {
 
         List<Long> paged = new ArrayList<>();
         for (int page = 0; page < 3; page++) {
-            String body = body(search("청년 월세").param("type", "YOUTH_POLICY").param("category", "주거")
+            String body = body(search("청년 월세").param("sort", "LATEST").param("type", "YOUTH_POLICY").param("category", "주거")
                     .param("applicationStatus", "OPEN").param("page", String.valueOf(page)).param("size", "1"));
             assertThat(JsonPath.<Integer>read(body, "$.totalElements")).isEqualTo(3);
             assertThat(JsonPath.<Integer>read(body, "$.totalPages")).isEqualTo(3);
@@ -260,6 +260,106 @@ class OpportunitySearchCandidatePostgresTest {
                 .containsExactly(second.getId(), third.getId(), first.getId());
         assertThat(ids(search("python").param("type", "VOCATIONAL_TRAINING").param("sort", "START_DATE_ASC")))
                 .containsExactly(early.getId(), late.getId(), unknown.getId());
+    }
+
+    @Test
+    void keywordSearchDefaultsToRelevanceAndExplicitSortsAreRespected() throws Exception {
+        // 등록 순서를 관련도와 반대로 둬서 최신순과 관련도순이 구별되게 한다
+        Opportunity exact = opportunity("청년 월세", OpportunityType.YOUTH_POLICY);            // tier 5 완전 일치
+        Opportunity prefix = opportunity("청년 월세 지원사업", OpportunityType.YOUTH_POLICY);   // tier 4 접두
+        Opportunity phrase = opportunity("서울시 청년 월세 지원", OpportunityType.YOUTH_POLICY); // tier 3 구문
+        Opportunity joined = opportunity("서울시 청년월세 지원", OpportunityType.YOUTH_POLICY);  // tier 2 공백 무시 구문
+        Opportunity tokens = opportunity("월세 지원 청년 대상", OpportunityType.YOUTH_POLICY);   // tier 1 모든 토큰
+        flush();
+        List<Long> relevance = List.of(exact.getId(), prefix.getId(), phrase.getId(), joined.getId(), tokens.getId());
+        List<Long> latest = List.of(tokens.getId(), joined.getId(), phrase.getId(), prefix.getId(), exact.getId());
+
+        assertThat(ids(search("청년 월세"))).containsExactlyElementsOf(relevance);
+        assertThat(ids(search("청년 월세").param("sort", "RELEVANCE"))).containsExactlyElementsOf(relevance);
+        assertThat(ids(search("청년 월세").param("sort", "LATEST"))).containsExactlyElementsOf(latest);
+        assertThat(ids(search("청년 월세").param("sort", "OLDEST"))).containsExactlyElementsOf(relevance);
+        // 토큰이 모두 범용어라 보너스 신호가 없어도(모두 tier 1, bonus 0) 관련도순이 실패하지 않는다
+        assertThat(ids(search("청년 지원")))
+                .containsExactly(tokens.getId(), joined.getId(), phrase.getId(), prefix.getId());
+        // 검색어가 없으면 생략·RELEVANCE 모두 최신순이다
+        assertThat(ids(get("/api/opportunities"))).containsExactlyElementsOf(latest);
+        assertThat(ids(get("/api/opportunities").param("sort", "RELEVANCE"))).containsExactlyElementsOf(latest);
+        assertThat(ids(get("/api/opportunities").param("keyword", " ").param("sort", "RELEVANCE")))
+                .containsExactlyElementsOf(latest);
+    }
+
+    @Test
+    void bonusAndApplicationStatusOnlyBreakTiesWithinRelevance() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Opportunity closedPrefix = opportunity("월세 상담 청년", OpportunityType.YOUTH_POLICY);  // tier 4, 마감
+        window(closedPrefix, today.minusDays(10), today.minusDays(1));
+        Opportunity closedKeyword = opportunity("청년 월세 지원", OpportunityType.YOUTH_POLICY); // tier 3, keywords +30, 마감
+        policyDetail(closedKeyword, "월세,주거지원");
+        window(closedKeyword, today.minusDays(10), today.minusDays(1));
+        Opportunity open = opportunity("청년 월세 상담", OpportunityType.YOUTH_POLICY);          // tier 3, 모집 중
+        window(open, today.minusDays(1), today.plusDays(5));
+        Opportunity upcoming = opportunity("청년 월세 설명회", OpportunityType.YOUTH_POLICY);    // tier 3, 모집 예정
+        window(upcoming, today.plusDays(1), today.plusDays(5));
+        Opportunity unknown = opportunity("청년 월세 안내", OpportunityType.YOUTH_POLICY);       // tier 3, 상태 미상
+        Opportunity closed = opportunity("청년 월세 공고", OpportunityType.YOUTH_POLICY);        // tier 3, 마감
+        window(closed, today.minusDays(10), today.minusDays(1));
+        Opportunity always = opportunity("청년 월세 상시", OpportunityType.YOUTH_POLICY);        // tier 3, 상시 모집
+        entityManager.persist(ApplicationWindow.builder().version(always.getCurrentVersion())
+                .periodType(PeriodType.ALWAYS).validationStatus(ValidationStatus.VALID).build());
+        flush();
+
+        // tier가 높으면 마감이어도 먼저, 같은 tier에서는 bonus가 먼저, 모집 상태는 tier·bonus가 같을 때만 쓴다
+        // OPEN·ALWAYS_OPEN(같은 우선순위) 안에서는 최신 등록순이다
+        assertThat(ids(search("월세"))).containsExactly(closedPrefix.getId(), closedKeyword.getId(),
+                always.getId(), open.getId(), upcoming.getId(), unknown.getId(), closed.getId());
+    }
+
+    @Test
+    void upcomingCoursesShareTheOpenPriorityAndTrainingTargetAddsBonus() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        Opportunity target = opportunity("파이썬 실무", OpportunityType.VOCATIONAL_TRAINING);
+        // 파이썬(3자)은 훈련구분 비교 대상이 아니고 동의어 python(6자)이 비교된다
+        trainingDetail(target, "Python 집중훈련", today.minusDays(3));
+        Opportunity started = opportunity("파이썬 기초", OpportunityType.VOCATIONAL_TRAINING);
+        trainingDetail(started, null, today.minusDays(3));
+        Opportunity startsToday = opportunity("파이썬 입문", OpportunityType.VOCATIONAL_TRAINING);
+        trainingDetail(startsToday, null, today);
+        Opportunity noDetail = opportunity("파이썬 심화", OpportunityType.VOCATIONAL_TRAINING);
+        flush();
+
+        // 모두 tier 4(접두). 훈련구분 일치(+40)가 먼저, 다음은 개강 예정(오늘 포함)이 상태 미상보다 먼저다
+        assertThat(ids(search("파이썬"))).containsExactly(target.getId(), startsToday.getId(),
+                noDetail.getId(), started.getId());
+    }
+
+    @Test
+    void relevancePagesKeepCountsAndCoverEveryCandidateOnce() throws Exception {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        List<Long> created = new ArrayList<>();
+        for (String title : List.of("청년 월세", "청년월세 지원", "서울 청년 월세", "월세 청년", "청년 월세 상담",
+                "청년 주거 월세", "청년 월세 대출")) {
+            Opportunity opportunity = opportunity(title, OpportunityType.YOUTH_POLICY);
+            opportunity.updateSummary(title, "주거", "주거", null);
+            window(opportunity, today.minusDays(1), today.plusDays(3));
+            created.add(opportunity.getId());
+        }
+        opportunity("청년 월세 다른 분류", OpportunityType.YOUTH_POLICY);
+        flush();
+
+        List<Long> full = ids(search("청년 월세").param("category", "주거").param("applicationStatus", "OPEN")
+                .param("size", "100"));
+        List<Long> paged = new ArrayList<>();
+        for (int page = 0; page < 4; page++) {
+            String body = body(search("청년 월세").param("category", "주거").param("applicationStatus", "OPEN")
+                    .param("page", String.valueOf(page)).param("size", "2"));
+            assertThat(JsonPath.<Integer>read(body, "$.totalElements")).isEqualTo(7);
+            assertThat(JsonPath.<Integer>read(body, "$.totalPages")).isEqualTo(4);
+            paged.addAll(ids(body));
+        }
+        assertThat(paged).containsExactlyElementsOf(full);
+        assertThat(full).containsExactlyInAnyOrderElementsOf(created);
+        assertThat(JsonPath.<Integer>read(body(search("청년 월세").param("category", "주거")
+                .param("applicationStatus", "OPEN").param("sort", "LATEST")), "$.totalElements")).isEqualTo(7);
     }
 
     private MockHttpServletRequestBuilder search(String keyword) {
