@@ -1,44 +1,80 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
+import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import ts from 'typescript'
-import { readPushConfig, pushEnvironmentKeys } from '../src/push/config.ts'
+import { readPushConfig, pushEnvironmentKeys, supportsPush } from '../src/push/config.ts'
+import { createPushController, PushError } from '../src/push/model.ts'
+import { emptyPushStore } from '../src/push/storage.ts'
+import { pushScopeSuffix } from '../src/push/lifecycle.ts'
 import { pushTarget, pushClickPath, pushNavigateType, pushMessagePath } from '../src/push/protocol.ts'
 import { resolveConfig } from 'vite'
 
 test('development prebundles Firebase app, window and service-worker SDKs together', async () => {
-  const config = await resolveConfig({ root: new URL('../', import.meta.url).pathname }, 'serve')
+  const config = await resolveConfig({ root: fileURLToPath(new URL('../', import.meta.url)) }, 'serve')
   for (const entry of ['@firebase/app', '@firebase/messaging', '@firebase/messaging/sw']) {
     assert.ok(config.optimizeDeps.include.includes(entry), `${entry} must not be discovered only during worker registration`)
   }
+  assert.equal(config.worker.format, 'iife')
 })
 
-for (const development of [true, false]) test(`worker registration uses ${development ? 'module in development' : 'classic for the IIFE production bundle'} before requesting a token`, async () => {
+function browserFixture(development, registrationFails = false) {
+  // 모듈 전체를 실행하고 공개 controller.enable()을 호출한다. 내부 token()의 이름·위치를 알 필요가 없다.
   const source = fs.readFileSync(new URL('../src/push/browser.ts', import.meta.url), 'utf8')
-  const tokenSource = source.slice(source.indexOf('async function token()'), source.indexOf('async function removeToken()'))
-    .replaceAll('import.meta.env.DEV', String(development))
-  const compiled = ts.transpileModule(tokenSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+    .replaceAll('import.meta.env', 'fixtureEnv')
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const calls = []
   const active = { active: {} }
-  const context = vm.createContext({
-    URL, config: { vapidKey: 'fixture-public-key' }, Notification: { permission: 'granted' },
-    workerUrl: '/assets/firebase-messaging-sw.js', location: { href: 'https://yon.test/', origin: 'https://yon.test' },
-    pushScopeSuffix: '/yon-push/', registration: undefined, tokenClient: undefined,
-    navigator: { serviceWorker: { getRegistration: async () => undefined, register: async (url, options) => {
-      calls.push({ url: url.href, ...options }); return active
-    } } },
-    messaging: () => ({}), getToken: async (_client, options) => {
+  let store = emptyPushStore()
+  const modules = {
+    '@firebase/app': { getApps: () => [], initializeApp: () => ({}) },
+    '@firebase/messaging': { isSupported: async () => true, getMessaging: () => ({}), getToken: async (_client, options) => {
       assert.equal(options.serviceWorkerRegistration, active)
-      assert.equal(calls.length, 1)
-      return 'fixture-token'
-    },
-  })
-  assert.equal(await vm.runInContext(`${compiled}\ntoken()`, context), 'fixture-token')
-  assert.equal(calls[0].type, development ? 'module' : 'classic')
-  assert.equal(calls[0].scope, '/assets/yon-push/')
-  const viteConfig = fs.readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
-  assert.match(viteConfig, /worker:\s*\{\s*format:\s*'iife'\s*\}/)
+      calls.push({ action: 'token' }); return 'fixture-token'
+    } },
+    '../api/notifications.ts': { assertNotificationOwner: () => {},
+      getNotificationSettings: async () => ({ inAppEnabled: true, pushEnabled: false }),
+      putNotificationSettings: async value => value },
+    '../api/push.ts': { registerPushEndpoint: async token => {
+      calls.push({ action: 'endpoint', token }); return { id: 7, active: true }
+    } },
+    './config.ts': { readPushConfig, supportsPush }, './model.ts': { createPushController, PushError },
+    './storage.ts': { loadPushStore: () => structuredClone(store), savePushStore: value => { store = structuredClone(value) } },
+    './lifecycle.ts': { hasBrowserPush: async () => false, pushLock: async work => work(), pushScopeSuffix },
+    './firebase-messaging-sw.ts?worker&url': { __esModule: true, default: '/assets/firebase-messaging-sw.js' },
+  }
+  const exports = {}
+  vm.runInNewContext(compiled, { exports, require: name => {
+    assert.ok(Object.hasOwn(modules, name), `Unexpected dependency: ${name}`); return modules[name]
+  }, URL, Notification: { permission: 'granted' },
+  fixtureEnv: { ...Object.fromEntries(pushEnvironmentKeys.map(key => [key, 'fixture-public-key'])), DEV: development },
+  location: { href: 'https://yon.test/', origin: 'https://yon.test' },
+  window: { isSecureContext: true, Notification: {}, PushManager: {} },
+  navigator: { locks: {}, serviceWorker: { getRegistration: async () => undefined, register: async (url, options) => {
+    calls.push({ action: 'worker', url: url.href, ...options })
+    if (registrationFails) throw Error('fixture registration failure')
+    return active
+  } } } })
+  return { controller: () => exports.browserPushController({}, { id: 11 }), calls, store: () => store }
+}
+
+for (const development of [true, false]) test(`enabling push registers ${development ? 'module development' : 'classic production'} worker before token and endpoint`, async () => {
+  const f = browserFixture(development)
+  await (await f.controller()).enable()
+  assert.deepEqual(f.calls.map(call => call.action), ['worker', 'token', 'endpoint'])
+  assert.equal(f.calls[0].type, development ? 'module' : 'classic')
+  assert.equal(f.calls[0].url, 'https://yon.test/assets/firebase-messaging-sw.js')
+  assert.equal(f.calls[0].scope, '/assets/yon-fcm-push/')
+  assert.equal(f.calls[2].token, 'fixture-token')
+  assert.equal(f.store().users[11].phase, 'active')
+})
+
+test('failed worker registration never requests a token or registers an endpoint or claims active push', async () => {
+  const f = browserFixture(false, true)
+  await assert.rejects((await f.controller()).enable(), PushError)
+  assert.deepEqual(f.calls.map(call => call.action), ['worker'])
+  assert.notEqual(f.store().users[11].phase, 'active')
 })
 
 function workerFixture(existing = true) {

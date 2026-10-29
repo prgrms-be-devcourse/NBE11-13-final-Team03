@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'jacoco'
     id 'com.google.protobuf' version '0.9.6'
     id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
@@ -60,6 +61,21 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    finalizedBy tasks.named('jacocoTestReport')
+}
+
+jacoco { toolVersion = '0.8.14' } // Java 25 지원
+
+tasks.named('jacocoTestReport') {
+    dependsOn tasks.named('test')
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    // 생성된 wire 클래스만 제외한다. DTO·설정·예외 분기도 보고서에 남긴다.
+    classDirectories.setFrom(sourceSets.main.output.asFileTree.matching {
+        exclude 'com/team3/contracts/**'
+    })
 }
 
 tasks.named('bootJar') {

@@ -12,7 +12,8 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.http.HttpStatus;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -111,14 +112,15 @@ class YouthPolicyClientTests {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {302, 400, 401, 403, 429, 503})
-    void reportsHttpErrorsAndWhetherTheyCanBeRetried(int status) {
-        server.expect(anything()).andRespond(withStatus(HttpStatus.valueOf(status))
+    @CsvSource({"302, false", "400, false", "401, false", "403, true", "404, false",
+            "429, true", "499, false", "500, true", "503, true", "599, true"})
+    void reportsHttpErrorsAndWhetherTheyCanBeRetried(int status, boolean retryable) {
+        server.expect(anything()).andRespond(withStatus(HttpStatusCode.valueOf(status))
                 .body(apiKey).contentType(MediaType.TEXT_PLAIN));
         YouthPolicyClientException exception = assertThrows(YouthPolicyClientException.class,
                 () -> client.fetchPage(1, 100));
         assertEquals("HTTP_" + status, exception.getErrorCode());
-        assertEquals(status == 403 || status == 429 || status >= 500, exception.isRetryable());
+        assertEquals(retryable, exception.isRetryable());
         assertFalse(exception.toString().contains(apiKey));
         server.verify();
     }

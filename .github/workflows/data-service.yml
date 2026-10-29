@@ -31,6 +31,19 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: yon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d yon_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v6
@@ -49,6 +62,10 @@ jobs:
       - name: Test and build data-service independently
         working-directory: data-service
         run: bash ./gradlew --no-daemon clean test bootJar
+        env:
+          YON_TEST_DB_URL: jdbc:postgresql://localhost:5432/yon_test
+          YON_TEST_DB_USERNAME: postgres
+          YON_TEST_DB_PASSWORD: test
       - name: Require executed PostgreSQL notification tests
         if: always()
         run: |
@@ -87,6 +104,10 @@ jobs:
               assert int(sqs.attrib[key]) == 0, f'Collection SQS/PostgreSQL tests: {key}={sqs.attrib[key]}'
           print(f"Collection SQS/PostgreSQL tests passed: {sqs.attrib['tests']}")
           suites = [ET.parse(path).getroot() for path in results.glob('TEST-*.xml')]
+          # 외부 성능 측정용 테스트만 선택 실행한다. 업무 회귀 테스트의 skip은 실패다.
+          for result in suites:
+              if result.attrib['name'] != 'com.team3.dataservice.opportunity.ingest.RawIngestBenchmarkTest':
+                  assert int(result.attrib.get('skipped', 0)) == 0, f"Unexpected skipped tests: {result.attrib['name']}"
           counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
           print(f"data-service test totals: {counts}")
           PY
@@ -103,6 +124,7 @@ jobs:
           name: data-service-test-reports
           path: |
             data-service/build/reports/tests/test
+            data-service/build/reports/jacoco/test
             data-service/build/test-results/test
 
   # notification-service.yml과 같은 방식: 검증에서 만든 JAR로 이미지를 만들어 ghcr.io/<저장소>/data-service:sha-<커밋>으로 올린다

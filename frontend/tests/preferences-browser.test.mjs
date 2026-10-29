@@ -23,6 +23,10 @@ test('Chrome verifies saved paging/removal, detail and search save changes, reco
     import {apiClient} from '/src/api/client.ts';import AppRoutes from '/src/routes/AppRoutes.tsx';import '/src/index.css';
     const user=${JSON.stringify(user)}, options=${JSON.stringify(options)}, policy=${JSON.stringify(policy)}, latest=${JSON.stringify(latestItem)}, recommendation=${JSON.stringify(policyRecommendation)};
     const saved=new Set(Array.from({length:21},(_,index)=>index+42)),hidden=new Set(),calls=[];let loggedIn=true;
+    // 이 시나리오는 푸시 구독이 없는 단일 탭이다. 가상 시간에서 Web Locks IPC를 기다리지 않는다.
+    // 실제 push 소유권·경합·해제 실패는 push.test.mjs가 검증한다.
+    navigator.locks.request=async(_name,_options,work)=>work({});
+    navigator.serviceWorker.getRegistrations=async()=>[];
     document.cookie='XSRF-TOKEN=test-preference-browser; Path=/';
     const response=(config,data,status=200)=>({config,data,status,statusText:'',headers:{}});
     apiClient.defaults.adapter=async config=>{
@@ -101,7 +105,7 @@ test('Chrome verifies saved paging/removal, detail and search save changes, reco
     }catch(error){document.querySelector('#result').textContent=JSON.stringify({ok:false,error:String(error)})}
     finally{root.unmount();client.clear()}
   `
-  const server = await createServer({ root, cacheDir: path.join(temporary, 'vite'), configFile: false, plugins: [react(), {
+  const server = await createServer({ root, cacheDir: path.join(temporary, 'vite'), configFile: false, envPrefix: 'TEST_UNUSED_', plugins: [react(), {
     name: 'test-only-preference-page',
     resolveId(id) { if (id === '/__test__/preference-entry.tsx') return '\0preference-entry.tsx' },
     load(id) { if (id === '\0preference-entry.tsx') return ts.transpileModule(entry, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText },

@@ -66,6 +66,15 @@ jobs:
               assert int(partition.attrib[key]) == 0, f'Behavior partition tests: {key}={partition.attrib[key]}'
           print(f"Behavior partition tests passed: {partition.attrib['tests']}")
           counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
+          optional = {
+              'com.team3.backend.eligibility.benchmark.EligibilityBenchmarkTest',
+              'com.team3.backend.eligibility.benchmark.EligibilityBottleneckBenchmarkTest',
+              'com.team3.backend.search.OpportunitySearchCandidateEquivalenceTest',
+              'com.team3.backend.search.service.SearchRelevanceEquivalenceTest',
+          }
+          for result in suites:
+              if result.attrib['name'] not in optional:
+                  assert int(result.attrib.get('skipped', 0)) == 0, f"Unexpected skipped tests: {result.attrib['name']}"
           print(f"Backend test totals: {counts}")
           PY
       - name: Upload test reports
@@ -76,3 +85,4 @@ jobs:
           path: |
             backend/build/reports/tests/test
             backend/build/test-results/test
+            backend/build/reports/jacoco/test

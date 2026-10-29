@@ -52,6 +52,8 @@ jobs:
               assert int(suite.attrib[key]) == 0, f'Administrator tests: {key}={suite.attrib[key]}'
           print(f"Administrator SQS/PostgreSQL/Slack tests passed: {suite.attrib['tests']}")
           suites = [ET.parse(p).getroot() for p in report.parent.glob('TEST-*.xml')]
+          for result in suites:
+              assert int(result.attrib.get('skipped', 0)) == 0, f"Unexpected skipped tests: {result.attrib['name']}"
           print('Notification test totals:', {key: sum(int(s.attrib.get(key, 0)) for s in suites) for key in ('tests', 'failures', 'errors', 'skipped')})
           PY
       - name: Upload executable JAR
@@ -68,6 +70,7 @@ jobs:
           path: |
             notification-service/build/reports/tests/test
             notification-service/build/test-results/test
+            notification-service/build/reports/jacoco/test
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

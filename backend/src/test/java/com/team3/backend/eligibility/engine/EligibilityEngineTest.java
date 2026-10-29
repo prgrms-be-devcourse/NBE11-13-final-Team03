@@ -6,6 +6,8 @@ import com.team3.backend.region.directory.RegionIndex.Entry;
 import com.team3.backend.region.directory.RegionIndex;
 import com.team3.backend.region.domain.entity.Region;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -259,13 +261,34 @@ class EligibilityEngineTest {
     }
 
     @Test
-    void 검증_오류는_NOT_SPECIFIED보다_먼저_반영된다() {
+    void 검증_오류가_있는_누락_조건은_최종_판정을_UNKNOWN으로_만든다() {
         EligibilityConditionInput invalid = condition(ConditionType.MARITAL, RequirementType.REQUIRED,
                 Map.of("status", "UNKNOWN"), ValidationStatus.INVALID);
-        ConditionEvaluation notSpecified = new ConditionEvaluation(ConditionType.MARITAL, "marital",
-                RequirementType.REQUIRED, null, null, null, NOT_SPECIFIED, "정책 데이터에 이 조건 정보가 없습니다.");
+        var result = evaluate(profile(), List.of(age(19, 34), invalid), List.of());
+        assertThat(result.status()).isEqualTo(EligibilityStatus.UNKNOWN);
+        assertThat(result.conditions()).extracting(ConditionEvaluation::result)
+                .containsExactly(MATCHED, DATA_UNCLEAR);
+    }
 
-        assertThat(EligibilityEngine.applyValidation(invalid, notSpecified).result()).isEqualTo(DATA_UNCLEAR);
+    @ParameterizedTest(name = "생일 {0}: 만 나이 {1}, 판정 {2}")
+    @CsvSource({
+            "2007-10-16, 18, NOT_ELIGIBLE",
+            "2007-10-15, 19, ELIGIBLE",
+            "1991-10-16, 34, ELIGIBLE",
+            "1991-10-15, 35, NOT_ELIGIBLE"
+    })
+    void 만_나이_생일_경계와_최소_최대_포함을_최종_판정에_반영한다(
+            LocalDate birthday, int actualAge, EligibilityStatus expected) {
+        var result = evaluate(profileBuilder().birthDate(birthday).build(), List.of(age(19, 34)), List.of());
+        assertThat(result.status()).isEqualTo(expected);
+        assertThat(result.conditions().getFirst().actual()).isEqualTo(actualAge);
+    }
+
+    @Test
+    void 생년월일이_누락되면_불합격으로_확정하지_않는다() {
+        var result = evaluate(profileBuilder().birthDate(null).build(), List.of(age(19, 34)), List.of());
+        assertThat(result.status()).isEqualTo(EligibilityStatus.POSSIBLY_ELIGIBLE);
+        assertThat(result.conditions()).extracting(ConditionEvaluation::result).containsExactly(USER_INFO_MISSING);
     }
 
     // ── 직업훈련 ──
