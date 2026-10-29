@@ -181,7 +181,9 @@ def prepare(inventory_path):
                        "tags": tags(oidc.get("Tags", []))}
     if config["oidc"]["url"] != "https://token.actions.githubusercontent.com":
         raise ValueError("Unexpected OIDC provider")
-    add("aws_iam_openid_connect_provider.github", config["oidc"]["id"], id=config["oidc"]["id"], url=config["oidc"]["url"])
+    # The provider stores the URL as IAM returns it (no scheme) and suppresses the https:// difference in config.
+    add("aws_iam_openid_connect_provider.github", config["oidc"]["id"], id=config["oidc"]["id"],
+        url=config["oidc"]["url"].removeprefix("https://"))
     instances = [i for r in get("instances")["Reservations"] for i in r["Instances"]]
     if {i["InstanceId"] for i in instances} != set(INSTANCES):
         raise ValueError("Exactly the four approved EC2 instances are required")
