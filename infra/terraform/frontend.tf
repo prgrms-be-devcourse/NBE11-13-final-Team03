@@ -73,7 +73,11 @@ resource "aws_cloudfront_function" "existing" {
   publish                      = true
   key_value_store_associations = each.value.key_value_store_associations
   tags                         = each.value.tags
-  lifecycle { prevent_destroy = true }
+  # publish is Terraform-only and imports as null; adoption must not republish the live function.
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [publish]
+  }
 }
 
 resource "aws_cloudfront_distribution" "frontend" {
@@ -239,7 +243,12 @@ resource "aws_cloudfront_distribution" "frontend" {
       include_cookies = logging_config.value.include_cookies
     }
   }
-  lifecycle { prevent_destroy = true }
+  # retain_on_delete/wait_for_deployment are Terraform-only and import as provider defaults (false/true).
+  # Changing them would be an update plan, so adoption keeps the imported values; prevent_destroy still blocks deletion.
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [retain_on_delete, wait_for_deployment]
+  }
 }
 
 import {

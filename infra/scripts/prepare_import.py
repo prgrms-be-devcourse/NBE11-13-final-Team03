@@ -73,7 +73,8 @@ def distribution(value, resource_tags):
                                       "origin_ssl_protocols": custom["OriginSslProtocols"]["Items"],
                                       "origin_read_timeout": custom["OriginReadTimeout"],
                                       "origin_keepalive_timeout": custom["OriginKeepaliveTimeout"]}] if custom else [],
-            "s3_origin_config": [{"origin_access_identity": s3["OriginAccessIdentity"]}] if s3 else [],
+            # An OAC S3 origin has an empty OAI, which the provider reads back as no s3_origin_config block.
+            "s3_origin_config": [{"origin_access_identity": s3["OriginAccessIdentity"]}] if s3 and s3.get("OriginAccessIdentity") else [],
             "origin_shield": [{"enabled": True, "origin_shield_region": shield["OriginShieldRegion"]}]
                              if shield.get("Enabled") else [],
         })
@@ -82,7 +83,7 @@ def distribution(value, resource_tags):
     logging = value["Logging"]
     return {
         "enabled": value["Enabled"], "is_ipv6_enabled": value["IsIPV6Enabled"],
-        "aliases": value["Aliases"].get("Items", []), "comment": value["Comment"],
+        "aliases": value["Aliases"].get("Items", []), "comment": value["Comment"] or None,
         "default_root_object": value["DefaultRootObject"], "http_version": value["HttpVersion"],
         "price_class": value["PriceClass"], "web_acl_id": value.get("WebACLId", ""),
         "continuous_deployment_policy_id": value.get("ContinuousDeploymentPolicyId", ""),
@@ -93,7 +94,7 @@ def distribution(value, resource_tags):
         "viewer_certificate": {"cloudfront_default_certificate": cert.get("CloudFrontDefaultCertificate", False),
                                "acm_certificate_arn": cert.get("ACMCertificateArn"), "iam_certificate_id": cert.get("IAMCertificateId"),
                                "minimum_protocol_version": cert["MinimumProtocolVersion"],
-                               "ssl_support_method": cert.get("SSLSupportMethod")},
+                               "ssl_support_method": None if cert.get("CloudFrontDefaultCertificate") else cert.get("SSLSupportMethod")},
         "custom_error_responses": [{"error_code": e["ErrorCode"], "response_code": e.get("ResponseCode"),
                                     "response_page_path": e.get("ResponsePagePath"),
                                     "error_caching_min_ttl": e.get("ErrorCachingMinTTL", 300)}
