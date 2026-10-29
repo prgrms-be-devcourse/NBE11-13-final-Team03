@@ -69,6 +69,11 @@ main에는 `team03-main-sqs`, data에는 `team03-data-sqs` 인스턴스 역할�
 
 - 수동 실행: Actions → Deploy → Run workflow → `service`(backend/data-service/notification-service), `image_tag`(비우면 최신 커밋, 롤백은 `sha-<40자리 커밋 SHA>`)
 - 배포는 한 번에 하나씩 (`concurrency: deploy-production`)
+- 이미지 보관: 서비스마다 **기동 확인까지 성공한 최근 3개**만 서버에 남긴다 (배포 폴더 `deploy-history/<서비스>`에 기록, 이력에 없는 그 서비스 이미지는 `docker rmi`).
+  같은 서버의 다른 서비스 이미지는 건드리지 않는다. 더 오래된 이미지로 롤백하면 GHCR에서 다시 받는다. GHCR 쪽 버전 정리는 별도다
+  이력이 없을 때(새 서버·이력 파일 유실)는 방금 성공한 이미지 하나만 남고 그 서비스의 나머지 이미지는 지운다. 최근 3개를 유지하려면 이력을 미리 채운다.
+  이력 저장·이미지 삭제 실패는 경고(`::warning::`)만 남기고 배포는 성공으로 둔다. 이력 저장에 실패하면 삭제는 건너뛴다.
+  3개는 보관 목표이며 상한이 아니다. 사용 중이라 지우지 못한 이미지는 남으므로 로그의 `서버 이미지 N개`와 경고를 함께 확인한다
 
 ### 프론트 배포 (`frontend.yml`)
 
