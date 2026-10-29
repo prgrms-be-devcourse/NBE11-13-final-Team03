@@ -1,6 +1,7 @@
 package com.team3.notification.config;
 
 import com.team3.notification.security.NotificationInternalKeyFilter;
+import com.team3.notification.api.NotificationTestPushController;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.http.HttpMethod;
@@ -17,13 +18,15 @@ import org.springframework.security.web.SecurityFilterChain;
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
 @EnableMethodSecurity
-@EnableConfigurationProperties({NotificationReceiverProperties.class, NotificationUserApiProperties.class})
+@EnableConfigurationProperties({NotificationReceiverProperties.class, NotificationUserApiProperties.class,
+        NotificationTestPushProperties.class})
 @PropertySource("classpath:notification-http.properties")
 public class NotificationSecurityConfig {
 
     @Bean
     public SecurityFilterChain notificationSecurityFilterChain(HttpSecurity http, NotificationReceiverProperties properties,
-                                                              NotificationUserApiProperties userApi) throws Exception {
+                                                              NotificationUserApiProperties userApi,
+                                                              NotificationTestPushProperties testPush) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .requestCache(AbstractHttpConfigurer::disable)
@@ -34,6 +37,10 @@ public class NotificationSecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(authorize -> {
+                    if (testPush.enabled()) {
+                        authorize.requestMatchers(HttpMethod.POST, NotificationTestPushController.PATH)
+                                .hasAuthority(NotificationTestPushController.AUTHORITY);
+                    }
                     if (userApi.enabled()) {
                         authorize.requestMatchers("/internal/users/*/notifications", "/internal/users/*/notifications/**",
                                         "/internal/users/*/notification-settings", "/internal/users/*/notification-endpoints",
@@ -61,6 +68,16 @@ public class NotificationSecurityConfig {
             }, AnonymousAuthenticationFilter.class);
         }
 
+        if (testPush.enabled()) {
+            http.addFilterBefore(new NotificationInternalKeyFilter(testPush.apiKey(),
+                    request -> "POST".equals(request.getMethod()) && (request.getContextPath()
+                            + NotificationTestPushController.PATH).equals(request.getRequestURI()),
+                    NotificationTestPushController.AUTHORITY) {
+                @Override protected String getAlreadyFilteredAttributeName() {
+                    return "notificationTestPushKey.FILTERED";
+                }
+            }, AnonymousAuthenticationFilter.class);
+        }
         return http.build();
     }
 }
