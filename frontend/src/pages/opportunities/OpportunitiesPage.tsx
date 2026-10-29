@@ -126,7 +126,7 @@ function OpportunitiesPage() {
             <h2 ref={headingRef} tabIndex={-1}>검색 결과{data && !loading && !results.isError ? <span> {data.totalElements.toLocaleString('ko-KR')}건</span> : null}</h2>
             <label className={styles.sort}>정렬
               <select value={params.sort} onChange={(event) => apply({ ...params, sort: event.target.value as SearchSort })}>
-                {availableSorts(params.type).map((sort) => <option key={sort} value={sort}>{sortLabels[sort]}</option>)}
+                {availableSorts(params.type, params.keyword).map((sort) => <option key={sort} value={sort}>{sortLabels[sort]}</option>)}
               </select>
             </label>
           </div>

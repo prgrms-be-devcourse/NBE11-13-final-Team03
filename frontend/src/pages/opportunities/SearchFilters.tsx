@@ -2,7 +2,7 @@ import { useId, useState } from 'react'
 import type { FormEvent } from 'react'
 import Button from '../../components/ui/Button'
 import TextField from '../../components/ui/TextField'
-import { applicationStatusLabel, categoryDisplayLabel, categoryMatchesType, changeSearchCategory, changeSearchType, dateRangeError, defaultSearchParams, statusLabels, typeLabels } from './searchParams'
+import { applicationStatusLabel, categoryDisplayLabel, categoryMatchesType, changeSearchCategory, changeSearchType, dateRangeError, defaultSearchParams, defaultSort, statusLabels, typeLabels } from './searchParams'
 import { searchErrorMessage } from './searchError'
 import type { ApplicationStatus, InterestOptions, SearchParams } from './types'
 import type { RegionSource } from '../profile/regionSelection'
@@ -50,7 +50,7 @@ function SearchFilters({ applied, options, optionsLoading, optionsError, onRetry
 
   return (
     <form className={styles.filters} onSubmit={submit}>
-      <Button className={styles.resetFilters} variant="ghost" onClick={() => setDraft({ ...defaultSearchParams(), keyword: applied.keyword, size: applied.size })}>필터 초기화</Button>
+      <Button className={styles.resetFilters} variant="ghost" onClick={() => setDraft({ ...defaultSearchParams(), keyword: applied.keyword, sort: defaultSort(applied.keyword), size: applied.size })}>필터 초기화</Button>
       <label className={styles.field}>공고 유형
         <select value={draft.type} onChange={(event) => setDraft(changeSearchType(draft, event.target.value as SearchParams['type']))}>
           <option value="">전체 유형</option>

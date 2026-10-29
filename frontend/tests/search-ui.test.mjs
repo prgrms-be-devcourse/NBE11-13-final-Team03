@@ -51,6 +51,25 @@ const item = { opportunityId: 42, type: 'YOUTH_POLICY', title: '테스트 전용
   subCategory: null, detailCategory: null, createdAt: '2026-10-25T09:00:00', eligibilityStatus: null, saved: false }
 const data = { content: [item], page: 0, size: 20, totalElements: 1, totalPages: 1, hasNext: false }
 
+test('sort select shows relevance only with a keyword and selects the applied sort', () => {
+  const selected = (html) => html.match(/<option value="([A-Z_]+)" selected="">/)?.[1]
+  const keyword = renderPage(data, '/opportunities?keyword=%EC%B2%AD%EB%85%84')
+  assert.match(keyword, /<option value="RELEVANCE"[^>]*>관련도순<\/option>/)
+  assert.equal(selected(keyword), 'RELEVANCE')
+  assert.equal(selected(renderPage(data, '/opportunities?keyword=%EC%B2%AD%EB%85%84&sort=LATEST')), 'LATEST')
+  const none = renderPage(data, '/opportunities')
+  assert.doesNotMatch(none, /관련도순/)
+  assert.equal(selected(none), 'LATEST')
+  assert.equal(selected(renderPage(data, '/opportunities?sort=RELEVANCE')), 'LATEST')
+})
+
+test('header-style keyword search URL relies on the default relevance sort', () => {
+  // Header.tsx와 같은 방식으로 검색 URL을 만든다
+  const { changeSearchConditions } = require('../src/pages/opportunities/searchParams.ts')
+  assert.equal(serializeSearchParams(changeSearchConditions(defaultSearchParams(), { keyword: '청년' })).toString(),
+    'keyword=%EC%B2%AD%EB%85%84')
+})
+
 test('result markup renders only supplied fields, accessible bookmark state and existing detail link', () => {
   const html = renderPage(data)
   assert.match(html, /테스트 전용 검색 결과/)

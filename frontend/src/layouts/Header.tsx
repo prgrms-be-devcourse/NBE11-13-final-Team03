@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { Menu, X, Search, House, Bookmark, Bell, UserRound } from 'lucide-react'
-import { defaultSearchParams, serializeSearchParams } from '../pages/opportunities/searchParams'
+import { changeSearchConditions, defaultSearchParams, serializeSearchParams } from '../pages/opportunities/searchParams'
 import AuthControls from './AuthControls'
 import NotificationBadge from './NotificationBadge'
 import styles from './Header.module.css'
@@ -20,7 +20,7 @@ function Header() {
   function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const keyword = String(new FormData(event.currentTarget).get('keyword') ?? '').trim()
-    const query = serializeSearchParams({ ...defaultSearchParams(), keyword }).toString()
+    const query = serializeSearchParams(changeSearchConditions(defaultSearchParams(), { keyword })).toString()
     navigate(`/opportunities${query ? `?${query}` : ''}`)
     setIsMenuOpen(false)
   }

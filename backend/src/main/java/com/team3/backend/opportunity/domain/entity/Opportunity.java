@@ -41,6 +41,19 @@ public class Opportunity {
     private String detailUrl;
 
     /**
+     * 검색용 제목 정규화 값. PostgreSQL 생성 컬럼이라 DB가 title에서 계산한다
+     * (database/scripts/search-title-columns.sql). INSERT/UPDATE에 포함하지 않으며,
+     * 저장·수정 직후의 엔티티에는 반영되지 않고 다시 조회해야 보인다.
+     * columnDefinition은 실제 타입(text)과 맞춘다. 다르면 ddl-auto:update가 생성 컬럼 타입을 바꾸려 한다.
+     */
+    @Column(name = "search_title_norm", columnDefinition = "text", insertable = false, updatable = false)
+    private String searchTitleNorm;
+
+    /** search_title_norm에서 공백·가운뎃점·하이픈을 지운 값. 생성 컬럼, 읽기 전용 */
+    @Column(name = "search_title_strip", columnDefinition = "text", insertable = false, updatable = false)
+    private String searchTitleStrip;
+
+    /**
      * 순환 참조(opportunity <-> opportunity_versions)이므로 nullable.
      * Opportunity INSERT -> OpportunityVersion INSERT -> changeCurrentVersion()로 UPDATE 순서를 따른다.
      */
