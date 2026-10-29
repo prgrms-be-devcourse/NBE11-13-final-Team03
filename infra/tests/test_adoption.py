@@ -54,6 +54,13 @@ class AdoptionTests(unittest.TestCase):
             self.assertEqual(origins["frontend-s3"]["s3_origin_config"], [])
             self.assertEqual(origins["frontend-s3"]["origin_access_control_id"], "E2JJZ8SZNVRWDC")
 
+    def test_oidc_snapshot_url_matches_provider_state(self):
+        with tempfile.TemporaryDirectory() as path:
+            file, _ = make_inventory(Path(path))
+            config, targets = prepare_import.prepare(file)
+            self.assertEqual(config["oidc"]["url"], "https://token.actions.githubusercontent.com")
+            self.assertEqual(targets["aws_iam_openid_connect_provider.github"]["values"]["url"], "token.actions.githubusercontent.com")
+
     def test_batch_refuses_a_different_existing_backend(self):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path) / "checkout"
