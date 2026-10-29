@@ -2,6 +2,7 @@ package com.team3.backend.eligibility.api.local;
 
 import com.team3.backend.eligibility.api.EligibilityProvider;
 import com.team3.backend.eligibility.api.dto.ConditionResult;
+import com.team3.backend.eligibility.api.dto.EligibilityDecision;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshot;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshotPage;
 import com.team3.backend.eligibility.api.dto.OpportunityInfo;
@@ -86,6 +87,17 @@ public class LocalEligibilityProvider implements EligibilityProvider {
         Objects.requireNonNull(today, "today");
         return resultRepository.findFresh(userId, opportunityId, EligibilityResultService.RULE_VERSION, today)
                 .map(r -> withOpportunities(List.of(r), today).getFirst());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<EligibilityDecision> findFreshDecision(Long userId, Long opportunityId, LocalDate today) {
+        Objects.requireNonNull(userId, "userId");
+        Objects.requireNonNull(opportunityId, "opportunityId");
+        Objects.requireNonNull(today, "today");
+        return resultRepository.findFresh(userId, opportunityId, EligibilityResultService.RULE_VERSION, today)
+                .map(e -> new EligibilityDecision(e.result().getEligibilityStatus(), e.result().getReason(),
+                        e.result().getConditionResults().stream().map(LocalEligibilityProvider::toCondition).toList()));
     }
 
     private List<EligibilitySnapshot> withOpportunities(List<OpportunityEligibility> results) {

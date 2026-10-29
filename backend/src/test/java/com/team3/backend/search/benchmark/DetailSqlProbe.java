@@ -1,5 +1,6 @@
 package com.team3.backend.search.benchmark;
 
+import com.team3.backend.eligibility.api.EligibilityProvider;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -64,10 +65,31 @@ final class DetailSqlProbe {
                     if (bean instanceof DataSource dataSource) {
                         return proxy(DataSource.class, dataSource, null);
                     }
+                    if (bean instanceof EligibilityProvider provider) {
+                        return providerSection(provider);
+                    }
                     return bean;
                 }
             };
         }
+    }
+
+    /** 메서드 이름과 무관하게 Provider 호출 전체를 Provider 구간으로 표시해 개선 전후 같은 기준으로 센다. */
+    private static EligibilityProvider providerSection(EligibilityProvider delegate) {
+        return (EligibilityProvider) Proxy.newProxyInstance(EligibilityProvider.class.getClassLoader(),
+                new Class<?>[]{EligibilityProvider.class}, (ignored, method, args) -> {
+                    if (method.getDeclaringClass() == Object.class) {
+                        return method.invoke(delegate, args);
+                    }
+                    enterProvider();
+                    try {
+                        return method.invoke(delegate, args);
+                    } catch (InvocationTargetException exception) {
+                        throw exception.getCause();
+                    } finally {
+                        leaveProvider();
+                    }
+                });
     }
 
     private static <T> T proxy(Class<T> type, Object delegate, String sql) {

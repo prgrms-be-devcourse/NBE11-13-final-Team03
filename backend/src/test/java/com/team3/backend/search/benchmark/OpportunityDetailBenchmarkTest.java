@@ -1,10 +1,10 @@
 package com.team3.backend.search.benchmark;
 
 import com.team3.backend.auth.security.CustomUserDetails;
-import com.team3.backend.eligibility.api.EligibilityProvider;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.opportunity.domain.entity.*;
+import com.team3.backend.opportunity.domain.repository.ConditionSetRepository;
 import com.team3.backend.region.domain.entity.Region;
 import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
@@ -21,7 +21,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -42,13 +41,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.doAnswer;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
-/** PostgreSQL 상세 API의 최적화 전 SQL·응답시간을 독립적으로 측정한다. */
+/** PostgreSQL 상세 API의 SQL·응답시간을 개선 전후 같은 픽스처·요청·계측으로 측정한다. */
 @ActiveProfiles("test")
 @SpringBootTest(properties = {
         "app.scheduling.enabled=false",
@@ -58,15 +54,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 })
 @AutoConfigureMockMvc
 @Testcontainers
-@EnabledIfEnvironmentVariable(named = "YON_DETAIL_BEFORE_BENCH", matches = "true")
+@EnabledIfEnvironmentVariable(named = "YON_DETAIL_BENCH", matches = "true")
 @org.springframework.context.annotation.Import(DetailSqlProbe.Configuration.class)
-class OpportunityDetailBeforeBenchmarkTest {
+class OpportunityDetailBenchmarkTest {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     @Container
     static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine")
-            .withDatabaseName("yon_detail_before").withUsername("test").withPassword("test");
+            .withDatabaseName("yon_detail_bench").withUsername("test").withPassword("test");
 
     @DynamicPropertySource
     static void configureDatabase(DynamicPropertyRegistry registry) {
@@ -82,7 +78,7 @@ class OpportunityDetailBeforeBenchmarkTest {
     @Autowired private EntityManagerFactory entityManagerFactory;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
-    @MockitoSpyBean private EligibilityProvider eligibilityProvider;
+    @Autowired private ConditionSetRepository conditionSetRepository;
 
     private Long policyId;
     private Long trainingId;
@@ -92,16 +88,11 @@ class OpportunityDetailBeforeBenchmarkTest {
 
     /** 고정 픽스처를 트랜잭션 밖에서 준비한 뒤 8개 조건을 교차 반복 측정한다. */
     @Test
-    void measureBefore() throws Exception {
+    void measure() throws Exception {
         createFixture();
-        doAnswer(invocation -> {
-            DetailSqlProbe.enterProvider();
-            try {
-                return invocation.callRealMethod();
-            } finally {
-                DetailSqlProbe.leaveProvider();
-            }
-        }).when(eligibilityProvider).findFreshEligibility(anyLong(), anyLong(), any(LocalDate.class));
+        assertThat(jdbcTemplate.queryForObject("select count(*) from condition_sets", Long.class)).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForList("select user_id from eligibility_set_results order by user_id", Long.class))
+                .containsExactly(freshUserId, freshUserId, expiredUserId, expiredUserId);
 
         List<Scenario> scenarios = List.of(
                 new Scenario("A 정책 비로그인", policyId, null, false),
@@ -113,7 +104,7 @@ class OpportunityDetailBeforeBenchmarkTest {
                 new Scenario("C 훈련 미판정", trainingId, missingUserId, false),
                 new Scenario("D 훈련 만료", trainingId, expiredUserId, false));
         Map<String, List<Sample>> samples = new LinkedHashMap<>();
-        Map<String, List<DetailSqlProbe.SqlExecution>> traces = new LinkedHashMap<>();
+        Map<String, Sample> firstSamples = new LinkedHashMap<>();
         for (Scenario scenario : scenarios) {
             samples.put(scenario.name, new ArrayList<>());
         }
@@ -124,11 +115,11 @@ class OpportunityDetailBeforeBenchmarkTest {
                 Sample sample = request(scenario);
                 if (round >= warmups) {
                     samples.get(scenario.name).add(sample);
-                    traces.putIfAbsent(scenario.name, sample.executions);
+                    firstSamples.putIfAbsent(scenario.name, sample);
                 }
             }
         }
-        writeReport(scenarios, samples, traces, warmups, iterations);
+        writeReport(scenarios, samples, firstSamples, warmups, iterations);
     }
 
     private Sample request(Scenario scenario) throws Exception {
@@ -149,7 +140,7 @@ class OpportunityDetailBeforeBenchmarkTest {
             assertThat(body.contains("\"eligibility\":{")).isEqualTo(scenario.fresh);
             assertThat(executions).allMatch(sql -> sql.sql().trim().toLowerCase().startsWith("select"));
             assertThat(statistics.getPrepareStatementCount()).isEqualTo(executions.size());
-            return new Sample(responseNanos, executions);
+            return new Sample(responseNanos, executions, body);
         } finally {
             DetailSqlProbe.stop();
         }
@@ -196,7 +187,10 @@ class OpportunityDetailBeforeBenchmarkTest {
     private Opportunity opportunity(String title, OpportunityType type) {
         Opportunity opportunity = Opportunity.builder().title(title).opportunityType(type).build();
         entityManager.persist(opportunity);
+        // 판정 결과는 조건 묶음 단위로 저장되므로 공고마다 별도 묶음을 연결해 기존 공고별 시나리오를 유지한다.
+        Long conditionSetId = conditionSetRepository.resolveId(String.format("%064x", type.ordinal() + 1));
         OpportunityVersion version = OpportunityVersion.builder().opportunity(opportunity).versionNo(1)
+                .conditionSetId(conditionSetId)
                 .normalizationVersion("before").normalizedSnapshot(Map.of("title", title))
                 .personalizationStatus(PersonalizationStatus.UNKNOWN).build();
         entityManager.persist(version);
@@ -216,28 +210,29 @@ class OpportunityDetailBeforeBenchmarkTest {
 
     private void result(Long userId, Opportunity opportunity, LocalDate validUntil) {
         entityManager.persist(EligibilityResult.builder().userId(userId)
-                .opportunityId(opportunity.getId()).opportunityVersionId(opportunity.getCurrentVersion().getId())
+                .conditionSetId(opportunity.getCurrentVersion().getConditionSetId())
                 .profileVersion(1L).ruleVersion(EligibilityResultService.RULE_VERSION)
                 .eligibilityStatus(EligibilityStatus.ELIGIBLE).reason("측정용 판정")
                 .conditionResults(List.of()).validUntil(validUntil).evaluatedAt(LocalDateTime.now()).build());
     }
 
     private void writeReport(List<Scenario> scenarios, Map<String, List<Sample>> samples,
-                             Map<String, List<DetailSqlProbe.SqlExecution>> traces,
+                             Map<String, Sample> firstSamples,
                              int warmups, int iterations) throws IOException {
-        StringBuilder report = new StringBuilder("# 공고 상세 Before 측정 원자료\n\n");
-        report.append("- Java: ").append(System.getProperty("java.version"))
+        StringBuilder report = new StringBuilder("# 공고 상세 벤치마크 원자료\n\n");
+        report.append("- 라벨: ").append(System.getenv().getOrDefault("YON_DETAIL_BENCH_LABEL", "(없음)"))
+                .append("\n- Java: ").append(System.getProperty("java.version"))
                 .append(", Spring Boot: ").append(SpringBootVersion.getVersion())
                 .append(", PostgreSQL: ").append(jdbcTemplate.queryForObject("select version()", String.class))
                 .append("\n- OS: ").append(System.getProperty("os.name"))
                 .append(", JVM: ").append(System.getProperty("java.vm.name"))
                 .append("\n- Testcontainers image: postgres:16-alpine, MockMvc in-process, 순차 단일 스레드")
-                .append("\n- fixture: 공고/버전 각 2, 신청기간 2, 조건 1, 지역 1, 공고지역 2, 상세 각 1, 사용자/프로필 각 3, 판정 결과 4")
+                .append("\n- fixture: 공고/버전 각 2, 신청기간 2, 조건 1, 지역 1, 공고지역 2, 상세 각 1, 조건 묶음 2(공고별 1), 사용자/프로필 각 3, 판정 결과 4(최신 2·만료 2)")
                 .append("\n- 워밍업: 조건별 ").append(warmups).append("회, 본 측정: 조건별 ").append(iterations)
                 .append("회 (8개 조건 교차 실행)\n")
                 .append("- 응답 시간: MockMvc.perform 시작~andReturn 완료; SQL 시간: JDBC PreparedStatement.execute* 내부 벽시계 합계. 데이터 생성·통계 초기화·결과 검사 제외.\n")
-                .append("- Provider SQL: MockitoSpyBean에서 findFreshEligibility 호출 전후로 구간 표시; 1차 캐시는 요청별 트랜잭션에서만 유효.\n")
-                .append("- 중복 조회: 최신 판정에서 Provider 첫 판정결과 조회 뒤의 공고·신청기간·훈련일정 projection 3회. 비중은 해당 JDBC execute 시간 평균 / MockMvc 응답시간 평균이며 제거 시 개선폭이 아니다.\n")
+                .append("- Provider SQL: EligibilityProvider 빈의 모든 메서드 호출 구간 (DetailSqlProbe 프록시, 메서드 이름과 무관); 1차 캐시는 요청별 트랜잭션에서만 유효.\n")
+                .append("- 중복 SQL: Provider 구간에서 첫 SQL(최신 판정 조회) 이후 실행된 SQL (개선 전: 공고·신청기간·훈련일정 projection 3회). 비중은 해당 JDBC execute 시간 평균 / MockMvc 응답시간 평균이며 제거 시 개선폭이 아니다.\n")
                 .append("- 측정 요청 중 SELECT 이외 SQL 0회 (테스트 단언); Hibernate prepareStatement 횟수와 JDBC 실행 횟수 동일 (테스트 단언).\n\n")
                 .append("| 조건 | SQL 수 | Provider SQL 수 | 응답 평균 ms | p50 | p95 | p99 | SQL 평균 ms | Provider SQL 평균 ms | 중복 SQL 평균 ms | 응답 대비 % |\n")
                 .append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
@@ -273,16 +268,21 @@ class OpportunityDetailBeforeBenchmarkTest {
         for (Scenario scenario : scenarios) {
             report.append("\n### ").append(scenario.name).append("\n\n");
             int index = 0;
-            for (DetailSqlProbe.SqlExecution execution : traces.get(scenario.name)) {
+            for (DetailSqlProbe.SqlExecution execution : firstSamples.get(scenario.name).executions) {
                 report.append(++index).append(". ")
                         .append(execution.provider() ? "[Provider] " : "[Detail] ")
                         .append(execution.sql().replaceAll("\\s+", " ").trim()).append("\n");
             }
         }
-        Path path = Path.of("build/reports/opportunity-detail-before/raw.md");
+        report.append("\n## 첫 측정 요청별 응답 본문\n");
+        for (Scenario scenario : scenarios) {
+            report.append("\n### ").append(scenario.name).append("\n\n```json\n")
+                    .append(firstSamples.get(scenario.name).body).append("\n```\n");
+        }
+        Path path = Path.of("build/reports/opportunity-detail-benchmark/raw.md");
         Files.createDirectories(path.getParent());
         Files.writeString(path, report.toString());
-        System.out.println("Before benchmark: " + path.toAbsolutePath());
+        System.out.println("Opportunity detail benchmark: " + path.toAbsolutePath());
     }
 
     private static int repetitions(String name, int defaultValue) {
@@ -305,6 +305,6 @@ class OpportunityDetailBeforeBenchmarkTest {
     private record Scenario(String name, Long opportunityId, Long userId, boolean fresh) {
     }
 
-    private record Sample(long responseNanos, List<DetailSqlProbe.SqlExecution> executions) {
+    private record Sample(long responseNanos, List<DetailSqlProbe.SqlExecution> executions, String body) {
     }
 }

@@ -73,7 +73,8 @@ public class OpportunityDetailService {
         OpportunityDetailResponseDto.EligibilityItem eligibility = null;
         boolean saved = false;
         if (userId != null) {
-            eligibility = eligibilityProvider.findFreshEligibility(userId, opportunityId, today)
+            // 기회 정보는 위에서 이미 읽었으므로 판정 내용만 조회한다 (기회 요약 조립 SQL 3번 생략)
+            eligibility = eligibilityProvider.findFreshDecision(userId, opportunityId, today)
                     .map(OpportunityDetailResponseDto.EligibilityItem::from).orElse(null);
             saved = preferenceService.getSavedOpportunityIds(userId, List.of(opportunityId)).contains(opportunityId);
         }
