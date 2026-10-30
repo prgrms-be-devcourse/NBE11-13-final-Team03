@@ -155,7 +155,10 @@ public class RecommendationCandidateRepository {
         return value instanceof Timestamp timestamp ? timestamp.toLocalDateTime() : (LocalDateTime) value;
     }
 
-    /** 기본 제외 조건을 DB에서 적용하고 엔티티 대신 후보 요약을 조회한다. */
+    /**
+     * 운영 미사용: 기존 전체 후보 순회 방식의 동등성 검증 및 성능 측정에만 사용한다 (운영 추천은 findTopPerGroup).
+     * 기본 제외 조건을 DB에서 적용하고 엔티티 대신 후보 요약을 조회한다.
+     */
     public List<CandidateRow> findAfter(long afterId, int size, LocalDate today) {
         CriteriaBuilder builder = entityManager.getCriteriaBuilder();
         CriteriaQuery<CandidateRow> query = builder.createQuery(CandidateRow.class);

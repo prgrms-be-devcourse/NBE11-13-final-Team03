@@ -146,7 +146,10 @@ public class PreferenceService {
         return Set.copyOf(preferenceRepository.findSavedOpportunityIds(userId, opportunityIds));
     }
 
-    /** 사용자가 숨긴 공고 ID 전체를 한 번에 조회한다 (추천 후보 순회 전체에서 재사용). */
+    /**
+     * 운영 미사용: 기존 전체 후보 순회 방식(추천)의 동등성 검증 및 성능 측정에만 사용한다 (운영 추천은 SQL에서 숨김을 제외).
+     * 사용자가 숨긴 공고 ID 전체를 한 번에 조회한다 (추천 후보 순회 전체에서 재사용).
+     */
     @Transactional(readOnly = true)
     public Set<Long> getHiddenOpportunityIds(Long userId) {
         return Set.copyOf(preferenceRepository.findHiddenOpportunityIds(userId));

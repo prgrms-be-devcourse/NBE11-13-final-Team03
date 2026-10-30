@@ -37,7 +37,10 @@ public class RecommendationCandidateService {
     private final TrainingCourseDetailRepository trainingDetailRepository;
     private final ApplicationStatusCalculator statusCalculator;
 
-    /** 첫 커서는 0이며, 순회 시작 시 계산한 KST 날짜를 모든 배치에 동일하게 넘긴다. */
+    /**
+     * 운영 미사용: 기존 전체 후보 순회 방식의 동등성 검증 및 성능 측정에만 사용한다 (운영 추천은 toCandidates).
+     * 첫 커서는 0이며, 순회 시작 시 계산한 KST 날짜를 모든 배치에 동일하게 넘긴다.
+     */
     @Transactional(readOnly = true)
     public List<RecommendationCandidate> getCandidatesAfter(long afterId, int size, LocalDate today) {
         if (afterId < 0 || size < 1 || today == null) {

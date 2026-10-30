@@ -85,7 +85,10 @@ public interface UserOpportunityPreferenceRepository
             @Param("opportunityIds") Collection<Long> opportunityIds
     );
 
-    /** 사용자가 저장 여부와 관계없이 숨긴 공고 ID 전체를 조회한다. */
+    /**
+     * 운영 미사용: 기존 전체 후보 순회 방식(추천)의 동등성 검증 및 성능 측정에만 사용한다 (PreferenceService.getHiddenOpportunityIds 전용).
+     * 사용자가 저장 여부와 관계없이 숨긴 공고 ID 전체를 조회한다.
+     */
     @Query("""
         select preference.opportunity.id
         from UserOpportunityPreference preference
