@@ -43,6 +43,8 @@ class UserServiceTest {
     private EligibilityProfileRepository eligibilityProfileRepository;
     @Mock private OutboxEventRepository outboxRepository;
     @Mock private Clock clock;
+    @Mock private com.team3.backend.auth.unlink.KakaoIdentityGuard kakaoIdentityGuard;
+    @Mock private com.team3.backend.auth.unlink.KakaoUnlinkJobs kakaoUnlinkJobs;
 
     @InjectMocks
     private UserService userService;
@@ -52,12 +54,16 @@ class UserServiceTest {
         Long userId = 1L;
 
         var user = org.mockito.Mockito.mock(User.class);
+        when(user.getKakaoId()).thenReturn(123L);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(clock.instant()).thenReturn(Instant.parse("2026-10-24T00:00:00Z"));
 
         userService.withdraw(userId);
 
         InOrder inOrder = inOrder(
+                kakaoIdentityGuard,
+                kakaoUnlinkJobs,
                 outboxRepository,
                 refreshTokenRepository,
                 eligibilityResultRepository,
@@ -65,6 +71,8 @@ class UserServiceTest {
                 userRepository
         );
 
+        inOrder.verify(kakaoIdentityGuard).lock(123L);
+        inOrder.verify(kakaoUnlinkJobs).enqueue(123L);
         inOrder.verify(outboxRepository).cancelPendingNotifications(userId);
         inOrder.verify(outboxRepository).saveAndFlush(any(OutboxEvent.class));
         inOrder.verify(refreshTokenRepository)
@@ -81,7 +89,7 @@ class UserServiceTest {
     void 존재하지_않는_회원은_탈퇴할_수_없다() {
         Long userId = 99L;
 
-        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.empty());
+        when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.withdraw(userId))
                 .isInstanceOf(BusinessException.class)

@@ -58,6 +58,9 @@ spring:
       thread-name-prefix: yon-scheduling-
 
 app:
+  kakao-unlink:
+    enabled: ${KAKAO_UNLINK_ENABLED:false}
+    admin-key: ${KAKAO_ADMIN_KEY:}
   admin-kakao-ids: ${ADMIN_KAKAO_IDS:}
 
   auth-cookie:

@@ -118,7 +118,10 @@ def execute(state_dir, apply=False, rebind_main_http=False):
         check(data, phase, targets, rebind_main_http=bool(rebinding))
         pending = sum(bool(x["change"].get("importing")) for x in data["resource_changes"])
         moved = sum(bool(x.get("previous_address")) for x in data["resource_changes"])
+        drift = len(data.get("resource_drift") or [])
         print(f"PASS: {len(targets)} targets, {pending} pending imports, 0 AWS resource changes ({phase})", flush=True)
+        if drift:
+            print(f"Accepted read-only drift (public IP/DNS, rule mirrors, temporary policies): {drift}", flush=True)
         print(f"Verified state address moves: {moved}", flush=True)
         return saved, pending, moved
 
