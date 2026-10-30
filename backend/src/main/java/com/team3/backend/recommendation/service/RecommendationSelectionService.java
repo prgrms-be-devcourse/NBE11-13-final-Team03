@@ -4,8 +4,10 @@ import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.service.EligibilityProfileService;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.global.exception.GlobalErrorCode;
+import com.team3.backend.interest.domain.entity.InterestType;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
-import com.team3.backend.preference.service.PreferenceService;
+import com.team3.backend.recommendation.domain.repository.RecommendationCandidateRepository;
+import com.team3.backend.recommendation.domain.repository.RecommendationCandidateRepository.TopCandidateRow;
 import com.team3.backend.recommendation.dto.InterestMatchLevel;
 import com.team3.backend.recommendation.dto.RecommendationCandidate;
 import com.team3.backend.recommendation.dto.RecommendationEligibleCandidate;
@@ -21,67 +23,77 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
-import java.util.Set;
 
-/** 전체 후보를 순회하며 그룹별 상위 후보만 보유하고 최대 다섯 건을 선정한다. */
+/**
+ * 그룹별 상위 후보를 DB에서 받아 최대 다섯 건을 선정한다.
+ * DB(RecommendationCandidateRepository.findTopPerGroup)는 그룹마다 우선순위 상위 LIMIT건만 돌려준다. 혼합 규칙(takeInterested·takeUnrestricted)은
+ * 그룹마다 상위 LIMIT건 안에서만 고르므로 결과가 전체 후보를 순회할 때와 같다 (테스트의 전체 순회 참조 구현과 비교해 확인한다).
+ * 향후 그룹 안 순서(priority)를 바꾸려면 DB의 상위 후보 선정 기준도 함께 바꿔야 한다.
+ */
 @Service
 @RequiredArgsConstructor
 public class RecommendationSelectionService {
 
-    private static final int LIMIT = 5;
+    /** 그룹마다 유지하는 후보 수이자 최종 선정 최대 건수 */
+    static final int LIMIT = 5;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final EligibilityProfileService profileService;
     private final RecommendationCandidateService candidateService;
     private final RecommendationInterestMatcher interestMatcher;
-    private final RecommendationEligibilityService eligibilityService;
-    private final PreferenceService preferenceService;
+    private final RecommendationCandidateRepository candidateRepository;
 
-    /** 추천 요청 시작 시 KST 기준일을 한 번 정하고 모든 후보 배치에 재사용한다. */
     @Transactional(readOnly = true)
-    public List<RecommendationEligibleCandidate> select(Long userId, int batchSize) {
-        return select(userId, batchSize, LocalDate.now(KST));
+    public List<RecommendationEligibleCandidate> select(Long userId) {
+        return select(userId, LocalDate.now(KST));
     }
 
-    /** 프로필을 먼저 확인한 뒤 커서가 끝날 때까지 모든 후보를 평가한다. */
+    /** 프로필을 먼저 확인한 뒤 같은 KST 기준일로 그룹별 상위 후보를 조회해 최종 후보를 고른다. */
     @Transactional(readOnly = true)
-    public List<RecommendationEligibleCandidate> select(Long userId, int batchSize, LocalDate today) {
-        if (batchSize < 1 || today == null) {
+    public List<RecommendationEligibleCandidate> select(Long userId, LocalDate today) {
+        if (today == null) {
             throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
         }
         profileService.get(userId);
         var matchContext = interestMatcher.load(userId);
-        Comparator<RecommendationEligibleCandidate> priority = priority(today);
-        Map<Group, PriorityQueue<RecommendationEligibleCandidate>> topByGroup = new EnumMap<>(Group.class);
-        long cursor = 0L;
+        List<TopCandidateRow> rows = candidateRepository.findTopPerGroup(userId, today, matchContext.unrestricted(),
+                matchContext.codes(InterestType.SUB_CATEGORY), matchContext.codes(InterestType.CATEGORY),
+                matchContext.codes(InterestType.DETAIL_CATEGORY), LIMIT);
+        List<RecommendationCandidate> candidates = candidateService.toCandidates(
+                rows.stream().map(TopCandidateRow::row).toList(), today);
+        TopCandidates top = new TopCandidates(today);
+        for (int i = 0; i < rows.size(); i++) {
+            top.add(new RecommendationEligibleCandidate(candidates.get(i), rows.get(i).level(), rows.get(i).status()));
+        }
+        return top.choose();
+    }
 
-        while (true) {
-            List<RecommendationCandidate> batch = candidateService.getCandidatesAfter(cursor, batchSize, today);
-            if (batch.isEmpty()) {
-                break;
-            }
-            cursor = batch.getLast().opportunityId();
-            Set<Long> hidden = preferenceService.getHiddenOpportunityIds(userId,
-                    batch.stream().map(RecommendationCandidate::opportunityId).toList());
-            List<RecommendationCandidate> visible = batch.stream()
-                    .filter(candidate -> !hidden.contains(candidate.opportunityId()))
-                    .toList();
-            for (RecommendationEligibleCandidate candidate :
-                    eligibilityService.filterEligible(userId, visible, matchContext, today)) {
-                Group group = groupOf(candidate);
-                PriorityQueue<RecommendationEligibleCandidate> top = topByGroup.computeIfAbsent(group,
-                        ignored -> new PriorityQueue<>(priority.reversed()));
-                top.add(candidate);
-                if (top.size() > LIMIT) {
-                    top.poll();
-                }
+    /** 그룹마다 우선순위 상위 LIMIT건만 유지하고 그룹 혼합 규칙으로 최종 후보를 고른다 (운영 경로와 전체 순회 참조 구현 공용). */
+    static final class TopCandidates {
+
+        private final Comparator<RecommendationEligibleCandidate> priority;
+        private final Map<Group, PriorityQueue<RecommendationEligibleCandidate>> topByGroup = new EnumMap<>(Group.class);
+
+        TopCandidates(LocalDate today) {
+            this.priority = priority(today);
+        }
+
+        void add(RecommendationEligibleCandidate candidate) {
+            PriorityQueue<RecommendationEligibleCandidate> top = topByGroup.computeIfAbsent(groupOf(candidate),
+                    ignored -> new PriorityQueue<>(priority.reversed()));
+            top.add(candidate);
+            if (top.size() > LIMIT) {
+                top.poll();
             }
         }
-        if (topByGroup.containsKey(Group.UNRESTRICTED_ELIGIBLE)
-                || topByGroup.containsKey(Group.UNRESTRICTED_POSSIBLE)) {
-            return takeUnrestricted(topByGroup, priority);
+
+        List<RecommendationEligibleCandidate> choose() {
+            if (topByGroup.containsKey(Group.UNRESTRICTED_ELIGIBLE)
+                    || topByGroup.containsKey(Group.UNRESTRICTED_POSSIBLE)) {
+                return takeUnrestricted(topByGroup, priority);
+            }
+            return takeInterested(topByGroup, priority);
         }
-        return takeInterested(topByGroup, priority);
     }
 
     private static Group groupOf(RecommendationEligibleCandidate item) {
