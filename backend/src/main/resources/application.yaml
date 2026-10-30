@@ -93,6 +93,21 @@ yon:
       # 복제본 연결에 실패하면 이 시간 동안은 복제본을 건너뛰고 바로 primary를 쓴다 (장애 중 요청마다 대기 시간이 붙지 않게)
       failure-cooldown-ms: 30000
       transaction-prefixes:
+  behavior:
+    # 행동 로그 월 파티션 보관 정리 (UserBehaviorEventRetentionScheduler, 매월 1일 03:00 KST).
+    # 운영 DB의 파티션 전환·점검과 _old 삭제를 확인한 환경에서만 켠다. dry-run=true면 대상만 로그로 남긴다.
+    retention:
+      enabled: ${YON_BEHAVIOR_RETENTION_ENABLED:false}
+      # 현재 월을 포함해 보관하는 월 수 (4: 현재 월 + 직전 3개월)
+      retained-months: ${YON_BEHAVIOR_RETENTION_RETAINED_MONTHS:4}
+      dry-run: ${YON_BEHAVIOR_RETENTION_DRY_RUN:true}
+      # 운영자 수동 정리 (UserBehaviorEventRetentionManualRun). 웹 서버 없는 일회성 실행에서만 동작하며 기본은 dry-run.
+      # 실행 방법은 docs/user-behavior-events-partitioning.md 7절. .env에 상시로 두지 않는다
+      manual-run: ${YON_BEHAVIOR_RETENTION_MANUAL_RUN:false}
+      manual-execute: ${YON_BEHAVIOR_RETENTION_MANUAL_EXECUTE:false}
+      # 관리자 API(POST /api/admin/behavior-events/retention/execute)의 실제 정리 허용. 미리보기는 항상 읽기 전용으로 동작한다.
+      # 자동 정리(enabled)·수동 실행과 별개이며, 운영 파티션 확인·백업 확인 전에는 켜지 않는다 (문서 8절)
+      admin-execute-enabled: ${YON_BEHAVIOR_RETENTION_ADMIN_EXECUTE_ENABLED:false}
   eligibility:
     # 판정 결과 제공 방식. local: 같은 애플리케이션 안에서 직접 호출 (MSA 전환 시 원격 구현을 추가하고 값을 바꾼다)
     provider: ${YON_ELIGIBILITY_PROVIDER:local}
