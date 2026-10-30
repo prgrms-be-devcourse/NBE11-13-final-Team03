@@ -27,7 +27,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/** 추천 기본 후보를 순회하고 현재 버전의 모집·훈련 날짜를 보강한다. */
+/** 추천 후보 요약에 현재 버전의 모집·훈련 날짜를 보강한다 (전체 순회는 참조 구현·성능 측정용). */
 @Service
 @RequiredArgsConstructor
 public class RecommendationCandidateService {
@@ -37,13 +37,21 @@ public class RecommendationCandidateService {
     private final TrainingCourseDetailRepository trainingDetailRepository;
     private final ApplicationStatusCalculator statusCalculator;
 
-    /** 첫 커서는 0이며, 순회 시작 시 계산한 KST 날짜를 모든 배치에 동일하게 넘긴다. */
+    /**
+     * 운영 미사용: 기존 전체 후보 순회 방식의 동등성 검증 및 성능 측정에만 사용한다 (운영 추천은 toCandidates).
+     * 첫 커서는 0이며, 순회 시작 시 계산한 KST 날짜를 모든 배치에 동일하게 넘긴다.
+     */
     @Transactional(readOnly = true)
     public List<RecommendationCandidate> getCandidatesAfter(long afterId, int size, LocalDate today) {
         if (afterId < 0 || size < 1 || today == null) {
             throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
         }
-        List<CandidateRow> rows = candidateRepository.findAfter(afterId, size, today);
+        return toCandidates(candidateRepository.findAfter(afterId, size, today), today);
+    }
+
+    /** 후보 요약 행에 현재 버전의 신청기간·훈련 일정을 붙여 같은 순서의 추천 후보로 만든다 (신청기간·훈련 일정 SQL 최대 2번). */
+    @Transactional(readOnly = true)
+    public List<RecommendationCandidate> toCandidates(List<CandidateRow> rows, LocalDate today) {
         if (rows.isEmpty()) {
             return List.of();
         }

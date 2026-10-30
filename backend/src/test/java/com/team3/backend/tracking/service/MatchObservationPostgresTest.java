@@ -1,5 +1,7 @@
 package com.team3.backend.tracking.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.interest.domain.entity.InterestType;
@@ -50,6 +52,7 @@ import static com.team3.backend.eligibility.domain.entity.EligibilityStatus.*;
         com.team3.backend.tracking.config.MatchOutboxConfig.class,MatchOutboxTransaction.class,MatchNotificationMessageFactory.class,
         ApplicationStatusCalculator.class,MatchObservationPostgresTest.Beans.class})
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class MatchObservationPostgresTest {
     static final Instant NOW=Instant.parse("2026-10-26T00:00:00Z");
     static final LocalDate TODAY=LocalDate.of(2026,10,26);

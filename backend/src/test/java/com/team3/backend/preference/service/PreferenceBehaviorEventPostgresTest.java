@@ -1,5 +1,7 @@
 package com.team3.backend.preference.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.behavior.domain.entity.UserBehaviorEvent;
 import com.team3.backend.behavior.domain.entity.UserBehaviorEventType;
@@ -46,6 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @SpringBootTest
 @AutoConfigureMockMvc
+@Tag("postgres")
 class PreferenceBehaviorEventPostgresTest {
 
     @Container

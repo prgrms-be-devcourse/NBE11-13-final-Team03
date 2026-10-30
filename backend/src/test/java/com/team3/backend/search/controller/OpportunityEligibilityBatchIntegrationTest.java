@@ -1,5 +1,7 @@
 package com.team3.backend.search.controller;
 
+import org.junit.jupiter.api.Tag;
+
 import com.jayway.jsonpath.JsonPath;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.*;
@@ -62,6 +64,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 })
 @AutoConfigureMockMvc
 @Testcontainers
+@Tag("postgres")
 class OpportunityEligibilityBatchIntegrationTest {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");

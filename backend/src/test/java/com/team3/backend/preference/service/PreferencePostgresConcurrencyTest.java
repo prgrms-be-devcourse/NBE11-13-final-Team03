@@ -1,5 +1,7 @@
 package com.team3.backend.preference.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
@@ -35,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers
 @ActiveProfiles("test")
 @SpringBootTest
+@Tag("postgres")
 class PreferencePostgresConcurrencyTest {
 
     @Container

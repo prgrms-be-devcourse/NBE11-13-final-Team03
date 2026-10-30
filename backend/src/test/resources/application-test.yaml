@@ -7,7 +7,11 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # create (not create-drop): every test context shares the same in-memory H2 (jdbc:h2:mem:yon, DB_CLOSE_DELAY=-1).
+      # When the Spring test context cache (max 32) evicts a context, create-drop dropped the shared tables and
+      # broke the contexts still cached (Table "USERS" not found). create rebuilds the schema when a context starts
+      # and never drops it on close. Tests still clean their own data.
+      ddl-auto: create
     open-in-view: false
 
   security:
@@ -42,6 +46,8 @@ internal:
 
 
 app:
+  kakao-unlink:
+    enabled: false
   admin-kakao-ids: ""
   auth-cookie:
     secure: false

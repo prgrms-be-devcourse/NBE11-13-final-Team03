@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'scripts/test_report.py'
+      - 'scripts/test-policy.json'
+      - 'scripts/test_report_test.py'
       - 'notification-service/**'
       - 'database/**'
       - 'contracts/**'
@@ -11,10 +14,13 @@ on:
   push:
     branches: [main]
     paths:
+      - 'scripts/test_report.py'
+      - 'scripts/test-policy.json'
+      - 'scripts/test_report_test.py'
       - 'notification-service/**'
       - '.github/workflows/notification-service.yml'
-      - 'contracts/collection-completed-*.json'
-      - 'database/scripts/notification-admin.sql'
+      - 'contracts/**'
+      - 'database/**'
   workflow_dispatch:
 
 permissions:
@@ -38,24 +44,10 @@ jobs:
         run: docker info
       - name: Test and build Notification independently
         working-directory: notification-service
-        run: bash ./gradlew --no-daemon clean test bootJar
-      - name: Require executed administrator SQS PostgreSQL Slack tests
+        run: bash ./gradlew --no-daemon clean test --rerun bootJar
+      - name: Validate and report execution groups
         if: always()
-        run: |
-          python3 - <<'PY'
-          import pathlib
-          import xml.etree.ElementTree as ET
-          report = pathlib.Path('notification-service/build/test-results/test/TEST-com.team3.notification.admin.AdminNotificationSqsPostgresTest.xml')
-          suite = ET.parse(report).getroot()
-          assert int(suite.attrib['tests']) > 0, 'Administrator SQS/PostgreSQL/Slack tests did not run'
-          for key in ('failures', 'errors', 'skipped'):
-              assert int(suite.attrib[key]) == 0, f'Administrator tests: {key}={suite.attrib[key]}'
-          print(f"Administrator SQS/PostgreSQL/Slack tests passed: {suite.attrib['tests']}")
-          suites = [ET.parse(p).getroot() for p in report.parent.glob('TEST-*.xml')]
-          for result in suites:
-              assert int(result.attrib.get('skipped', 0)) == 0, f"Unexpected skipped tests: {result.attrib['name']}"
-          print('Notification test totals:', {key: sum(int(s.attrib.get(key, 0)) for s in suites) for key in ('tests', 'failures', 'errors', 'skipped')})
-          PY
+        run: python3 scripts/test_report.py notification-service --output notification-service/build/test-summary
       - name: Upload executable JAR
         uses: actions/upload-artifact@v4
         with:
@@ -70,7 +62,8 @@ jobs:
           path: |
             notification-service/build/reports/tests/test
             notification-service/build/test-results/test
-            notification-service/build/reports/jacoco/test
+            notification-service/build/reports/jacoco
+            notification-service/build/test-summary
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

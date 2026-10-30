@@ -119,7 +119,7 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
   `
   const cases = [390, 768, 1440].flatMap(width => paths.map(route => ({ width, route })))
   for (const width of [390, 1440]) cases.push({ width, route: '/', anonymous: true }, { width, route: '/', anonymous: true, state: 'empty' }, { width, route: '/', state: 'error' })
-  const server = await createServer({ root, cacheDir: path.join(temporary, 'vite'), configFile: false, plugins: [react(), {
+  const server = await createServer({ root, envDir: false, envPrefix: 'TEST_UNUSED_', cacheDir: path.join(temporary, 'vite'), configFile: false, plugins: [react(), {
     name: 'test-only-redesign-pages',
     resolveId(id) { if (id === '/__test__/redesign-entry.tsx') return '\0redesign-entry.tsx' },
     load(id) { if (id === '\0redesign-entry.tsx') return ts.transpileModule(entry, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText },

@@ -1,5 +1,7 @@
 package com.team3.backend.opportunity.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.eligibility.service.EligibilityEvaluator;
@@ -44,6 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 @Import({TrainingCourseNormalizationService.class, RegionNormalizer.class, RegionDirectory.class,
         EligibilityEvaluator.class, EligibilityEngine.class, ApplicationStatusCalculator.class})
+@Tag("postgres")
 class TrainingCourseNormalizationServiceTest {
 
     private static final Long SOURCE = 2L;

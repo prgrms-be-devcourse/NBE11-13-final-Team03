@@ -1,5 +1,7 @@
 package com.team3.backend.eligibility.domain.repository;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultUpsertRepository.UpsertRow;
 import org.junit.jupiter.api.AfterEach;
@@ -40,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
+@Tag("postgres")
 class EligibilityResultUpsertRepositoryTest {
 
     private static final Long USER = 1L;

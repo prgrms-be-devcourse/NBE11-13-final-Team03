@@ -1,5 +1,7 @@
 package com.team3.backend.architecture;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.global.config.ApplicationDatabaseBoundaryConfig;
 import org.junit.jupiter.api.Test;
 import org.postgresql.PGConnection;
@@ -21,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
+@Tag("postgres")
 class DatabaseBoundaryPostgresTest {
 
     @Container

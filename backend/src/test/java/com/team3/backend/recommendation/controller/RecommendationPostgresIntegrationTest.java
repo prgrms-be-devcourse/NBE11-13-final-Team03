@@ -1,13 +1,17 @@
 package com.team3.backend.recommendation.controller;
 
+import org.junit.jupiter.api.Tag;
+
 import com.jayway.jsonpath.JsonPath;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.eligibility.domain.entity.EmploymentStatus;
+import com.team3.backend.eligibility.service.EligibilityProfileService;
 import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.eligibility.support.EligibilityResultFixtures;
+import com.team3.backend.fixture.BackendPostgres;
 import com.team3.backend.interest.domain.entity.InterestType;
 import com.team3.backend.interest.domain.entity.UserInterest;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
@@ -24,14 +28,21 @@ import com.team3.backend.opportunity.domain.entity.RequirementType;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
+import com.team3.backend.preference.service.PreferenceService;
 import com.team3.backend.recommendation.dto.RecommendationEligibleCandidate;
+import com.team3.backend.recommendation.service.RecommendationCandidateService;
+import com.team3.backend.recommendation.service.RecommendationEligibilityService;
+import com.team3.backend.recommendation.service.RecommendationFullScanReference;
+import com.team3.backend.recommendation.service.RecommendationInterestMatcher;
 import com.team3.backend.recommendation.service.RecommendationSelectionService;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
 import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
+
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
+
 import org.hibernate.SessionFactory;
 import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.hibernate.stat.Statistics;
@@ -40,6 +51,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -52,9 +64,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.ArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -74,22 +86,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 @AutoConfigureMockMvc
 @Transactional
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class RecommendationPostgresIntegrationTest {
 
     private static final LocalDate TODAY = LocalDate.now(ZoneId.of("Asia/Seoul"));
 
     @Container
-    static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine")
-            .withDatabaseName("yon_recommendation_integration_test")
-            .withUsername("test").withPassword("test");
+    static final PostgreSQLContainer postgres = BackendPostgres.create();
 
     @DynamicPropertySource
     static void configureDatabase(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.datasource.driver-class-name", postgres::getDriverClassName);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create");
+        BackendPostgres.register(registry, postgres);
     }
 
     @Autowired private EntityManager entityManager;
@@ -97,6 +105,11 @@ class RecommendationPostgresIntegrationTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private RegionDirectory regionDirectory;
     @Autowired private RecommendationSelectionService selectionService;
+    @Autowired private EligibilityProfileService profileService;
+    @Autowired private RecommendationCandidateService candidateService;
+    @Autowired private RecommendationInterestMatcher interestMatcher;
+    @Autowired private RecommendationEligibilityService eligibilityService;
+    @Autowired private PreferenceService preferenceService;
 
     @AfterEach
     void clearRegionIndex() {
@@ -250,12 +263,12 @@ class RecommendationPostgresIntegrationTest {
         List<Long> largeBatch;
         try {
             statistics.clear();
-            smallBatch = selectionService.select(owner.getId(), 2, TODAY).stream()
+            smallBatch = fullScanReference().select(owner.getId(), 2, TODAY).stream()
                     .map(item -> item.candidate().opportunityId()).toList();
             long smallBatchStatements = statistics.getPrepareStatementCount();
             entityManager.clear();
             statistics.clear();
-            largeBatch = selectionService.select(owner.getId(), 100, TODAY).stream()
+            largeBatch = fullScanReference().select(owner.getId(), 100, TODAY).stream()
                     .map(item -> item.candidate().opportunityId()).toList();
             long largeBatchStatements = statistics.getPrepareStatementCount();
             assertTrue(smallBatchStatements > largeBatchStatements);
@@ -265,6 +278,10 @@ class RecommendationPostgresIntegrationTest {
             statistics.setStatisticsEnabled(previouslyEnabled);
         }
         assertEquals(largeBatch, smallBatch);
+        // 운영 경로(DB 그룹별 상위 후보)도 뒤 배치의 마감 임박 공고를 포함해 같은 결과를 낸다
+        entityManager.clear();
+        assertEquals(smallBatch, selectionService.select(owner.getId(), TODAY).stream()
+                .map(item -> item.candidate().opportunityId()).toList());
         assertEquals(5, smallBatch.size());
         assertEquals(late.getId(), smallBatch.getFirst());
         assertEquals(5, smallBatch.stream().distinct().count());
@@ -313,7 +330,7 @@ class RecommendationPostgresIntegrationTest {
             long coldStatements = statistics.getPrepareStatementCount();
             List<String> coldSql = SqlCapture.stop();
             assertEquals(coldStatements, coldSql.size());
-            assertEquals(1, coldSql.stream().filter(sql -> sql.contains(" from regions ")).count());
+            assertEquals(1, coldSql.stream().filter(sql -> sql.contains(" from application.regions ")).count());
             entityManager.clear();
             statistics.clear();
             SqlCapture.start();
@@ -326,7 +343,9 @@ class RecommendationPostgresIntegrationTest {
             assertTrue(oneItemSql.stream().anyMatch(sql -> sql.contains("user_opportunity_preferences")));
             assertTrue(oneItemSql.stream().anyMatch(sql -> sql.contains("opportunity_regions")));
             assertTrue(oneItemSql.stream().anyMatch(sql -> sql.contains("opportunity_versions")));
-            assertTrue(oneItemSql.stream().allMatch(sql -> sql.stripLeading().toLowerCase().startsWith("select")));
+            // 읽기 전용: SELECT 또는 쓰기가 없는 CTE 조회(그룹별 상위 후보)만 실행된다
+            assertTrue(oneItemSql.stream().map(sql -> sql.stripLeading().toLowerCase()).allMatch(sql -> sql.startsWith("select")
+                    || (sql.startsWith("with") && !sql.matches("(?s).*\\b(insert|update|delete|merge)\\b.*"))));
             assertEquals(oneItemStatements + 1, coldStatements);
             System.out.println("RECOMMENDATION_SQL_TABLES " + oneItemSql.stream()
                     .map(sql -> {
@@ -356,6 +375,12 @@ class RecommendationPostgresIntegrationTest {
             SqlCapture.stop();
             statistics.setStatisticsEnabled(previouslyEnabled);
         }
+    }
+
+    /** 운영 경로 이전의 전체 후보 순회 참조 구현 (배치 크기와 무관한 결과·SQL 수 비교용) */
+    private RecommendationFullScanReference fullScanReference() {
+        return new RecommendationFullScanReference(profileService, candidateService, interestMatcher,
+                eligibilityService, preferenceService);
     }
 
     private List<Map<String, Object>> recommendations(User owner) throws Exception {

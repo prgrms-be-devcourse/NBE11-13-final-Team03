@@ -4,9 +4,8 @@ import com.team3.backend.auth.oauth2.AuthProvider;
 import com.team3.backend.auth.oauth2.CustomOAuth2User;
 import com.team3.backend.auth.oauth2.OAuth2UserInfo;
 import com.team3.backend.auth.oauth2.OAuth2UserInfoFactory;
-import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
-import com.team3.backend.user.domain.repository.UserRepository;
+import java.time.Clock;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
@@ -27,12 +26,14 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     @Value("${app.admin-kakao-ids:}")
     private String adminKakaoIds;
 
-    private final UserRepository userRepository;
+    private final KakaoLoginTransaction loginTransaction;
+    private final Clock clock;
 
     @Override
     public OAuth2User loadUser(OAuth2UserRequest userRequest)
             throws OAuth2AuthenticationException {
 
+        var requestedAt = clock.instant();
         OAuth2User oAuth2User = super.loadUser(userRequest);
 
         String registrationId =
@@ -67,29 +68,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             );
         }
 
-        User user = userRepository
-                .findByKakaoIdAndProvider(userInfo.id(), provider)
-                .map(existing -> {
-                    existing.updateProfile(userInfo.name());
-
-                    if (isAdmin(userInfo.id()) && existing.getRole() != Role.ADMIN) {
-                        existing.promoteToAdmin();
-                    }
-
-                    return existing;
-                })
-                .orElseGet(() -> {
-
-                    User newUser = User.builder()
-                            .kakaoId(userInfo.id())
-                            .nickname(userInfo.name())
-                            .email(userInfo.email())
-                            .role(isAdmin(userInfo.id()) ? Role.ADMIN : Role.USER)
-                            .provider(provider)
-                            .build();
-
-                    return userRepository.save(newUser);
-                });
+        User user = loginTransaction.login(userInfo, provider, isAdmin(userInfo.id()), requestedAt);
 
         return new CustomOAuth2User(
                 user,

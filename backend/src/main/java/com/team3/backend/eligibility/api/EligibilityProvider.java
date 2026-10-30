@@ -1,5 +1,6 @@
 package com.team3.backend.eligibility.api;
 
+import com.team3.backend.eligibility.api.dto.EligibilityDecision;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshot;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshotPage;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
@@ -21,7 +22,7 @@ import java.util.Optional;
  * getEligibilities·findByStatuses는 오래되거나 없는 판정 결과를 먼저 다시 판정한 뒤 돌려준다.
  * 결과마다 추천에 필요한 기회 요약(OpportunityInfo: 분류, NCS, 모집 상태, 마감일, 교육 시작일, 등록일)을 함께 담는다.
  * 판정 프로필이 없는 사용자는 BusinessException(PROFILE_NOT_FOUND).
- * findFreshStatuses·findFreshEligibility는 재판정하지 않고 저장된 최신 결과만 읽는다 (검색 목록·상세 표시용).
+ * findFreshStatuses·findFreshEligibility·findFreshDecision은 재판정하지 않고 저장된 최신 결과만 읽는다 (검색 목록·상세 표시용).
  */
 public interface EligibilityProvider {
 
@@ -52,4 +53,10 @@ public interface EligibilityProvider {
      * today는 한국 시간 날짜를 넘긴다 (기회 요약의 모집 상태도 이 날짜로 계산한다).
      */
     Optional<EligibilitySnapshot> findFreshEligibility(Long userId, Long opportunityId, LocalDate today);
+
+    /**
+     * findFreshEligibility와 같은 최신 기준·같은 빈 값 조건으로 판정 상태·사유·조건별 결과만 조회한다 (예: 기회 상세 페이지).
+     * 기회 요약(OpportunityInfo)을 만들지 않으므로 판정 결과 조회 SQL 1번으로 끝난다. DB 조회 전용, 재판정하지 않는다.
+     */
+    Optional<EligibilityDecision> findFreshDecision(Long userId, Long opportunityId, LocalDate today);
 }

@@ -1,5 +1,7 @@
 package com.team3.backend.search.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Tuple;
@@ -38,6 +40,7 @@ import java.util.Map;
 @SpringBootTest
 @Transactional(readOnly = true)
 @EnabledIfEnvironmentVariable(named = "YON_SEARCH_RELEVANCE_OUTPUT", matches = ".+")
+@Tag("manual")
 class SearchRelevanceEquivalenceTest {
 
     private static final int CHUNK = 1_000;

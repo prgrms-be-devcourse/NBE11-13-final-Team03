@@ -1,5 +1,7 @@
 package com.team3.backend.tracking.service;
 
+import org.junit.jupiter.api.Tag;
+
 import org.junit.jupiter.api.*;
 import org.testcontainers.junit.jupiter.*;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -10,6 +12,7 @@ import static org.assertj.core.api.Assertions.*;
 
 /** Production upgrade script, exercised only against a dedicated disposable container. */
 @Testcontainers
+@Tag("postgres")
 class VersionWorkerUpgradePostgresTest {
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
             .withDatabaseName("worker_upgrade_disposable");

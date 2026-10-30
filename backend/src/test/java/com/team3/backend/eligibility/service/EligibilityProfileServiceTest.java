@@ -1,5 +1,7 @@
 package com.team3.backend.eligibility.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.dto.EligibilityProfilePatchRequest;
 import com.team3.backend.eligibility.dto.EligibilityProfileResponse;
@@ -44,6 +46,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         EligibilityProfileValidator.class,
         RegionDirectory.class
 })
+@Tag("postgres")
 class EligibilityProfileServiceTest {
 
     @Container

@@ -1,5 +1,7 @@
 package com.team3.backend.opportunity.domain.repository;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 import com.team3.backend.opportunity.domain.status.ApplicationStatus;
@@ -36,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
+@Tag("postgres")
 class ApplicationStatusSpecificationsTest {
 
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 20);

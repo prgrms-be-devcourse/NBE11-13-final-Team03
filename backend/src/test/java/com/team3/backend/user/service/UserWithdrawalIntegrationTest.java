@@ -1,5 +1,7 @@
 package com.team3.backend.user.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.auth.domain.entity.RefreshToken;
 import com.team3.backend.auth.domain.repository.RefreshTokenRepository;
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
@@ -41,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 )
 @ActiveProfiles("test")
 @SpringBootTest
+@Tag("postgres")
 class UserWithdrawalIntegrationTest {
 
     @Container

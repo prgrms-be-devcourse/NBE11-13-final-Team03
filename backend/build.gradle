@@ -67,6 +67,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter:2.0.5'
     testImplementation 'org.testcontainers:testcontainers-postgresql:2.0.5'
+    testImplementation 'com.github.database-rider:rider-junit5:1.44.0:jakarta'
     testCompileOnly 'org.projectlombok:lombok'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testRuntimeOnly 'com.h2database:h2'
@@ -80,26 +81,22 @@ dependencyManagement {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
     finalizedBy tasks.named('jacocoTestReport')
+    def group = providers.gradleProperty('testGroup').orElse('all').get()
+    useJUnitPlatform {
+        if (group == 'postgres') { includeTags 'postgres'; excludeTags 'manual' }
+        else if (group == 'fast') { excludeTags 'postgres', 'manual' }
+        else if (group == 'manual') { includeTags 'manual' }
+        else if (group != 'all') { throw new GradleException("Unknown testGroup: ${group}") }
+    }
+    if (group != 'all') {
+        reports.junitXml.outputLocation = layout.buildDirectory.dir("test-results/${group}")
+        reports.html.outputLocation = layout.buildDirectory.dir("reports/tests/${group}")
+    }
     // Gradle 테스트 JVM 기본 힙(512m)으로는 Spring 테스트 컨텍스트 캐시(기본 32개)가 쌓이면 OutOfMemoryError가 난다.
     // CI 러너(16GB)에 맞춰 힙만 늘린다. 캐시 크기는 줄이지 않는다: 컨텍스트가 캐시에서 밀려 닫히면
     // ddl-auto:create-drop이 같은 이름의 공유 H2 메모리 DB(jdbc:h2:mem:yon) 테이블을 지워 다른 컨텍스트 테스트가 깨진다.
     maxHeapSize = '4g'
-}
-
-jacoco { toolVersion = '0.8.14' } // Java 25 지원
-
-tasks.named('jacocoTestReport') {
-    dependsOn tasks.named('test')
-    reports {
-        xml.required = true
-        html.required = true
-    }
-    // 생성된 wire 클래스만 제외한다. DTO·설정·예외 분기도 보고서에 남긴다.
-    classDirectories.setFrom(sourceSets.main.output.asFileTree.matching {
-        exclude 'com/team3/contracts/**'
-    })
 }
 
 // Administrator SQL is test input, never an application startup resource.
@@ -114,4 +111,54 @@ tasks.named('processTestResources') {
 
 tasks.named('bootJar') {
     archiveFileName = 'app.jar'
+}
+
+// Real primary/standby lifecycle is opt-in; ordinary tests keep their existing scope.
+sourceSets {
+    replicaTest {
+        compileClasspath += sourceSets.main.output + sourceSets.test.output
+        runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+    }
+}
+configurations {
+    replicaTestImplementation.extendsFrom testImplementation
+    replicaTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+dependencies {
+    replicaTestImplementation 'com.github.database-rider:rider-junit5:1.44.0:jakarta'
+}
+tasks.named('processReplicaTestResources') {
+    from('../database/scripts/database-boundaries.sql') { into 'replica' }
+}
+tasks.register('replicaTest', Test) {
+    finalizedBy tasks.named('jacocoReplicaTestReport')
+    description = 'Actual PostgreSQL streaming replication and application routing'
+    group = 'verification'
+    testClassesDirs = sourceSets.replicaTest.output.classesDirs
+    classpath = sourceSets.replicaTest.runtimeClasspath
+    useJUnitPlatform()
+    maxHeapSize = '1g'
+}
+
+jacoco { toolVersion = '0.8.14' } // Java 25 support
+
+tasks.named('jacocoTestReport') {
+    dependsOn tasks.named('test')
+}
+
+tasks.register('jacocoReplicaTestReport', JacocoReport) {
+    dependsOn tasks.named('replicaTest')
+    executionData tasks.named('replicaTest').get()
+}
+
+tasks.withType(JacocoReport).configureEach {
+    sourceSets sourceSets.main
+    reports {
+        html.required = true
+        xml.required = true
+    }
+    // Generated gRPC/protobuf classes are not application code.
+    classDirectories.setFrom(sourceSets.main.output.asFileTree.matching {
+        exclude 'com/team3/contracts/**'
+    })
 }

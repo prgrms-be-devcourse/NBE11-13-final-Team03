@@ -1,5 +1,7 @@
 package com.team3.backend.outbox;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.outbox.config.NotificationPublisherProperties;
 import com.team3.backend.outbox.publisher.*;
 import com.team3.backend.outbox.service.*;
@@ -40,6 +42,7 @@ import static org.mockito.Mockito.*;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import({OutboxPublicationStore.class, OutboxPublicationWorker.class, OutboxPublicationPostgresTest.Beans.class})
+@Tag("postgres")
 class OutboxPublicationPostgresTest {
     private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");

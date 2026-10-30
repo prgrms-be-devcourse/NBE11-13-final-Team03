@@ -39,7 +39,7 @@ class RecommendationServiceTest {
     void preservesSelectionOrderAndReadsSavedIdsOnceWithSameDateForReasons() {
         var first = item(9L, TODAY.plusDays(14));
         var second = item(2L, TODAY.plusDays(1));
-        when(selectionService.select(7L, 100, TODAY)).thenReturn(List.of(first, second));
+        when(selectionService.select(7L, TODAY)).thenReturn(List.of(first, second));
         when(preferenceService.getSavedOpportunityIds(7L, List.of(9L, 2L))).thenReturn(Set.of(2L));
         var seoul = new OpportunityDetailResponseDto.RegionItem(RegionRole.RESIDENCE, "SPECIFIC",
                 "1100000000", "서울", ValidationStatus.VALID);
@@ -61,7 +61,7 @@ class RecommendationServiceTest {
 
     @Test
     void emptySelectionReturnsEmptyListWithoutSavedLookup() {
-        when(selectionService.select(7L, 100, TODAY)).thenReturn(List.of());
+        when(selectionService.select(7L, TODAY)).thenReturn(List.of());
         var service = new RecommendationService(selectionService, new RecommendationReasonService(), preferenceService,
                 regionService);
 

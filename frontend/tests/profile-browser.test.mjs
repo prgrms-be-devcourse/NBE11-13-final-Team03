@@ -88,7 +88,7 @@ test('Chrome exercises real region selects, onboarding PUT/back/complete and pro
     } catch(error) { document.querySelector('#result').textContent=JSON.stringify({ok:false,error:String(error)}); }
     finally { root.unmount();client.clear(); }
   `
-  const server = await createServer({ root, cacheDir: path.join(temporary, 'vite'), configFile: false, plugins: [react(), {
+  const server = await createServer({ root, envDir: false, envPrefix: 'TEST_UNUSED_', cacheDir: path.join(temporary, 'vite'), configFile: false, plugins: [react(), {
     name: 'test-only-profile-page',
     resolveId(id) { if (id === '/__test__/profile-entry.tsx') return '\0profile-entry.tsx' },
     load(id) { if (id === '\0profile-entry.tsx') return ts.transpileModule(entry, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText },

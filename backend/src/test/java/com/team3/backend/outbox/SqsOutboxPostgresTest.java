@@ -1,5 +1,7 @@
 package com.team3.backend.outbox;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.outbox.config.NotificationPublisherProperties;
 import com.team3.backend.outbox.domain.entity.OutboxEvent;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
@@ -49,6 +51,7 @@ import static org.mockito.Mockito.*;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import({OutboxPublicationStore.class, OutboxPublicationWorker.class, SqsOutboxPostgresTest.Beans.class})
+@Tag("postgres")
 class SqsOutboxPostgresTest {
     private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");
     private static final String SOURCE = "yon-integration-outbox";

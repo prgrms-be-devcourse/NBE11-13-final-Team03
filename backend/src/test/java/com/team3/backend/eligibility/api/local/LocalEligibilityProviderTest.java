@@ -1,8 +1,11 @@
 package com.team3.backend.eligibility.api.local;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.eligibility.api.EligibilityProvider;
 import com.team3.backend.eligibility.api.dto.ConditionResult;
+import com.team3.backend.eligibility.api.dto.EligibilityDecision;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshot;
 import com.team3.backend.eligibility.api.dto.EligibilitySnapshotPage;
 import com.team3.backend.eligibility.api.dto.OpportunityInfo;
@@ -59,6 +62,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
         YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+@Tag("postgres")
 class LocalEligibilityProviderTest {
 
     private static final Long USER = 1L;
@@ -232,11 +236,36 @@ class LocalEligibilityProviderTest {
     }
 
     @Test
+    void 판정_내용_조회는_상세_조회와_같은_최신_기준으로_판정_내용만_돌려준다() {
+        Long policy = normalizePolicy("R2026-1", "11680");
+        persistProfile();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+
+        assertThat(provider.findFreshDecision(USER, policy, today)).isEmpty();
+
+        provider.getEligibilities(USER, List.of(policy));
+        em.clear();
+
+        EligibilitySnapshot fresh = provider.findFreshEligibility(USER, policy, today).orElseThrow();
+        EligibilityDecision decision = provider.findFreshDecision(USER, policy, today).orElseThrow();
+        assertThat(decision.status()).isEqualTo(fresh.status());
+        assertThat(decision.reason()).isEqualTo(fresh.reason());
+        assertThat(decision.conditions()).isEqualTo(fresh.conditions()).isNotEmpty();
+
+        em.createQuery("update EligibilityProfile p set p.profileVersion = p.profileVersion + 1 where p.userId = :u")
+                .setParameter("u", USER).executeUpdate();
+        em.clear();
+        assertThat(provider.findFreshDecision(USER, policy, today)).isEmpty();
+    }
+
+    @Test
     void 상세_조회는_프로필이_없거나_없는_기회면_빈_값이다() {
         Long policy = normalizePolicy("R2026-1", "11680");
 
         assertThat(provider.findFreshEligibility(99L, policy, LocalDate.of(2026, 10, 20))).isEmpty();
         assertThat(provider.findFreshEligibility(USER, 999_999L, LocalDate.of(2026, 10, 20))).isEmpty();
+        assertThat(provider.findFreshDecision(99L, policy, LocalDate.of(2026, 10, 20))).isEmpty();
+        assertThat(provider.findFreshDecision(USER, 999_999L, LocalDate.of(2026, 10, 20))).isEmpty();
     }
 
     private Long normalizePolicy(String plcyNo, String zipCd) {

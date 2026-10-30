@@ -1,6 +1,9 @@
 package com.team3.backend.search.controller;
 
+import org.junit.jupiter.api.Tag;
+
 import com.jayway.jsonpath.JsonPath;
+import com.team3.backend.fixture.BackendPostgres;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
@@ -10,12 +13,15 @@ import com.team3.backend.opportunity.domain.entity.PersonalizationStatus;
 import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.opportunity.domain.entity.YouthPolicyDetail;
+
 import jakarta.persistence.EntityManager;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -46,26 +52,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class OpportunitySearchCandidatePostgresTest {
 
     @Container
-    static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine")
-            .withDatabaseName("yon_test")
-            .withUsername("test")
-            .withPassword("test");
+    static final PostgreSQLContainer postgres = BackendPostgres.create();
 
     @DynamicPropertySource
     static void configureDatabase(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.datasource.driver-class-name", postgres::getDriverClassName);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create");
-        registry.add("spring.jpa.properties.hibernate.hbm2ddl.import_files",
-                () -> "search-title-columns-hibernate-create.sql");
-        registry.add("spring.jpa.properties.hibernate.hbm2ddl.halt_on_error", () -> "true");
-        // import 파일은 기본 문자셋으로 읽힌다. 정규식의 가운뎃점(·・‧ᆞ)이 깨지지 않게 명시한다
-        registry.add("spring.jpa.properties.hibernate.hbm2ddl.charset_name", () -> "UTF-8");
+        BackendPostgres.register(registry, postgres);
     }
 
     @Autowired

@@ -1,5 +1,7 @@
 package com.team3.dataservice.collection.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.DataServiceApplication;
 import com.team3.dataservice.collection.domain.entity.ExternalSource;
 import com.team3.dataservice.collection.domain.entity.SyncHistory;
@@ -28,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Real application_user ownership, Hibernate update, partitioned CRUD, rollback and re-application. */
 @Testcontainers
+@Tag("postgres")
 class RawPartitionPostgresTest {
     @Container static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
     private final OffsetDateTime started = OffsetDateTime.parse("2026-10-27T12:00:00+09:00");

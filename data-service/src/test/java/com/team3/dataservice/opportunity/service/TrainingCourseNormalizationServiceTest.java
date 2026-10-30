@@ -1,5 +1,7 @@
 package com.team3.dataservice.opportunity.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.opportunity.domain.entity.*;
 import com.team3.dataservice.opportunity.domain.repository.*;
 import com.team3.dataservice.opportunity.normalization.dto.TrainingCourseRaw;
@@ -14,12 +16,10 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import com.team3.dataservice.support.ApplicationPostgresTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
-import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -31,17 +31,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 고용24 훈련과정 페이지 정규화를 실제 PostgreSQL로 검증한다. 원본 값은 2026-10-16 응답 샘플 기준.
  */
 @DataJpaTest
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@EnabledIfEnvironmentVariable(named = "YON_TEST_DB_URL", matches = ".+")
-@TestPropertySource(properties = {
-        "spring.datasource.url=${YON_TEST_DB_URL}",
-        "spring.datasource.username=${YON_TEST_DB_USERNAME:postgres}",
-        "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
-        "spring.jpa.hibernate.ddl-auto=create-drop"
-})
 @Import({com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache.class,
         com.team3.dataservice.opportunity.service.OpportunitySourceLookup.class,TrainingCourseNormalizationService.class, RegionNormalizer.class, RegionDirectory.class})
-class TrainingCourseNormalizationServiceTest {
+@Tag("postgres")
+class TrainingCourseNormalizationServiceTest extends ApplicationPostgresTest {
 
     private static final Long SOURCE = 2L;
     private static final LocalDateTime DAY1 = LocalDateTime.of(2026, 10, 16, 9, 0);

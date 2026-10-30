@@ -4,6 +4,8 @@ PR #103은 **기존 설정을 보존해 Terraform 관리 대상으로 등록**�
 코드·권한·자료를 모아 전달하고 AWS 담당자는 한 번의 작업 시간에 조회→계획→등록→검증을 진행한다.
 PR 병합만으로 import는 실행되지 않는다. 기존 main push는 backend 재배포를 유발할 수 있으므로 서버 가동 시간에 맞춰 병합한다.
 
+운영 import를 완료한 기존 state의 모듈 전환도 같은 명령과 state 경로로 진행한다. [모듈 전환 지침](module-migration.md)을 먼저 확인한다. 승인된 주소 이동은 AWS 변경과 구분해 출력하고, import 0건이어도 이동이 남아 있으면 `--apply`가 state에 반영한다. 이동과 신규 import가 함께 나타나면 중단한다.
+
 ## 관리 범위
 
 | 범위 | 대상 |
@@ -85,9 +87,9 @@ python3 infra/scripts/adopt_infrastructure.py --state-dir "$HOME/yon-terraform-s
 2. `--scope import` 전체 조회. AccessDenied를 자원 부재로 취급하지 않는다.
 3. 관측값으로 비공개 tfvars·정확한 대상 목록 생성. 정책 본문·Function·헤더를 기본값으로 채우지 않는다.
 4. local backend 초기화·문법 검증·기존 상태 백업.
-5. 실제 계획 생성 → 정확한 주소/ID·기준 속성·모든 자원의 `no-op` 검사. 생성·수정·삭제·교체·드리프트·불완전 계획이면 중단.
+5. 실제 계획 생성 → 모듈을 재귀 조회해 정확한 주소/ID·기준 속성·모든 자원의 `no-op` 검사. 생성·수정·삭제·교체·드리프트·불완전 계획, 승인되지 않은 주소 이동이면 중단.
 6. `--apply`이면 검증된 계획으로 상태 등록 → 상태 사본 저장.
-7. 다시 계획 → 모든 대상 등록 완료·pending import 없음·AWS 변경 0 확인 → `completed.json` 기록.
+7. 다시 계획 → 모든 대상 등록 완료·pending import 없음·주소 이동 0·AWS 변경 0 확인 → `completed.json` 기록.
 
 기존 네트워크 snapshot과 규칙 ID가 달라졌거나 EC2 추가 디스크·미지원 CloudFront 기능 등이 발견되면 검토를 위해 중단한다.
 Function LIVE/DEVELOPMENT 설정·소스가 다를 때도 미배포 변경을 덮어쓰지 않도록 중단한다.

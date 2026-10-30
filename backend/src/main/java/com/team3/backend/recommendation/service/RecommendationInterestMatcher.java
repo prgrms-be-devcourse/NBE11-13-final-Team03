@@ -46,6 +46,16 @@ public class RecommendationInterestMatcher {
             this.codesByType = Map.copyOf(copy);
         }
 
+        /** 관심 분야가 없어 모든 후보를 UNRESTRICTED로 보는지 여부 (DB 상위 후보 조회 조건) */
+        public boolean unrestricted() {
+            return unrestricted;
+        }
+
+        /** 유형별 관심 코드 (DB 상위 후보 조회 조건). match()와 같은 기준이다 */
+        public Set<String> codes(InterestType type) {
+            return codesByType.getOrDefault(type, Set.of());
+        }
+
         /** 현재 하위 분류명이 상위 분류 간 유일하다는 전제로 상위 분류를 재검증하지 않고 정확히 일치하는 하위 분류를 우선한다. */
         public Optional<InterestMatchLevel> match(RecommendationCandidate candidate) {
             if (unrestricted) {
