@@ -70,6 +70,7 @@ jobs:
           path: |
             data-service/build/reports/tests/test
             data-service/build/test-results/test
+            data-service/build/reports/jacoco
             data-service/build/test-summary
 
   # notification-service.yml과 같은 방식: 검증에서 만든 JAR로 이미지를 만들어 ghcr.io/<저장소>/data-service:sha-<커밋>으로 올린다

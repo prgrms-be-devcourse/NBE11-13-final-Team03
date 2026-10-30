@@ -53,4 +53,5 @@ jobs:
             backend/build/test-results/replicaTest/
             backend/build/reports/tests/replicaTest/
             backend/build/test-results/test/
+            backend/build/reports/jacoco/
           if-no-files-found: error
