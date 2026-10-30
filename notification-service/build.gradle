@@ -41,7 +41,17 @@ dependencies {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    def group = providers.gradleProperty('testGroup').orElse('all').get()
+    useJUnitPlatform {
+        if (group == 'postgres') { includeTags 'postgres'; excludeTags 'manual' }
+        else if (group == 'fast') { excludeTags 'postgres', 'manual' }
+        else if (group == 'manual') { includeTags 'manual' }
+        else if (group != 'all') { throw new GradleException("Unknown testGroup: ${group}") }
+    }
+    if (group != 'all') {
+        reports.junitXml.outputLocation = layout.buildDirectory.dir("test-results/${group}")
+        reports.html.outputLocation = layout.buildDirectory.dir("reports/tests/${group}")
+    }
 }
 
 // Share operator SQL and wire-contract examples only as test fixtures, not runtime code.

@@ -4,13 +4,22 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'scripts/test_report.py'
+      - 'scripts/test-policy.json'
+      - 'scripts/test_report_test.py'
       - 'backend/**'
       - 'data-service/**'
       - 'notification-service/**'
       - 'database/**'
+      - 'deploy/**'
+      - '.github/workflows/backend-image.yml'
+      - '.github/workflows/data-service.yml'
+      - '.github/workflows/notification-service.yml'
       - 'contracts/**'
       - 'scripts/notification-sqs-e2e/**'
       - '.github/workflows/service-e2e.yml'
+  schedule:
+    - cron: '0 17 * * 1' # Tuesday 02:00 KST; hosted Docker, independent of EC2 hours
   workflow_dispatch:
 
 permissions:
@@ -35,33 +44,15 @@ jobs:
       - name: Require Docker
         run: docker info
       - name: Run real JAR service flows
-        run: python3 scripts/notification-sqs-e2e/run.py
-      - name: Require all seven scenarios
+        run: python3 scripts/notification-sqs-e2e/run.py --output .validation/service-e2e
+      - name: Validate and report required scenarios
         if: always()
-        run: |
-          python3 - <<'PY'
-          import json, pathlib
-          reports = list(pathlib.Path('.validation').glob('service-e2e-*/results.json'))
-          assert len(reports) == 1, f'Expected one service E2E run, got {len(reports)}'
-          rows = json.loads(reports[0].read_text())
-          expected = {
-              'startup and authentication boundaries',
-              '100 plus remainder, page retry, final completion only',
-              'independent normalization result',
-              'failure, Slack rollback/redelivery, full manual retry',
-              'administrator duplicate has no extra Slack/user inbox',
-              'user outbox, ownership, read and duplicate',
-              'invalid message has no receipt/Slack and reaches DLQ',
-          }
-          assert len(rows) == 7 and {row['scenario'] for row in rows} == expected, rows
-          assert all(row['status'] == 'passed' for row in rows), rows
-          print('Service E2E: 7 passed, 0 skipped, 0 failed')
-          PY
+        run: python3 scripts/test_report.py service-e2e --results .validation/service-e2e/results.json --output .validation/service-e2e/summary
       - name: Upload results and failure evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: service-e2e-evidence
-          path: .validation/service-e2e-*/
+          path: .validation/service-e2e/
           include-hidden-files: true
           if-no-files-found: error

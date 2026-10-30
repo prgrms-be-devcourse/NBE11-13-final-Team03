@@ -1,5 +1,7 @@
 package com.team3.dataservice.collection.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.collection.domain.entity.*;
 import com.team3.dataservice.collection.domain.repository.*;
 import com.team3.dataservice.collection.dto.request.RawRecordSaveRequest;
@@ -30,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @ActiveProfiles("test")
 @Import({RawRecordService.class, RawRecordFingerprint.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
+@Tag("postgres")
 class RawRecordBatchTransactionTests extends ApplicationPostgresTest {
     @Autowired JdbcTemplate db;
     @Autowired RawRecordService service;

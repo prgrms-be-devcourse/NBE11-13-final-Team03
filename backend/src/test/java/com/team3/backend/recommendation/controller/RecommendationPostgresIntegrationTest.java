@@ -1,5 +1,7 @@
 package com.team3.backend.recommendation.controller;
 
+import org.junit.jupiter.api.Tag;
+
 import com.jayway.jsonpath.JsonPath;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
@@ -85,6 +87,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class RecommendationPostgresIntegrationTest {
 
     private static final LocalDate TODAY = LocalDate.now(ZoneId.of("Asia/Seoul"));

@@ -1,5 +1,7 @@
 package com.team3.backend.preference.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.global.exception.GlobalErrorCode;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
@@ -34,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers
 @ActiveProfiles("test")
 @SpringBootTest
+@Tag("postgres")
 class PreferenceSavedUsersPostgresTest {
 
     @Container

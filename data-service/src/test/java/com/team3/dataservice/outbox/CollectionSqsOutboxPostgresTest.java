@@ -1,5 +1,7 @@
 package com.team3.dataservice.outbox;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.outbox.config.CollectionNotificationPublisherProperties;
 
 import com.team3.dataservice.outbox.domain.repository.CollectionOutboxEventRepository;
@@ -50,6 +52,7 @@ import static org.mockito.Mockito.*;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import({OutboxPublicationStore.class, OutboxPublicationWorker.class, CollectionSqsOutboxPostgresTest.Beans.class})
+@Tag("postgres")
 class CollectionSqsOutboxPostgresTest {
     private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");
     private static final String SOURCE = "yon-collection-admin-integration";

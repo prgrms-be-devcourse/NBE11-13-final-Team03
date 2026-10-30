@@ -1,5 +1,7 @@
 package com.team3.notification.sqs;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.notification.NotificationApplication;
 import com.team3.notification.api.NotificationUserDtos.*;
 import com.team3.notification.config.NotificationSqsProperties;
@@ -47,6 +49,7 @@ import static org.mockito.Mockito.*;
         useMainMethod = SpringBootTest.UseMainMethod.ALWAYS,
         properties = {"app.scheduling.enabled=false", "yon.notification.sqs.consumer-enabled=false",
                 "yon.notification.receiver.enabled=false", "yon.notification.push.enabled=false"})
+@Tag("postgres")
 class NotificationSqsPostgresTest {
     private static final String PASSWORD = NotificationPostgres.PASSWORD;
     private static final String SOURCE = "yon-integration-notifications";

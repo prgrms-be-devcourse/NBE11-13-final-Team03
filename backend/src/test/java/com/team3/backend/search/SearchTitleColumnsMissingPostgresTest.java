@@ -1,5 +1,7 @@
 package com.team3.backend.search;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.search.service.SearchTitleColumns;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @SpringBootTest
 @AutoConfigureMockMvc
+@Tag("postgres")
 class SearchTitleColumnsMissingPostgresTest {
 
     @Container

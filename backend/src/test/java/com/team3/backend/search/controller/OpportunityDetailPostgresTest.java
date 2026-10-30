@@ -1,5 +1,7 @@
 package com.team3.backend.search.controller;
 
+import org.junit.jupiter.api.Tag;
+
 import com.github.database.rider.core.api.configuration.DBUnit;
 import com.github.database.rider.core.api.dataset.DataSet;
 import com.github.database.rider.core.api.dataset.ExpectedDataSet;
@@ -60,6 +62,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class OpportunityDetailPostgresTest {
     @Container
     static final PostgreSQLContainer postgres = BackendPostgres.create();

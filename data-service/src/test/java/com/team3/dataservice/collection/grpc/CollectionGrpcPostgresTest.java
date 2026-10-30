@@ -1,5 +1,7 @@
 package com.team3.dataservice.collection.grpc;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.contracts.collection.v1.*;
 import com.team3.dataservice.collection.domain.entity.ExternalSource;
 import com.team3.dataservice.collection.domain.entity.SyncHistory;
@@ -39,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(properties = {"spring.grpc.server.port=0", "yon.normalization.condition-set-backfill.enabled=false"})
+@Tag("postgres")
 class CollectionGrpcPostgresTest {
     @Container static final PostgreSQLContainer postgres = ApplicationPostgres.create();
     @DynamicPropertySource

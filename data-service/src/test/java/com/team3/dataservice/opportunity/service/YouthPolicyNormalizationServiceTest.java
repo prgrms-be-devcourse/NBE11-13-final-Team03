@@ -1,5 +1,7 @@
 package com.team3.dataservice.opportunity.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.opportunity.domain.entity.*;
 import com.team3.dataservice.opportunity.domain.repository.*;
 import com.team3.dataservice.opportunity.normalization.dto.NormalizationCommand;
@@ -40,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         RegionNormalizer.class, RegionDirectory.class,
         CodeConditionNormalizer.class, IncomeNormalizer.class, YouthPolicyCodeTable.class,
         OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+@Tag("postgres")
 class YouthPolicyNormalizationServiceTest extends ApplicationPostgresTest {
 
     private static final long SOURCE_ID = 1L;

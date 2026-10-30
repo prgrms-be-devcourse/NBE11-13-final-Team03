@@ -1,5 +1,7 @@
 package com.team3.dataservice.collection.service;
 
+import org.junit.jupiter.api.Tag;
+
 import java.sql.Connection;
 import com.team3.dataservice.support.ApplicationPostgres;
 import java.sql.DriverManager;
@@ -14,6 +16,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers
+@Tag("postgres")
 class NormalizationNotificationTriggerTests {
     private static final String CHANNEL = "raw_normalization_requested";
     @Container

@@ -1,5 +1,7 @@
 package com.team3.dataservice.opportunity.ingest;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.collection.domain.RecordResultType;
 import com.team3.dataservice.collection.domain.entity.ExternalSource;
 import com.team3.dataservice.collection.domain.entity.RawExternalRecord;
@@ -57,6 +59,7 @@ import static org.mockito.Mockito.doThrow;
         AgeNormalizer.class, ApplicationPeriodNormalizer.class, RegionNormalizer.class, RegionDirectory.class,
         CodeConditionNormalizer.class, IncomeNormalizer.class, YouthPolicyCodeTable.class,
         OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+@Tag("postgres")
 class RawIngestProcessorTest extends ApplicationPostgresTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();

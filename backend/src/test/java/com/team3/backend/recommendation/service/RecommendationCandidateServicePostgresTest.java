@@ -1,5 +1,7 @@
 package com.team3.backend.recommendation.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.fixture.BackendPostgres;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
@@ -43,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 @Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class RecommendationCandidateServicePostgresTest {
 
     @Container

@@ -1,5 +1,7 @@
 package com.team3.notification.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.notification.NotificationApplication;
 import com.team3.notification.api.NotificationUserDtos.*;
 import com.team3.notification.config.NotificationPushProperties;
@@ -35,6 +37,7 @@ import static org.mockito.Mockito.*;
         useMainMethod=SpringBootTest.UseMainMethod.ALWAYS,properties={"app.scheduling.enabled=false",
         "yon.notification.push.enabled=false","yon.notification.push.slots.enabled=true",
         "yon.notification.push.slots.inbox-path=/test-inbox"})
+@Tag("postgres")
 class NotificationSlotPostgresTest {
     private static final Instant NOW=Instant.parse("2026-10-23T00:00:00Z"); // 09:00 KST
     @Container static final PostgreSQLContainer POSTGRES=NotificationPostgres.create();

@@ -80,7 +80,17 @@ dependencyManagement {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    def group = providers.gradleProperty('testGroup').orElse('all').get()
+    useJUnitPlatform {
+        if (group == 'postgres') { includeTags 'postgres'; excludeTags 'manual' }
+        else if (group == 'fast') { excludeTags 'postgres', 'manual' }
+        else if (group == 'manual') { includeTags 'manual' }
+        else if (group != 'all') { throw new GradleException("Unknown testGroup: ${group}") }
+    }
+    if (group != 'all') {
+        reports.junitXml.outputLocation = layout.buildDirectory.dir("test-results/${group}")
+        reports.html.outputLocation = layout.buildDirectory.dir("reports/tests/${group}")
+    }
     // Gradle 테스트 JVM 기본 힙(512m)으로는 Spring 테스트 컨텍스트 캐시(기본 32개)가 쌓이면 OutOfMemoryError가 난다.
     // CI 러너(16GB)에 맞춰 힙만 늘린다. 캐시 크기는 줄이지 않는다: 컨텍스트가 캐시에서 밀려 닫히면
     // ddl-auto:create-drop이 같은 이름의 공유 H2 메모리 DB(jdbc:h2:mem:yon) 테이블을 지워 다른 컨텍스트 테스트가 깨진다.

@@ -1,5 +1,7 @@
 package com.team3.backend.behavior;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.BackendApplication;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.behavior.domain.repository.UserBehaviorEventRepository;
@@ -42,6 +44,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Production-account migration and backend restart; no shared or operational database is used. */
 @Testcontainers
+@Tag("postgres")
 class UserBehaviorPartitionPostgresTest {
     @Container static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
     private JdbcTemplate db;

@@ -1,5 +1,7 @@
 package com.team3.backend.tracking.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.outbox.domain.entity.*;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
@@ -35,6 +37,7 @@ import static org.assertj.core.api.Assertions.*;
         OpportunitySnapshotComparator.class, OpportunityVersionWorker.class, OpportunityVersionAnalysisTransaction.class,
         DeadlineExtensionPostgresTest.TimeConfig.class})
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class DeadlineExtensionPostgresTest {
     static final Instant NOW = Instant.parse("2026-10-25T00:00:00Z");
     static final LocalDate START = LocalDate.of(2026, 10, 1);

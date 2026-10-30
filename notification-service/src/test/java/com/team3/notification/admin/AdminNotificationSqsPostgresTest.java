@@ -1,5 +1,7 @@
 package com.team3.notification.admin;
 
+import org.junit.jupiter.api.Tag;
+
 import com.sun.net.httpserver.HttpServer;
 import com.team3.notification.config.AdminNotificationProperties;
 import com.team3.notification.message.NotificationMessageFingerprint;
@@ -57,6 +59,7 @@ import static org.mockito.Mockito.*;
 @Testcontainers
 @SpringJUnitConfig(AdminNotificationSqsPostgresTest.Beans.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class AdminNotificationSqsPostgresTest {
     private static final String PASSWORD = NotificationPostgres.PASSWORD;
     private static final String SOURCE = "yon-admin-integration", DLQ = SOURCE + "-dlq", USER = "yon-user-integration";

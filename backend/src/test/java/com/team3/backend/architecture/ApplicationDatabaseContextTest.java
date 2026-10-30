@@ -1,5 +1,7 @@
 package com.team3.backend.architecture;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.BackendApplication;
 import jakarta.persistence.EntityManagerFactory;
 import com.team3.backend.global.config.ApplicationDatabaseBoundaryConfig;
@@ -36,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
                 "yon.normalization.condition-set-backfill.enabled=false",
                 "region-code-api.sync-on-startup=false"
         })
+@Tag("postgres")
 class ApplicationDatabaseContextTest {
 
     @Container

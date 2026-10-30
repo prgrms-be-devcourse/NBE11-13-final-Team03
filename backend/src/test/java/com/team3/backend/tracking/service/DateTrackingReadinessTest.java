@@ -1,5 +1,7 @@
 package com.team3.backend.tracking.service;
 
+import org.junit.jupiter.api.Tag;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * data-service 소유 테이블은 backend 엔티티로 만들지 않으므로, 읽는 컬럼만 가진 최소 테이블을 직접 만들어 실제 SQL을 검증한다.
  */
 @Testcontainers
+@Tag("postgres")
 class DateTrackingReadinessTest {
 
     @Container

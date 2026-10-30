@@ -1,5 +1,7 @@
 package com.team3.backend.opportunity.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
@@ -43,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
         YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+@Tag("postgres")
 class NormalizationResultQueryServiceTest {
 
     @Autowired

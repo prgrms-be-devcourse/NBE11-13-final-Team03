@@ -1,5 +1,7 @@
 package com.team3.backend.auth.unlink;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.auth.oauth2.*;
 import com.team3.backend.auth.service.KakaoLoginTransaction;
 import com.team3.backend.user.domain.entity.*;
@@ -28,6 +30,7 @@ import static org.mockito.Mockito.*;
 @ActiveProfiles("test")
 @SpringBootTest(properties={"app.scheduling.enabled=false","app.kakao-unlink.enabled=false"})
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class KakaoUnlinkPostgresTest {
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) {

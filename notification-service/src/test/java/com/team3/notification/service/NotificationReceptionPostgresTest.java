@@ -1,5 +1,7 @@
 package com.team3.notification.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.notification.NotificationApplication;
 import com.team3.notification.domain.repository.*;
 import com.team3.notification.fixture.NotificationMessages;
@@ -43,6 +45,7 @@ import static com.team3.notification.domain.entity.ReceptionStatus.*;
         properties = {"app.scheduling.enabled=false", "NOTIFICATION_RECEIVER_ENABLED=true",
                 "NOTIFICATION_USER_API_ENABLED=true",
                 "NOTIFICATION_INTERNAL_API_KEY=test-notification-key"})
+@Tag("postgres")
 class NotificationReceptionPostgresTest {
     private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");
     private static final String PASSWORD = NotificationPostgres.PASSWORD;

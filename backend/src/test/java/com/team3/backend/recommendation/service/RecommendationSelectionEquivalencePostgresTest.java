@@ -1,5 +1,7 @@
 package com.team3.backend.recommendation.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
@@ -62,6 +64,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(properties = {"collection.schedule.enabled=false", "app.scheduling.enabled=false"})
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class RecommendationSelectionEquivalencePostgresTest {
     @Container
     static final PostgreSQLContainer postgres = BackendPostgres.create();

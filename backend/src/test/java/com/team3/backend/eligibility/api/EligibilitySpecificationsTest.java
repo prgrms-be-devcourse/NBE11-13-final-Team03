@@ -1,5 +1,7 @@
 package com.team3.backend.eligibility.api;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.eligibility.dto.EligibilityResultFreshness;
@@ -42,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
+@Tag("postgres")
 class EligibilitySpecificationsTest {
 
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 20);

@@ -1,5 +1,7 @@
 package com.team3.dataservice.opportunity.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.opportunity.domain.entity.*;
 import com.team3.dataservice.opportunity.domain.repository.*;
 import com.team3.dataservice.opportunity.normalization.dto.TrainingCourseRaw;
@@ -31,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DataJpaTest
 @Import({com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache.class,
         com.team3.dataservice.opportunity.service.OpportunitySourceLookup.class,TrainingCourseNormalizationService.class, RegionNormalizer.class, RegionDirectory.class})
+@Tag("postgres")
 class TrainingCourseNormalizationServiceTest extends ApplicationPostgresTest {
 
     private static final Long SOURCE = 2L;

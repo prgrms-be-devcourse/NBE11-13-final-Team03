@@ -1,5 +1,7 @@
 package com.team3.dataservice.support;
 
+import org.junit.jupiter.api.Tag;
+
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -14,6 +16,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
+@Tag("postgres")
 public abstract class ApplicationPostgresTest {
     @Container
     static final PostgreSQLContainer POSTGRES = ApplicationPostgres.create();

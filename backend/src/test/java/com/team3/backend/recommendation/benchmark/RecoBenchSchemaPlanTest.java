@@ -1,5 +1,7 @@
 package com.team3.backend.recommendation.benchmark;
 
+import org.junit.jupiter.api.Tag;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "yon.normalization.condition-set-backfill.enabled=false"
 })
 @EnabledIfEnvironmentVariable(named = "YON_RECO_BENCH_PHASE", matches = "schema-plan")
+@Tag("manual")
 class RecoBenchSchemaPlanTest {
 
     @Test

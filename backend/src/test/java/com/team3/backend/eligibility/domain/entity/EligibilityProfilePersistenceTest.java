@@ -1,5 +1,7 @@
 package com.team3.backend.eligibility.domain.entity;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -28,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
+@Tag("postgres")
 class EligibilityProfilePersistenceTest {
 
     @PersistenceContext

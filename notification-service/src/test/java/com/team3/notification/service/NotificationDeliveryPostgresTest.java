@@ -1,5 +1,7 @@
 package com.team3.notification.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.notification.NotificationApplication;
 import com.team3.notification.api.NotificationUserDtos.*;
 import com.team3.notification.config.NotificationPushProperties;
@@ -41,6 +43,7 @@ import static org.mockito.Mockito.*;
 @SpringBootTest(classes = {NotificationApplication.class, NotificationDeliveryPostgresTest.Beans.class},
         useMainMethod = SpringBootTest.UseMainMethod.ALWAYS,
         properties = {"app.scheduling.enabled=false", "yon.notification.push.enabled=false"})
+@Tag("postgres")
 class NotificationDeliveryPostgresTest {
     private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");
     @Container static final PostgreSQLContainer POSTGRES = NotificationPostgres.create();

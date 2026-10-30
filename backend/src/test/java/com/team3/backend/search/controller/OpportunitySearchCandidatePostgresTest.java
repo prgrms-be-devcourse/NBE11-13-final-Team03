@@ -1,5 +1,7 @@
 package com.team3.backend.search.controller;
 
+import org.junit.jupiter.api.Tag;
+
 import com.jayway.jsonpath.JsonPath;
 import com.team3.backend.fixture.BackendPostgres;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
@@ -51,6 +53,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class OpportunitySearchCandidatePostgresTest {
 
     @Container

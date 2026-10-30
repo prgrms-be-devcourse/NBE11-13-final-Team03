@@ -1,5 +1,7 @@
 package com.team3.dataservice.opportunity.conditionset;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.opportunity.domain.repository.ConditionSetRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @DataJpaTest
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
+@Tag("postgres")
 class ConditionSetRepositoryTest extends ApplicationPostgresTest {
 
     private static final String HASH = "a".repeat(64);

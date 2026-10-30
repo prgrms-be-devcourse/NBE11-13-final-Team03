@@ -1,5 +1,7 @@
 package com.team3.backend.tracking.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.tracking.domain.entity.EventScanHistory;
 import com.team3.backend.tracking.domain.entity.EventScanStatus;
 import com.team3.backend.tracking.domain.model.EventScanExecution;
@@ -65,6 +67,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         ApplicationStatusTransitionDetector.class, DeadlineSoonDetector.class, OpportunityEventFactory.class,
         EventScanCoordinatorIntegrationTest.ScanConfiguration.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
+@Tag("postgres")
 class EventScanCoordinatorIntegrationTest {
 
     @Container

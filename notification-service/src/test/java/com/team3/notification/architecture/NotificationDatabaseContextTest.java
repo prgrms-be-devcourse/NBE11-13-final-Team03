@@ -1,5 +1,7 @@
 package com.team3.notification.architecture;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.notification.NotificationApplication;
 import com.team3.notification.fixture.BoundaryProbe;
 import com.team3.notification.fixture.BoundaryProbeRepository;
@@ -35,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         properties = {
                 "app.scheduling.enabled=false"
         })
+@Tag("postgres")
 class NotificationDatabaseContextTest {
 
     @Container

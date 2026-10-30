@@ -1,5 +1,7 @@
 package com.team3.backend.tracking.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.tracking.domain.entity.*;
 import com.team3.backend.tracking.domain.model.SnapshotComparison;
@@ -35,6 +37,7 @@ import static com.team3.backend.tracking.domain.entity.OpportunityVersionTrackin
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class OpportunityVersionTrackingPostgresTest {
     private static final Instant NOW = Instant.parse("2026-10-25T00:00:00Z");
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")

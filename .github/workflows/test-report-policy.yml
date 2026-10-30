@@ -1,0 +1,21 @@
+name: Test report policy
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/test_report.py'
+      - 'scripts/test-policy.json'
+      - 'scripts/test_report_test.py'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 -m unittest discover -s scripts -p test_report_test.py -v

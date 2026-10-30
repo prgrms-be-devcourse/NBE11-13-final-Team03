@@ -4,12 +4,17 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'scripts/test_report.py'
+      - 'scripts/test-policy.json'
+      - 'scripts/test_report_test.py'
       - 'backend/**'
       - 'database/**'
       - 'deploy/db/**'
       - 'deploy/db-replica/**'
       - 'contracts/**'
       - '.github/workflows/replica-integration.yml'
+  schedule:
+    - cron: '0 17 * * 1' # Tuesday 02:00 KST; hosted Docker, independent of EC2 hours
   workflow_dispatch:
 
 permissions:
@@ -35,30 +40,9 @@ jobs:
         working-directory: backend
         run: |
           bash ./gradlew --no-daemon --console=plain test --rerun --tests '*ReadReplicaRoutingDataSourceTest' --tests '*ReadReplicaDataSourceConfigTest' replicaTest --rerun
-      - name: Require executed replica lifecycle and all checkpoints
+      - name: Validate and report required scenarios
         if: always()
-        run: |
-          python3 - <<'PY'
-          import json, pathlib, xml.etree.ElementTree as ET
-          report = pathlib.Path('backend/build/test-results/replicaTest/TEST-com.team3.backend.global.config.ReplicaIntegrationTest.xml')
-          suite = ET.parse(report).getroot()
-          assert int(suite.attrib['tests']) == 1, 'Replica lifecycle did not execute'
-          for key in ('failures', 'errors', 'skipped'):
-              assert int(suite.attrib[key]) == 0, f'Replica lifecycle: {key}={suite.attrib[key]}'
-          assert {case.attrib['name'] for case in suite.findall('testcase')} == {'streamingRoutingLagAndConnectionRecovery()'}
-          expected = {
-              'streaming-and-committed-rider', 'standby-write-rejected', 'public-reads-on-standby',
-              'lag-is-distinct-from-connection-failure', 'primary-write-nontarget-and-outside',
-              'fallback-and-cooldown', 'recovered-standby-retried',
-          }
-          checkpoints = json.loads(pathlib.Path('backend/build/replica-evidence/checkpoints.json').read_text())
-          assert set(checkpoints) == expected, checkpoints
-          for name in ('ReadReplicaRoutingDataSourceTest', 'ReadReplicaDataSourceConfigTest'):
-              unit = ET.parse(f'backend/build/test-results/test/TEST-com.team3.backend.global.config.{name}.xml').getroot()
-              assert int(unit.attrib['tests']) > 0 and all(int(unit.attrib[key]) == 0 for key in ('failures', 'errors', 'skipped')), name
-              print(f"Routing unit tests: {name}: {unit.attrib['tests']} passed")
-          print('Replica integration: 1 lifecycle passed, 7 checkpoints, 0 skipped, 0 failed')
-          PY
+        run: python3 scripts/test_report.py replica --output backend/build/replica-evidence/summary
       - name: Upload replica results and PostgreSQL evidence
         if: always()
         uses: actions/upload-artifact@v4

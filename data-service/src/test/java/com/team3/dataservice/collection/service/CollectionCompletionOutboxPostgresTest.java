@@ -1,5 +1,7 @@
 package com.team3.dataservice.collection.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.collection.domain.SyncJobStatus;
 import com.team3.dataservice.collection.domain.entity.ExternalSource;
 import com.team3.dataservice.collection.domain.entity.SyncHistory;
@@ -49,6 +51,7 @@ import static org.assertj.core.api.Assertions.*;
         "spring.grpc.server.port=0", "yon.normalization.condition-set-backfill.enabled=false",
         "spring.jpa.hibernate.ddl-auto=update", "spring.jpa.properties.hibernate.default_schema=application",
         "spring.datasource.hikari.connection-init-sql=SET search_path TO application, pg_catalog"})
+@Tag("postgres")
 class CollectionCompletionOutboxPostgresTest {
     @Container static final PostgreSQLContainer POSTGRES = ApplicationPostgres.create();
     private static final OffsetDateTime START = OffsetDateTime.parse("2026-10-26T14:50:00Z");

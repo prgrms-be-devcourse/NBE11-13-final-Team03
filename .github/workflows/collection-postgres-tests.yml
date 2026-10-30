@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'scripts/test_report.py'
+      - 'scripts/test-policy.json'
+      - 'scripts/test_report_test.py'
       - 'contracts/proto/**'
       - 'backend/**'
       - 'database/**'
@@ -45,75 +48,15 @@ jobs:
         working-directory: backend
         run: |
           chmod +x gradlew
-          ./gradlew clean test --no-daemon --console=plain
+          ./gradlew clean test --rerun --no-daemon --console=plain
         env:
           YON_TEST_DB_URL: jdbc:postgresql://localhost:5432/yon_test
           YON_TEST_DB_USERNAME: postgres
           YON_TEST_DB_PASSWORD: test
       # NOTIFY 트리거 테스트는 수집·정규화와 함께 data-service로 옮겨 data-service.yml에서 확인한다
-      - name: Summarize backend test results
+      - name: Validate and report execution groups
         if: always()
-        run: |
-          python3 - <<'PY'
-          import pathlib
-          import xml.etree.ElementTree as ET
-
-          suites = [ET.parse(path).getroot() for path in pathlib.Path('backend/build/test-results/test').glob('TEST-*.xml')]
-          assert suites, 'No backend test results'
-          partition = ET.parse('backend/build/test-results/test/TEST-com.team3.backend.behavior.UserBehaviorPartitionPostgresTest.xml').getroot()
-          assert int(partition.attrib['tests']) > 0, 'Behavior partition tests did not run'
-          for key in ('failures', 'errors', 'skipped'):
-              assert int(partition.attrib[key]) == 0, f'Behavior partition tests: {key}={partition.attrib[key]}'
-          print(f"Behavior partition tests passed: {partition.attrib['tests']}")
-          counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
-          print(f"Backend test totals: {counts}")
-          assert counts['failures'] == counts['errors'] == 0, 'Backend tests failed'
-          by_name = {suite.attrib['name']: suite for suite in suites}
-          required = {
-              'com.team3.backend.search.controller.OpportunitySearchPostgresTest': set(),
-              'com.team3.backend.search.controller.OpportunitySearchCandidatePostgresTest': set(),
-              'com.team3.backend.search.controller.OpportunityDetailPostgresTest': {
-                  'anonymousPolicyShowsCurrentDetailsAllWindowsAndRegions',
-                  'trainingKeepsUnknownApplicationStatusAndMissingDetailIsSafe',
-                  'unknownRegionIsNotShownAsNational',
-                  'verifiedAgeIncomeAndUnreviewedTextConditionsStayDistinct',
-                  'trainingRegionValidationUsesOnlyMatchingCurrentSnapshot',
-                  'uncertainIncomeTextIsNotCoercedToANumber',
-                  'latestEligibilityAndSavedBelongOnlyToCurrentUser',
-                  'freshAndExpiredEligibilityAreDistinguishedWithoutRecalculation',
-                  'eligibilityForOldProfileOrOtherConditionSetIsHidden',
-                  'missingAndUnnormalizedOpportunitiesReturnNotFound',
-              },
-              'com.team3.backend.recommendation.service.RecommendationCandidateServicePostgresTest': set(),
-              'com.team3.backend.recommendation.service.RecommendationSelectionEquivalencePostgresTest': {
-                  'topPerGroupSelectionMatchesFullScanReferenceOnRandomFixtures',
-              },
-              'com.team3.backend.recommendation.controller.RecommendationPostgresIntegrationTest': set(),
-          }
-          for name, methods in required.items():
-              suite = by_name.get(name)
-              assert suite is not None and int(suite.attrib['tests']) > 0, f'Required DB tests absent: {name}'
-              for key in ('failures', 'errors', 'skipped'):
-                  assert int(suite.attrib.get(key, 0)) == 0, f'{name}: {key} is not zero'
-              executed = {case.attrib['name'].split('(')[0] for case in suite.findall('testcase')}
-              assert methods <= executed, f'Moved/pilot scenarios absent: {name}: {methods - executed}'
-              print(f"Required DB tests passed: {name}: {suite.attrib['tests']}")
-          # Only explicit dump/benchmark opt-ins may skip; mandatory DB tests must actually execute.
-          manual = {
-              'com.team3.backend.eligibility.benchmark.EligibilityBenchmarkTest',
-              'com.team3.backend.eligibility.benchmark.EligibilityBottleneckBenchmarkTest',
-              'com.team3.backend.search.benchmark.OpportunityDetailBenchmarkTest',
-              'com.team3.backend.search.OpportunitySearchCandidateEquivalenceTest',
-              'com.team3.backend.search.service.SearchRelevanceEquivalenceTest',
-              'com.team3.backend.recommendation.benchmark.RecoBenchSchemaPlanTest',
-              'com.team3.backend.recommendation.benchmark.RecommendationBenchmarkTest',
-              'com.team3.backend.recommendation.benchmark.RecommendationDumpReferenceTest',
-          }
-          unexpected = [suite.attrib['name'] + '.' + case.attrib['name'] for suite in suites
-                        for case in suite.findall('testcase')
-                        if case.find('skipped') is not None and suite.attrib['name'] not in manual]
-          assert not unexpected, f'Unexpected backend skips: {unexpected}'
-          PY
+        run: python3 scripts/test_report.py backend --output backend/build/test-summary
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -122,3 +65,4 @@ jobs:
           path: |
             backend/build/reports/tests/test
             backend/build/test-results/test
+            backend/build/test-summary
