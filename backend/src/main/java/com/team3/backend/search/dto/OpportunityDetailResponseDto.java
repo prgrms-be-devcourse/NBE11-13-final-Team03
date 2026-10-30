@@ -1,7 +1,7 @@
 package com.team3.backend.search.dto;
 
 import com.team3.backend.eligibility.api.dto.ConditionResult;
-import com.team3.backend.eligibility.api.dto.EligibilitySnapshot;
+import com.team3.backend.eligibility.api.dto.EligibilityDecision;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.status.ApplicationStatus;
@@ -137,8 +137,8 @@ public record OpportunityDetailResponseDto(
 
     /** 미판정 null과 실제 UNKNOWN 판정을 구분한다. */
     public record EligibilityItem(EligibilityStatus status, String reason, List<EligibilityConditionItem> conditions) {
-        public static EligibilityItem from(EligibilitySnapshot snapshot) {
-            return new EligibilityItem(snapshot.status(), snapshot.reason(), snapshot.conditions().stream()
+        public static EligibilityItem from(EligibilityDecision decision) {
+            return new EligibilityItem(decision.status(), decision.reason(), decision.conditions().stream()
                     .map(EligibilityConditionItem::from).toList());
         }
     }

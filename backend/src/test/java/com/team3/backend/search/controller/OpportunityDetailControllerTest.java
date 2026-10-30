@@ -302,6 +302,29 @@ class OpportunityDetailControllerTest {
     }
 
     @Test
+    void eligibilityForOldProfileOrOtherConditionSetIsHidden() throws Exception {
+        Opportunity staleProfile = opportunity("이전 프로필", OpportunityType.YOUTH_POLICY);
+        Opportunity changedSet = opportunity("조건 묶음 변경", OpportunityType.YOUTH_POLICY);
+        User owner = account(90005L);
+        profile(owner, region("1100000000", "서울"));
+        LocalDate validUntil = LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(10);
+        EligibilityResultFixtures.result(entityManager, owner.getId(), staleProfile, EligibilityStatus.ELIGIBLE,
+                2L, EligibilityResultService.RULE_VERSION, validUntil);
+        EligibilityResultFixtures.conditionSetOf(entityManager, changedSet.getCurrentVersion());
+        EligibilityResultFixtures.result(entityManager, owner.getId(),
+                EligibilityResultFixtures.newConditionSet(entityManager), EligibilityStatus.ELIGIBLE,
+                1L, EligibilityResultService.RULE_VERSION, validUntil);
+        entityManager.flush();
+        entityManager.clear();
+
+        for (Opportunity opportunity : List.of(staleProfile, changedSet)) {
+            mockMvc.perform(get("/api/opportunities/{id}", opportunity.getId()).with(user(principal(owner))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.eligibility").doesNotExist());
+        }
+    }
+
+    @Test
     void missingAndUnnormalizedOpportunitiesReturnNotFound() throws Exception {
         Opportunity unnormalized = Opportunity.builder().opportunityType(OpportunityType.YOUTH_POLICY)
                 .title("미정규화").build();
