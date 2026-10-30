@@ -40,7 +40,7 @@ public class RecommendationCandidateRepository {
      * 그룹마다 RecommendationSelectionService.priority()와 같은 순서로 상위 :limit건.
      * 최신 기준은 EligibilityResultRepository.findFreshStatuses, 관심 적합도는 MatchContext.match, 그룹은 groupOf,
      * 날짜는 RecommendationCandidateService.nearestOpenDeadline·훈련 시작일과 같다. 한쪽 규칙을 바꾸면 다른 쪽도 함께 바꾸고
-     * RecommendationSelectionEquivalenceTest(전체 순회 참조 구현과 비교)로 확인한다.
+     * RecommendationSelectionEquivalencePostgresTest(전체 순회 참조 구현과 비교)로 확인한다.
      */
     private static final String TOP_PER_GROUP_SQL = """
             with fresh as (

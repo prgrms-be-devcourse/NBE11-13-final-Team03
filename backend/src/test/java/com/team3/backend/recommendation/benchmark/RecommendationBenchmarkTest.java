@@ -1,5 +1,7 @@
 package com.team3.backend.recommendation.benchmark;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.api.EligibilityProvider;
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
@@ -83,6 +85,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @AutoConfigureMockMvc
 @Import(RecoBenchProbe.Configuration.class)
 @EnabledIfEnvironmentVariable(named = "YON_RECO_BENCH_DB_URL", matches = ".+")
+@Tag("manual")
 class RecommendationBenchmarkTest {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");

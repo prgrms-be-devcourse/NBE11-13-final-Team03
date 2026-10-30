@@ -34,7 +34,7 @@ test('Chrome with missing Firebase configuration disables enable and makes no pe
     }catch(error){document.querySelector('#result').textContent=JSON.stringify({ok:false,error:String(error)})}
     finally{root.unmount();client.clear()}
   `
-  const server = await createServer({ root, configFile: false, envPrefix: 'TEST_UNUSED_', cacheDir: path.join(temporary, 'vite'), plugins: [react(), {
+  const server = await createServer({ root, envDir: false, configFile: false, envPrefix: 'TEST_UNUSED_', cacheDir: path.join(temporary, 'vite'), plugins: [react(), {
     name: 'test-only-push-page', resolveId: id => id === '/__test__/push-entry.tsx' ? '\0push-entry.tsx' : undefined,
     load: id => id === '\0push-entry.tsx' ? ts.transpileModule(entry, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText : undefined,
     configureServer(server) { server.middlewares.use((request, response, next) => {

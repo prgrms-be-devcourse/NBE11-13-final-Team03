@@ -122,9 +122,14 @@ limit 50;
 
 ## 테스트
 ```bash
-yon-test data
+cd data-service
+./gradlew test bootJar
 ```
-PostgreSQL 테스트는 `YON_TEST_DB_URL`이 있을 때만 돕니다.
+JDK 25와 실행 중인 Docker가 필요합니다. 필수 정규화·수집 DB 테스트는
+Testcontainers PostgreSQL 16의 격리된 DB에서 실행하며 외부 DB 환경변수 없이 동작합니다.
+공통 초기화는 운영 `database-boundaries.sql`로 역할·스키마를 준비하고,
+애플리케이션은 `application_user`로 연결합니다. 수동 성능 시험인
+`RawIngestBenchmarkTest`만 `YON_BENCH_DB_URL` opt-in을 유지합니다.
 
 
 ## 수집 gRPC 계약

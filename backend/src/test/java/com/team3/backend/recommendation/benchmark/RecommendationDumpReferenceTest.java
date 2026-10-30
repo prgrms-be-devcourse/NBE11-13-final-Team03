@@ -1,5 +1,7 @@
 package com.team3.backend.recommendation.benchmark;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.eligibility.service.EligibilityProfileService;
 import com.team3.backend.preference.service.PreferenceService;
 import com.team3.backend.recommendation.dto.RecommendationEligibleCandidate;
@@ -47,6 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "yon.normalization.condition-set-backfill.enabled=false"
 })
 @EnabledIfEnvironmentVariable(named = "YON_RECO_BENCH_PHASE", matches = "dump-reference")
+@Tag("manual")
 class RecommendationDumpReferenceTest {
 
     private static final LocalDate TODAY = LocalDate.parse(System.getenv().getOrDefault("YON_RECO_BENCH_TODAY", "2026-10-29"));

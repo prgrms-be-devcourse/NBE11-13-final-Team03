@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
+import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import ts from 'typescript'
 import { readPushConfig, pushEnvironmentKeys } from '../src/push/config.ts'
@@ -8,7 +9,7 @@ import { pushTarget, pushClickPath, pushNavigateType, pushMessagePath } from '..
 import { resolveConfig } from 'vite'
 
 test('development prebundles Firebase app, window and service-worker SDKs together', async () => {
-  const config = await resolveConfig({ root: new URL('../', import.meta.url).pathname }, 'serve')
+  const config = await resolveConfig({ root: fileURLToPath(new URL('../', import.meta.url)) }, 'serve')
   for (const entry of ['@firebase/app', '@firebase/messaging', '@firebase/messaging/sw']) {
     assert.ok(config.optimizeDeps.include.includes(entry), `${entry} must not be discovered only during worker registration`)
   }

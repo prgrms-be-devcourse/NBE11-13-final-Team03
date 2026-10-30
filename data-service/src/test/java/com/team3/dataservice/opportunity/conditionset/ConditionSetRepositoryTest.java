@@ -1,14 +1,14 @@
 package com.team3.dataservice.opportunity.conditionset;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.opportunity.domain.repository.ConditionSetRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import com.team3.dataservice.support.ApplicationPostgresTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
-import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,19 +20,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 조건 묶음 ID 확보(resolveId)를 실제 PostgreSQL로 검증한다. 동시 생성을 보려고 테스트 트랜잭션 없이 각자 커밋한다.
- * 일회용 DB를 YON_TEST_DB_URL로 지정할 것 (ddl-auto=create-drop).
+ * 클래스 전용 PostgreSQL·application_user로 실행한다 (매핑 테이블은 Hibernate create-drop).
  */
 @DataJpaTest
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@EnabledIfEnvironmentVariable(named = "YON_TEST_DB_URL", matches = ".+")
-@TestPropertySource(properties = {
-        "spring.datasource.url=${YON_TEST_DB_URL}",
-        "spring.datasource.username=${YON_TEST_DB_USERNAME:postgres}",
-        "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
-        "spring.jpa.hibernate.ddl-auto=create-drop"
-})
-class ConditionSetRepositoryTest {
+@Tag("postgres")
+class ConditionSetRepositoryTest extends ApplicationPostgresTest {
 
     private static final String HASH = "a".repeat(64);
 

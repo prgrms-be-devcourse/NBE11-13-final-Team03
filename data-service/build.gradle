@@ -52,6 +52,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter:2.0.5'
     testImplementation 'org.testcontainers:testcontainers-postgresql:2.0.5'
+    testImplementation 'com.github.database-rider:rider-junit5:1.44.0:jakarta'
     testCompileOnly 'org.projectlombok:lombok'
     testAnnotationProcessor 'org.projectlombok:lombok'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -59,7 +60,17 @@ dependencies {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    def group = providers.gradleProperty('testGroup').orElse('all').get()
+    useJUnitPlatform {
+        if (group == 'postgres') { includeTags 'postgres'; excludeTags 'manual' }
+        else if (group == 'fast') { excludeTags 'postgres', 'manual' }
+        else if (group == 'manual') { includeTags 'manual' }
+        else if (group != 'all') { throw new GradleException("Unknown testGroup: ${group}") }
+    }
+    if (group != 'all') {
+        reports.junitXml.outputLocation = layout.buildDirectory.dir("test-results/${group}")
+        reports.html.outputLocation = layout.buildDirectory.dir("reports/tests/${group}")
+    }
 }
 
 tasks.named('bootJar') {

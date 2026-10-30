@@ -1,5 +1,7 @@
 package com.team3.backend.interest.domain.repository;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.BackendApplication;
 import com.team3.backend.interest.dto.InterestOptionRow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
@@ -30,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(classes = BackendApplication.class)
 @Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class InterestOptionRepositoryTest {
 
     @Container

@@ -1,5 +1,7 @@
 package com.team3.backend.tracking.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.engine.EligibilityEngine;
 import com.team3.backend.eligibility.service.EligibilityEvaluator;
@@ -70,6 +72,7 @@ import static org.assertj.core.api.Assertions.*;
         OpportunitySnapshotComparator.class, DeadlineExtensionTransaction.class, DeadlineExtensionDetector.class,
         EligibilityNotificationRevalidationPostgresTest.TimeConfig.class})
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class EligibilityNotificationRevalidationPostgresTest {
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 25);
     private static final Long USER = 1L;

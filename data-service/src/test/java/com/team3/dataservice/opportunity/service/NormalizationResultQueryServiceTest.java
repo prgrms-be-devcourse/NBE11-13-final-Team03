@@ -1,5 +1,7 @@
 package com.team3.dataservice.opportunity.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.global.exception.BusinessException;
 import com.team3.dataservice.opportunity.domain.entity.*;
 import com.team3.dataservice.opportunity.normalization.dto.NormalizationCommand;
@@ -17,12 +19,10 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import com.team3.dataservice.support.ApplicationPostgresTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
-import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -31,20 +31,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@EnabledIfEnvironmentVariable(named = "YON_TEST_DB_URL", matches = ".+")
-@TestPropertySource(properties = {
-        "spring.datasource.url=${YON_TEST_DB_URL}",
-        "spring.datasource.username=${YON_TEST_DB_USERNAME:postgres}",
-        "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
-        "spring.jpa.hibernate.ddl-auto=create-drop"
-})
 @Import({com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache.class,
         com.team3.dataservice.opportunity.service.OpportunitySourceLookup.class,NormalizationResultQueryService.class,
         YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
         YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
-class NormalizationResultQueryServiceTest {
+@Tag("postgres")
+class NormalizationResultQueryServiceTest extends ApplicationPostgresTest {
 
     @Autowired
     private NormalizationResultQueryService service;

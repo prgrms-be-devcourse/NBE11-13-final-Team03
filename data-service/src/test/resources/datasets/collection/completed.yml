@@ -1,0 +1,8 @@
+application.sync_history:
+  - id: 100
+    status: SUCCESS
+application.collection_outbox_events:
+  - sync_job_id: 100
+    dedup_key: COLLECTION_COMPLETED:100
+    status: PENDING
+    retry_count: 0

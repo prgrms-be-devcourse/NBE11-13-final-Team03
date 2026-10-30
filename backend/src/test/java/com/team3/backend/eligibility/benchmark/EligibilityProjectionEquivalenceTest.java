@@ -1,5 +1,7 @@
 package com.team3.backend.eligibility.benchmark;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
@@ -68,6 +70,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
         YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+@Tag("postgres")
 class EligibilityProjectionEquivalenceTest {
 
     private static final OffsetDateTime NOW = OffsetDateTime.parse("2026-10-15T10:00:00+09:00");

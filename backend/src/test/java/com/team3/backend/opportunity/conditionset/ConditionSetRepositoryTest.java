@@ -1,5 +1,7 @@
 package com.team3.backend.opportunity.conditionset;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.repository.ConditionSetRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
+@Tag("postgres")
 class ConditionSetRepositoryTest {
 
     private static final String HASH = "a".repeat(64);

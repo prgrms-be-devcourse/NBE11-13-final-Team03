@@ -1,5 +1,7 @@
 package com.team3.dataservice.collection.grpc;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.contracts.collection.v1.*;
 import com.team3.dataservice.collection.domain.entity.ExternalSource;
 import com.team3.dataservice.collection.domain.entity.SyncHistory;
@@ -30,6 +32,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import com.team3.dataservice.support.ApplicationPostgres;
 import tools.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -38,14 +41,12 @@ import static org.junit.jupiter.api.Assertions.*;
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(properties = {"spring.grpc.server.port=0", "yon.normalization.condition-set-backfill.enabled=false"})
+@Tag("postgres")
 class CollectionGrpcPostgresTest {
-    @Container static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
+    @Container static final PostgreSQLContainer postgres = ApplicationPostgres.create();
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry properties) {
-        properties.add("spring.datasource.url", postgres::getJdbcUrl);
-        properties.add("spring.datasource.username", postgres::getUsername);
-        properties.add("spring.datasource.password", postgres::getPassword);
-        properties.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+        ApplicationPostgres.register(properties, postgres);
     }
     @Autowired GrpcServerLifecycle lifecycle;
     @Autowired JdbcTemplate db;

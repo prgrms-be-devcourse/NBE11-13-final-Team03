@@ -1,5 +1,7 @@
 package com.team3.backend.eligibility.api.local;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.eligibility.api.EligibilityProvider;
 import com.team3.backend.eligibility.api.dto.ConditionResult;
@@ -60,6 +62,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class, CodeConditionNormalizer.class, IncomeNormalizer.class,
         YouthPolicyCodeTable.class, OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+@Tag("postgres")
 class LocalEligibilityProviderTest {
 
     private static final Long USER = 1L;

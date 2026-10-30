@@ -1,0 +1,56 @@
+name: PostgreSQL replica integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/test_report.py'
+      - 'scripts/test-policy.json'
+      - 'scripts/test_report_test.py'
+      - 'backend/**'
+      - 'database/**'
+      - 'deploy/db/**'
+      - 'deploy/db-replica/**'
+      - 'contracts/**'
+      - '.github/workflows/replica-integration.yml'
+  schedule:
+    - cron: '0 17 * * 1' # Tuesday 02:00 KST; hosted Docker, independent of EC2 hours
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replica-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+          cache-dependency-path: |
+            backend/*.gradle
+            backend/gradle/wrapper/gradle-wrapper.properties
+      - name: Require Docker
+        run: docker info
+      - name: Verify routing unit tests and actual streaming replica
+        working-directory: backend
+        run: |
+          bash ./gradlew --no-daemon --console=plain test --rerun --tests '*ReadReplicaRoutingDataSourceTest' --tests '*ReadReplicaDataSourceConfigTest' replicaTest --rerun
+      - name: Validate and report required scenarios
+        if: always()
+        run: python3 scripts/test_report.py replica --output backend/build/replica-evidence/summary
+      - name: Upload replica results and PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replica-integration-evidence
+          path: |
+            backend/build/replica-evidence/
+            backend/build/test-results/replicaTest/
+            backend/build/reports/tests/replicaTest/
+            backend/build/test-results/test/
+          if-no-files-found: error

@@ -1,5 +1,7 @@
 package com.team3.backend.opportunity.conditionset;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.repository.OpportunityVersionRepository;
 import com.team3.backend.opportunity.normalization.dto.NormalizationCommand;
 import com.team3.backend.opportunity.normalization.dto.NormalizationResult;
@@ -54,6 +56,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         AgeNormalizer.class, ApplicationPeriodNormalizer.class, RegionNormalizer.class, RegionDirectory.class,
         CodeConditionNormalizer.class, IncomeNormalizer.class, YouthPolicyCodeTable.class,
         OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+@Tag("postgres")
 class ConditionSetBackfillTest {
 
     private static final LocalDateTime DAY1 = LocalDateTime.of(2026, 10, 21, 9, 0);

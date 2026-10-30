@@ -17,11 +17,17 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'scripts/test_report.py'
+      - 'scripts/test-policy.json'
+      - 'scripts/test_report_test.py'
       - 'frontend/**'
       - '.github/workflows/frontend.yml'
   push:
     branches: [main]
     paths:
+      - 'scripts/test_report.py'
+      - 'scripts/test-policy.json'
+      - 'scripts/test_report_test.py'
       - 'frontend/**'
       - '.github/workflows/frontend.yml'
   workflow_dispatch:
@@ -52,7 +58,29 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: npm test
+      - name: Require actual Chrome browser tests
+        run: |
+          chrome="$(command -v google-chrome)"
+          "$chrome" --version
+          printf '#!/usr/bin/env bash\nexec %q --no-sandbox "$@"\n' "$chrome" > "$RUNNER_TEMP/yon-chrome"
+          chmod +x "$RUNNER_TEMP/yon-chrome"
+          echo "CHROME_PATH=$RUNNER_TEMP/yon-chrome" >> "$GITHUB_ENV"
+      - name: Test with JUnit evidence
+        run: |
+          mkdir -p build/test-results/test
+          node --test --test-concurrency=1 --test-reporter=junit --test-reporter-destination=build/test-results/test/frontend.xml tests/*.test.mjs
+      - name: Validate and report frontend and browser executions
+        if: always()
+        working-directory: .
+        run: python3 scripts/test_report.py frontend --output frontend/build/test-summary
+      - name: Upload frontend test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-reports
+          path: |
+            frontend/build/test-results/test
+            frontend/build/test-summary
       - name: Build
         env:
           VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}

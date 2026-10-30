@@ -1,5 +1,7 @@
 package com.team3.dataservice.outbox;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.outbox.config.CollectionNotificationPublisherProperties;
 
 import com.team3.dataservice.outbox.domain.repository.CollectionOutboxEventRepository;
@@ -12,7 +14,6 @@ import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.*;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.*;
@@ -23,6 +24,9 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.*;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import com.team3.dataservice.support.ApplicationPostgres;
+import org.springframework.core.io.ClassPathResource;
+import java.nio.charset.StandardCharsets;
 import software.amazon.awssdk.auth.credentials.*;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.exception.SdkClientException;
@@ -33,7 +37,6 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 import tools.jackson.databind.json.JsonMapper;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -49,11 +52,12 @@ import static org.mockito.Mockito.*;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import({OutboxPublicationStore.class, OutboxPublicationWorker.class, CollectionSqsOutboxPostgresTest.Beans.class})
+@Tag("postgres")
 class CollectionSqsOutboxPostgresTest {
     private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");
     private static final String SOURCE = "yon-collection-admin-integration";
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
-    @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    @Container static final PostgreSQLContainer POSTGRES = ApplicationPostgres.create();
     @Container static final GenericContainer<?> LOCALSTACK = new GenericContainer<>("localstack/localstack:4.12.0")
             .withExposedPorts(4566).withEnv("SERVICES", "sqs").withEnv("SQS_ENDPOINT_STRATEGY", "off")
             .withEnv("SQS_DELAY_PURGE_RETRY", "0")
@@ -62,16 +66,8 @@ class CollectionSqsOutboxPostgresTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) throws Exception {
-        try (var connection = java.sql.DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-             var statement = connection.createStatement()) {
-            statement.execute("CREATE ROLE application_user LOGIN PASSWORD 'test'; CREATE SCHEMA application AUTHORIZATION application_user");
-            statement.execute("SET ROLE application_user");
-            statement.execute(new ClassPathResource("db-boundary/collection-outbox.sql").getContentAsString(StandardCharsets.UTF_8));
-        }
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", () -> "application_user");
-        registry.add("spring.datasource.password", () -> "test");
-        registry.add("spring.datasource.driver-class-name", POSTGRES::getDriverClassName);
+        ApplicationPostgres.applyCollectionOutbox(POSTGRES);
+        ApplicationPostgres.register(registry, POSTGRES);
     }
     private static String endpoint() { return "http://" + LOCALSTACK.getHost() + ":" + LOCALSTACK.getMappedPort(4566); }
     private static String queueUrl() { return endpoint() + "/000000000000/" + SOURCE; }

@@ -1,0 +1,11 @@
+notification.notifications:
+  - user_id: 7
+    type: DEADLINE_SOON
+notification.consumed_messages:
+  - user_id: 7
+    result: CREATED
+notification.notification_deliveries:
+  - user_id: 7
+    status: PENDING
+  - user_id: 7
+    status: PENDING

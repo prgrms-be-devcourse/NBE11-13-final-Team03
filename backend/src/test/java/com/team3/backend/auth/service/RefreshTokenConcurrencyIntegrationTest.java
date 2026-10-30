@@ -1,5 +1,7 @@
 package com.team3.backend.auth.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.auth.domain.entity.RefreshToken;
 import com.team3.backend.auth.domain.repository.RefreshTokenRepository;
 import com.team3.backend.auth.exception.AuthErrorCode;
@@ -32,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.*;
 )
 @ActiveProfiles("test")
 @SpringBootTest
+@Tag("postgres")
 class RefreshTokenConcurrencyIntegrationTest {
 
     @Container
