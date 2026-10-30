@@ -18,10 +18,9 @@ import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import com.team3.dataservice.support.ApplicationPostgresTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
-import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
@@ -44,17 +43,11 @@ import static org.mockito.Mockito.doThrow;
 
 /**
  * 수집 원본 → 정규화 연동을 실제 PostgreSQL로 검증한다. 수집 영역 테이블은 수집 엔티티로 만들고(ddl create-drop) 데이터도 수집 엔티티로 넣는다.
- * 원본 한 건마다 별도 트랜잭션으로 커밋하므로 테스트 트랜잭션은 쓰지 않고, 매 테스트 뒤 테이블을 비운다. 일회용 DB를 YON_TEST_DB_URL로 지정할 것.
+ * 원본 한 건마다 별도 트랜잭션으로 커밋하므로 테스트 트랜잭션은 쓰지 않고, 매 테스트 뒤 테이블을 비운다. 클래스 전용 PostgreSQL·application_user로 실행한다.
  */
 @DataJpaTest
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@EnabledIfEnvironmentVariable(named = "YON_TEST_DB_URL", matches = ".+")
 @TestPropertySource(properties = {
-        "spring.datasource.url=${YON_TEST_DB_URL}",
-        "spring.datasource.username=${YON_TEST_DB_USERNAME:postgres}",
-        "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
         "yon.normalization.ingest.batch-size=2",
         "yon.normalization.ingest.transaction-size=2"
 })
@@ -64,7 +57,7 @@ import static org.mockito.Mockito.doThrow;
         AgeNormalizer.class, ApplicationPeriodNormalizer.class, RegionNormalizer.class, RegionDirectory.class,
         CodeConditionNormalizer.class, IncomeNormalizer.class, YouthPolicyCodeTable.class,
         OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
-class RawIngestProcessorTest {
+class RawIngestProcessorTest extends ApplicationPostgresTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final OffsetDateTime T1 = OffsetDateTime.of(2026, 10, 20, 9, 0, 0, 0, ZoneOffset.ofHours(9));

@@ -95,6 +95,23 @@ jobs:
           print(f"Collection SQS/PostgreSQL tests passed: {sqs.attrib['tests']}")
           suites = [ET.parse(path).getroot() for path in results.glob('TEST-*.xml')]
           counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
+          normalization = [
+              'opportunity.service.YouthPolicyNormalizationServiceTest',
+              'opportunity.service.TrainingCourseNormalizationServiceTest',
+              'opportunity.service.NormalizationResultQueryServiceTest',
+              'opportunity.conditionset.ConditionSetBackfillTest',
+              'opportunity.conditionset.ConditionSetRepositoryTest',
+              'opportunity.ingest.RawIngestProcessorTest',
+              'collection.service.RawRecordBatchTransactionTests',
+          ]
+          for name in normalization:
+              suite = ET.parse(results / f'TEST-com.team3.dataservice.{name}.xml').getroot()
+              assert int(suite.attrib['tests']) > 0, f'Required PostgreSQL tests missing: {name}'
+              for key in ('skipped', 'failures', 'errors'):
+                  assert int(suite.attrib[key]) == 0, f'{name}: {key}={suite.attrib[key]}'
+          for suite in suites:
+              if suite.attrib['name'] != 'com.team3.dataservice.opportunity.ingest.RawIngestBenchmarkTest':
+                  assert int(suite.attrib.get('skipped', 0)) == 0, f"Unexpected skipped tests: {suite.attrib['name']}"
           print(f"data-service test totals: {counts}")
           PY
       - name: Upload executable JAR
