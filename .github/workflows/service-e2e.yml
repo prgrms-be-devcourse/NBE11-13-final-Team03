@@ -1,0 +1,67 @@
+name: Service E2E
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'data-service/**'
+      - 'notification-service/**'
+      - 'database/**'
+      - 'contracts/**'
+      - 'scripts/notification-sqs-e2e/**'
+      - '.github/workflows/service-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  service-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+          cache-dependency-path: |
+            backend/*.gradle
+            data-service/*.gradle
+            notification-service/*.gradle
+            **/gradle/wrapper/gradle-wrapper.properties
+      - name: Require Docker
+        run: docker info
+      - name: Run real JAR service flows
+        run: python3 scripts/notification-sqs-e2e/run.py
+      - name: Require all seven scenarios
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          reports = list(pathlib.Path('.validation').glob('service-e2e-*/results.json'))
+          assert len(reports) == 1, f'Expected one service E2E run, got {len(reports)}'
+          rows = json.loads(reports[0].read_text())
+          expected = {
+              'startup and authentication boundaries',
+              '100 plus remainder, page retry, final completion only',
+              'independent normalization result',
+              'failure, Slack rollback/redelivery, full manual retry',
+              'administrator duplicate has no extra Slack/user inbox',
+              'user outbox, ownership, read and duplicate',
+              'invalid message has no receipt/Slack and reaches DLQ',
+          }
+          assert len(rows) == 7 and {row['scenario'] for row in rows} == expected, rows
+          assert all(row['status'] == 'passed' for row in rows), rows
+          print('Service E2E: 7 passed, 0 skipped, 0 failed')
+          PY
+      - name: Upload results and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-e2e-evidence
+          path: .validation/service-e2e-*/
+          include-hidden-files: true
+          if-no-files-found: error
