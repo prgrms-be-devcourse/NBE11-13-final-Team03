@@ -1,0 +1,4 @@
+notification.admin_consumed_messages:
+  - event_type: COLLECTION_COMPLETED
+notification.consumed_messages: []
+notification.notifications: []

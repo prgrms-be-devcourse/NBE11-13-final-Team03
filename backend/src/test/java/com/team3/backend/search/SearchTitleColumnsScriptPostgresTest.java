@@ -1,5 +1,7 @@
 package com.team3.backend.search;
 
+import org.junit.jupiter.api.Tag;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 공고 테이블은 현재 운영과 같은 형태(생성 컬럼 없음)로 만들고 시작한다.
  */
 @Testcontainers
+@Tag("postgres")
 class SearchTitleColumnsScriptPostgresTest {
 
     private static final Path SCRIPTS = Path.of("../database/scripts");

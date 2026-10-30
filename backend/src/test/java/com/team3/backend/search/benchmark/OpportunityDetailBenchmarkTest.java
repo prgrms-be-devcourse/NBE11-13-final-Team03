@@ -1,5 +1,7 @@
 package com.team3.backend.search.benchmark;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.service.EligibilityResultService;
@@ -56,6 +58,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @Testcontainers
 @EnabledIfEnvironmentVariable(named = "YON_DETAIL_BENCH", matches = "true")
 @org.springframework.context.annotation.Import(DetailSqlProbe.Configuration.class)
+@Tag("manual")
 class OpportunityDetailBenchmarkTest {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");

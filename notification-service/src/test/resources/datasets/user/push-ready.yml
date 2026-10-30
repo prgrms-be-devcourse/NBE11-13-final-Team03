@@ -1,0 +1,20 @@
+# Instants use epoch milliseconds so the fixture is independent of the JVM time zone.
+notification.notification_settings:
+  - user_id: 7
+    in_app_enabled: true
+    push_enabled: true
+    push_consent_at: 1792713600000
+    updated_at: 1792713600000
+notification.notification_endpoints:
+  - id: 100
+    user_id: 7
+    fcm_token: device-a
+    active: true
+    created_at: 1792713600000
+    updated_at: 1792713600000
+  - id: 101
+    user_id: 7
+    fcm_token: device-b
+    active: true
+    created_at: 1792713600000
+    updated_at: 1792713600000

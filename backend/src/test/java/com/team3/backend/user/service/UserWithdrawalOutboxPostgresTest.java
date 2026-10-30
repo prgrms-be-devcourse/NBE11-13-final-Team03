@@ -1,5 +1,7 @@
 package com.team3.backend.user.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.outbox.domain.entity.*;
 import com.team3.backend.outbox.domain.repository.OutboxEventRepository;
@@ -25,6 +27,7 @@ import static org.assertj.core.api.Assertions.*;
 @ActiveProfiles("test")
 @SpringBootTest
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class UserWithdrawalOutboxPostgresTest {
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
     @DynamicPropertySource

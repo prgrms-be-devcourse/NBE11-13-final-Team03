@@ -83,7 +83,15 @@ class Backup:
                 'checked_at', clock_timestamp(),
                 'replay_timestamp', pg_last_xact_replay_timestamp(),
                 'replay_age_seconds', EXTRACT(EPOCH FROM clock_timestamp() - pg_last_xact_replay_timestamp()),
-                'wal_receiver_status', (SELECT status FROM pg_stat_wal_receiver LIMIT 1))
+                'wal_receiver_status', receiver.status,
+                'last_msg_receipt_time', receiver.last_msg_receipt_time,
+                'last_msg_age_seconds', EXTRACT(EPOCH FROM clock_timestamp() - receiver.last_msg_receipt_time),
+                'receive_lsn', pg_last_wal_receive_lsn(),
+                'replay_lsn', pg_last_wal_replay_lsn(),
+                'replay_lag_bytes', pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()),
+                'replay_paused', CASE WHEN pg_is_in_recovery() THEN pg_is_wal_replay_paused() END)
+            FROM (SELECT 1) AS singleton
+            LEFT JOIN pg_stat_wal_receiver AS receiver ON true
             """))
         if status["in_recovery"] is not True:
             raise RuntimeError("standby가 아닙니다. primary에서는 백업을 실행하지 않습니다")
@@ -93,9 +101,11 @@ class Backup:
         problems = []
         if status.get("wal_receiver_status") != "streaming":
             problems.append("복제 수신 상태가 streaming이 아닙니다")
-        age = status.get("replay_age_seconds")
-        if age is None or age > self.config["monitor"].getfloat("max_replay_age_seconds"):
-            problems.append("마지막 트랜잭션 재생 시각이 없거나 허용 시간을 초과했습니다")
+        age = status.get("last_msg_age_seconds")
+        if age is None or age < 0 or age >= self.config["monitor"].getfloat("max_wal_message_age_seconds", fallback=60):
+            problems.append("WAL 메시지 수신 시각이 없거나 허용 시간을 초과했습니다")
+        if status.get("replay_paused") is not False:
+            problems.append("WAL 재생이 중지됐거나 중지 여부를 확인할 수 없습니다")
         return problems
 
     def disk_usage(self):

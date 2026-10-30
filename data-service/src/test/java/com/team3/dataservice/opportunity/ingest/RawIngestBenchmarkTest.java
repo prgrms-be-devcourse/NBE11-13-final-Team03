@@ -1,5 +1,7 @@
 package com.team3.dataservice.opportunity.ingest;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.collection.domain.entity.ExternalSource;
 import com.team3.dataservice.collection.domain.entity.SyncHistory;
 import com.team3.dataservice.opportunity.normalization.*;
@@ -86,6 +88,7 @@ import java.util.List;
         AgeNormalizer.class, ApplicationPeriodNormalizer.class, RegionNormalizer.class, RegionDirectory.class,
         CodeConditionNormalizer.class, IncomeNormalizer.class, YouthPolicyCodeTable.class,
         OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
+@Tag("manual")
 class RawIngestBenchmarkTest {
 
     @TestConfiguration

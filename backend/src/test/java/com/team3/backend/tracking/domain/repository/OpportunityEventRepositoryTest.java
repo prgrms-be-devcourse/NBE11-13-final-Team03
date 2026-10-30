@@ -1,5 +1,7 @@
 package com.team3.backend.tracking.domain.repository;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
@@ -42,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @AutoConfigureTestDatabase(
         replace = AutoConfigureTestDatabase.Replace.NONE
 )
+@Tag("postgres")
 class OpportunityEventRepositoryTest {
 
     @Container

@@ -1,5 +1,7 @@
 package com.team3.backend.tracking.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
 import com.team3.backend.outbox.domain.entity.*;
@@ -47,6 +49,7 @@ import static org.assertj.core.api.Assertions.*;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import({EventFanoutCoordinator.class, EventFanoutBatch.class, DateNotificationMessageFactory.class,
         ApplicationStatusCalculator.class, DeadlineSoonDetector.class, PreferenceService.class, EventFanoutIntegrationTest.Beans.class})
+@Tag("postgres")
 class EventFanoutIntegrationTest {
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 23);
     private static final Instant NOW = Instant.parse("2026-10-23T00:00:00Z");

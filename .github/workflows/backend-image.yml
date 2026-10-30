@@ -41,9 +41,12 @@ jobs:
             backend/*.gradle
             backend/gradle/wrapper/gradle-wrapper.properties
 
+      - name: Require Docker for PostgreSQL tests
+        run: docker info
+
       - name: Test backend
         working-directory: backend
-        run: bash ./gradlew --no-daemon clean test
+        run: bash ./gradlew --no-daemon clean test --rerun
         env:
           YON_TEST_DB_URL: jdbc:postgresql://localhost:5432/yon_test
           YON_TEST_DB_USERNAME: postgres
@@ -54,32 +57,20 @@ jobs:
         working-directory: backend
         run: bash ./gradlew --no-daemon bootJar
 
-      - name: Summarize test results
+      - name: Validate and report execution groups
         if: always()
-        run: |
-          python3 - <<'PY'
-          import os
-          import pathlib
-          import xml.etree.ElementTree as ET
+        run: python3 scripts/test_report.py backend --output backend/build/test-summary
 
-          suites = [ET.parse(path).getroot() for path in pathlib.Path('backend/build/test-results/test').glob('TEST-*.xml')]
-          counts = {key: sum(int(suite.attrib.get(key, 0)) for suite in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
-          print(counts)
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-              summary.write(f"Tests: {counts['tests']}, failures: {counts['failures']}, errors: {counts['errors']}, skipped: {counts['skipped']}\n")
-              for suite in suites:
-                  if int(suite.attrib.get('skipped', 0)):
-                      summary.write(f"- Skipped: {suite.attrib['name']} ({suite.attrib['skipped']})\n")
-          PY
-
-      - name: Upload test reports on failure
-        if: failure()
+      - name: Upload test reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-image-test-reports
           path: |
             backend/build/reports/tests/test
             backend/build/test-results/test
+            backend/build/reports/jacoco
+            backend/build/test-summary
 
       - name: Set up QEMU
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.IMAGE_PLATFORM != 'linux/amd64'

@@ -1,5 +1,7 @@
 package com.team3.backend.search;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.search.dto.OpportunitySearchItemDto;
 import com.team3.backend.search.dto.OpportunitySearchResponseDto;
 import com.team3.backend.search.dto.OpportunitySearchSort;
@@ -33,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("test")
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "YON_SEARCH_EQUIVALENCE_DB_URL", matches = ".+")
+@Tag("manual")
 class OpportunitySearchCandidateEquivalenceTest {
 
     private static final int PAGE_SIZE = 100;

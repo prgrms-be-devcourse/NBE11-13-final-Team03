@@ -1,5 +1,7 @@
 package com.team3.dataservice.opportunity.conditionset;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.opportunity.domain.repository.OpportunityVersionRepository;
 import com.team3.dataservice.opportunity.normalization.dto.NormalizationCommand;
 import com.team3.dataservice.opportunity.normalization.dto.NormalizationResult;
@@ -22,13 +24,11 @@ import com.team3.dataservice.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import com.team3.dataservice.support.ApplicationPostgresTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
-import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -38,24 +38,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 조건 묶음 백필이 정규화 때와 같은 조건 묶음을 채우는지 실제 PostgreSQL로 검증한다 (jsonb에서 읽은 조건으로 키 계산).
  * PostgreSQL 전용인 이유: 이 테스트의 핵심은 "메모리의 expression과 jsonb로 저장했다 읽은 expression이 같은 키를 내는가"인데,
- * 숫자 타입·키 순서 등 jsonb 왕복 결과는 H2와 다르다. 다른 정규화 테스트도 같은 이유로 YON_TEST_DB_URL로 실행한다.
+ * 숫자 타입·키 순서 등 jsonb 왕복 결과는 H2와 다르다. 다른 정규화 테스트도 같은 이유로 클래스 전용 Testcontainers PostgreSQL로 실행한다.
  * 청크 실패 격리는 ConditionSetBackfillChunkTest(DB 없음, CI 포함)에서 검증한다.
  */
 @DataJpaTest
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@EnabledIfEnvironmentVariable(named = "YON_TEST_DB_URL", matches = ".+")
-@TestPropertySource(properties = {
-        "spring.datasource.url=${YON_TEST_DB_URL}",
-        "spring.datasource.username=${YON_TEST_DB_USERNAME:postgres}",
-        "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
-        "spring.jpa.hibernate.ddl-auto=create-drop"
-})
 @Import({com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache.class,
         com.team3.dataservice.opportunity.service.OpportunitySourceLookup.class,ConditionSetBackfill.class, YouthPolicyNormalizationService.class, TrainingCourseNormalizationService.class,
         AgeNormalizer.class, ApplicationPeriodNormalizer.class, RegionNormalizer.class, RegionDirectory.class,
         CodeConditionNormalizer.class, IncomeNormalizer.class, YouthPolicyCodeTable.class,
         OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
-class ConditionSetBackfillTest {
+@Tag("postgres")
+class ConditionSetBackfillTest extends ApplicationPostgresTest {
 
     private static final LocalDateTime DAY1 = LocalDateTime.of(2026, 10, 21, 9, 0);
 

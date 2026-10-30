@@ -1,6 +1,9 @@
 package com.team3.dataservice.collection.service;
 
+import org.junit.jupiter.api.Tag;
+
 import java.sql.Connection;
+import com.team3.dataservice.support.ApplicationPostgres;
 import java.sql.DriverManager;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
@@ -13,13 +16,14 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers
+@Tag("postgres")
 class NormalizationNotificationTriggerTests {
     private static final String CHANNEL = "raw_normalization_requested";
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine");
+    static final PostgreSQLContainer POSTGRES = ApplicationPostgres.create();
 
     private Connection connect() throws Exception {
-        return DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        return DriverManager.getConnection(POSTGRES.getJdbcUrl(), "application_user", "test");
     }
 
     @Test

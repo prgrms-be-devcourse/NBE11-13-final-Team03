@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'jacoco'
     id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
 }
@@ -33,6 +34,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter:2.0.5'
     testImplementation 'org.testcontainers:testcontainers-postgresql:2.0.5'
+    testImplementation 'com.github.database-rider:rider-junit5:1.44.0:jakarta'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -40,7 +42,18 @@ dependencies {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    finalizedBy tasks.named('jacocoTestReport')
+    def group = providers.gradleProperty('testGroup').orElse('all').get()
+    useJUnitPlatform {
+        if (group == 'postgres') { includeTags 'postgres'; excludeTags 'manual' }
+        else if (group == 'fast') { excludeTags 'postgres', 'manual' }
+        else if (group == 'manual') { includeTags 'manual' }
+        else if (group != 'all') { throw new GradleException("Unknown testGroup: ${group}") }
+    }
+    if (group != 'all') {
+        reports.junitXml.outputLocation = layout.buildDirectory.dir("test-results/${group}")
+        reports.html.outputLocation = layout.buildDirectory.dir("reports/tests/${group}")
+    }
 }
 
 // Share operator SQL and wire-contract examples only as test fixtures, not runtime code.
@@ -55,4 +68,14 @@ tasks.named('processTestResources') {
 
 tasks.named('bootJar') {
     archiveFileName = 'notification-service.jar'
+}
+
+jacoco { toolVersion = '0.8.14' } // Java 25 support
+
+tasks.named('jacocoTestReport') {
+    dependsOn tasks.named('test')
+    reports {
+        html.required = true
+        xml.required = true
+    }
 }

@@ -1,5 +1,7 @@
 package com.team3.dataservice.collection.grpc;
 
+import org.junit.jupiter.api.Tag;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.team3.dataservice.collection.domain.CollectionSource;
@@ -61,6 +63,7 @@ import static org.junit.jupiter.api.Assertions.*;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.jpa.open-in-view=false"
 })
+@Tag("postgres")
 class ManualSyncGrpcIntegrationTests {
     @Container
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");

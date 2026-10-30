@@ -1,5 +1,7 @@
 package com.team3.dataservice.collection.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.dataservice.collection.domain.SyncJobStatus;
 import com.team3.dataservice.collection.domain.entity.ExternalSource;
 import com.team3.dataservice.collection.domain.entity.SyncHistory;
@@ -7,8 +9,13 @@ import com.team3.dataservice.collection.domain.repository.ExternalSourceReposito
 import com.team3.dataservice.collection.domain.repository.SyncHistoryRepository;
 import com.team3.dataservice.outbox.domain.entity.CollectionOutboxStatus;
 import com.team3.dataservice.outbox.domain.repository.CollectionOutboxEventRepository;
+import com.team3.dataservice.support.ApplicationPostgres;
+import com.github.database.rider.core.api.configuration.DBUnit;
+import com.github.database.rider.core.api.dataset.DataSet;
+import com.github.database.rider.core.api.dataset.ExpectedDataSet;
+import com.github.database.rider.junit5.api.DBRider;
+
 import java.nio.charset.StandardCharsets;
-import java.sql.DriverManager;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.concurrent.CyclicBarrier;
@@ -44,23 +51,15 @@ import static org.assertj.core.api.Assertions.*;
         "spring.grpc.server.port=0", "yon.normalization.condition-set-backfill.enabled=false",
         "spring.jpa.hibernate.ddl-auto=update", "spring.jpa.properties.hibernate.default_schema=application",
         "spring.datasource.hikari.connection-init-sql=SET search_path TO application, pg_catalog"})
+@Tag("postgres")
 class CollectionCompletionOutboxPostgresTest {
-    @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    @Container static final PostgreSQLContainer POSTGRES = ApplicationPostgres.create();
     private static final OffsetDateTime START = OffsetDateTime.parse("2026-10-26T14:50:00Z");
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry properties) throws Exception {
-        try (var connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-             var statement = connection.createStatement()) {
-            statement.execute("CREATE ROLE application_user LOGIN PASSWORD 'test'; CREATE SCHEMA application AUTHORIZATION application_user");
-            statement.execute("SET ROLE application_user");
-            var ddl = new ClassPathResource("db-boundary/collection-outbox.sql").getContentAsString(StandardCharsets.UTF_8);
-            statement.execute(ddl);
-        }
-        properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        properties.add("spring.datasource.username", () -> "application_user");
-        properties.add("spring.datasource.password", () -> "test");
-        properties.add("spring.datasource.driver-class-name", POSTGRES::getDriverClassName);
+        ApplicationPostgres.applyCollectionOutbox(POSTGRES);
+        ApplicationPostgres.register(properties, POSTGRES);
     }
 
     @Autowired SyncJobService jobs;
@@ -78,8 +77,18 @@ class CollectionCompletionOutboxPostgresTest {
     }
 
     @Test
+    @DBRider(dataSourceBeanName = "dataSource")
+    @DBUnit(schema = "application", qualifiedTableNames = true, caseSensitiveTableNames = true,
+            cacheConnection = false, cacheTableNames = false, dataTypeFactoryClass = CollectionPostgresDataTypeFactory.class)
+    @DataSet(value = "datasets/collection/running.yml", executorId = "collection-completion-pilot", transactional = false)
+    @ExpectedDataSet("datasets/collection/completed.yml")
     void commitsScheduledCompletionAndPendingEnvelopeTogether() {
-        var history = history("EMPLOYMENT24", "SCHEDULED", START);
+        var history = histories.findById(100L).orElseThrow();
+        assertThat(history.getStartedAt().toInstant()).isEqualTo(START.toInstant());
+        assertThat(db.queryForObject("SELECT current_user", String.class)).isEqualTo("application_user");
+        assertThat(db.queryForList("SELECT conname FROM pg_constraint WHERE conrelid='application.collection_outbox_events'::regclass", String.class))
+                .contains("ck_collection_outbox_event_type", "ck_collection_outbox_status",
+                        "ck_collection_outbox_retry_count", "uk_collection_outbox_job");
         jobs.complete(history.getId(), true);
         assertThat(histories.findById(history.getId()).orElseThrow().getStatus()).isEqualTo(SyncJobStatus.SUCCESS);
         var event = outboxes.findAll().getFirst();
@@ -181,8 +190,13 @@ class CollectionCompletionOutboxPostgresTest {
     }
 
     @Test
+    @DBRider(dataSourceBeanName = "dataSource")
+    @DBUnit(schema = "application", qualifiedTableNames = true, caseSensitiveTableNames = true,
+            cacheConnection = false, cacheTableNames = false, dataTypeFactoryClass = CollectionPostgresDataTypeFactory.class)
+    @DataSet(value = "datasets/collection/running.yml", executorId = "collection-completion-pilot", transactional = false)
+    @ExpectedDataSet("datasets/collection/rolled-back.yml")
     void outboxStorageFailureAlsoRollsBackCompletion() {
-        var history = history("YOUTH_POLICY", "SCHEDULED", START);
+        var history = histories.findById(100L).orElseThrow();
         db.execute("ALTER TABLE collection_outbox_events ADD CONSTRAINT test_reject_outbox CHECK(sync_job_id < 0)");
         try {
             assertThatThrownBy(() -> jobs.complete(history.getId(), true)).isInstanceOf(DataIntegrityViolationException.class);

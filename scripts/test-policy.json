@@ -1,0 +1,79 @@
+{
+  "backend": {
+    "com.team3.backend.search.controller.OpportunitySearchPostgresTest": [],
+    "com.team3.backend.search.controller.OpportunitySearchCandidatePostgresTest": [],
+    "com.team3.backend.search.controller.OpportunityDetailPostgresTest": [
+      "anonymousPolicyShowsCurrentDetailsAllWindowsAndRegions",
+      "eligibilityForOldProfileOrOtherConditionSetIsHidden",
+      "freshAndExpiredEligibilityAreDistinguishedWithoutRecalculation",
+      "latestEligibilityAndSavedBelongOnlyToCurrentUser",
+      "missingAndUnnormalizedOpportunitiesReturnNotFound",
+      "trainingKeepsUnknownApplicationStatusAndMissingDetailIsSafe",
+      "trainingRegionValidationUsesOnlyMatchingCurrentSnapshot",
+      "uncertainIncomeTextIsNotCoercedToANumber",
+      "unknownRegionIsNotShownAsNational",
+      "verifiedAgeIncomeAndUnreviewedTextConditionsStayDistinct"
+    ],
+    "com.team3.backend.recommendation.service.RecommendationCandidateServicePostgresTest": [],
+    "com.team3.backend.recommendation.service.RecommendationSelectionEquivalencePostgresTest": [
+      "topPerGroupSelectionMatchesFullScanReferenceOnRandomFixtures"
+    ],
+    "com.team3.backend.recommendation.controller.RecommendationPostgresIntegrationTest": []
+  },
+  "notification-service": {
+    "com.team3.notification.service.NotificationDeliveryPostgresTest": [
+      "deliveryInsertFailureRollsBackNotificationAndConsumption",
+      "receiveCreatesPerEndpointDeliveriesOnceWithNotificationAndReceipt"
+    ],
+    "com.team3.notification.admin.AdminNotificationSqsPostgresTest": [
+      "replayWithTheSameMessageIdDoesNotSendSlackTwice"
+    ]
+  },
+  "data-service": {
+    "com.team3.dataservice.collection.service.CollectionCompletionOutboxPostgresTest": [
+      "commitsScheduledCompletionAndPendingEnvelopeTogether",
+      "outboxStorageFailureAlsoRollsBackCompletion"
+    ]
+  },
+  "manual": {
+    "com.team3.backend.eligibility.benchmark.EligibilityBenchmarkTest": "Explicit opt-in disabled: YON_BENCH_DB_URL",
+    "com.team3.backend.eligibility.benchmark.EligibilityBottleneckBenchmarkTest": "Explicit opt-in disabled: YON_BENCH_DB_URL",
+    "com.team3.backend.recommendation.benchmark.RecoBenchSchemaPlanTest": "Explicit opt-in disabled: YON_RECO_BENCH_PHASE",
+    "com.team3.backend.recommendation.benchmark.RecommendationBenchmarkTest": "Explicit opt-in disabled: YON_RECO_BENCH_DB_URL, YON_RECO_BENCH_PHASE, YON_RECO_BENCH_PHASE, YON_RECO_BENCH_PHASE, YON_RECO_BENCH_PHASE",
+    "com.team3.backend.recommendation.benchmark.RecommendationDumpReferenceTest": "Explicit opt-in disabled: YON_RECO_BENCH_PHASE",
+    "com.team3.backend.search.OpportunitySearchCandidateEquivalenceTest": "Explicit opt-in disabled: YON_SEARCH_EQUIVALENCE_DB_URL",
+    "com.team3.backend.search.benchmark.OpportunityDetailBenchmarkTest": "Explicit opt-in disabled: YON_DETAIL_BENCH",
+    "com.team3.backend.search.service.SearchRelevanceEquivalenceTest": "Explicit opt-in disabled: YON_SEARCH_RELEVANCE_OUTPUT",
+    "com.team3.dataservice.opportunity.ingest.RawIngestBenchmarkTest": "Explicit opt-in disabled: YON_BENCH_DB_URL"
+  },
+  "browser": [
+    "Chrome renders desktop brand/search/auth above centered navigation and mobile disclosure without overlap or overflow",
+    "Chrome verifies saved paging/removal, detail and search save changes, recommendation hide and anonymous return with mocked HTTP",
+    "Chrome exercises real region selects, onboarding PUT/back/complete and profile PATCH against a mocked transport",
+    "Chrome with missing Firebase configuration disables enable and makes no permission, worker or endpoint request",
+    "Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu Escape/return focus and header search with test-only responses"
+  ],
+  "replicaCheckpoints": [
+    "fallback-and-cooldown",
+    "lag-is-distinct-from-connection-failure",
+    "primary-write-nontarget-and-outside",
+    "public-reads-on-standby",
+    "recovered-standby-retried",
+    "standby-write-rejected",
+    "streaming-and-committed-rider"
+  ],
+  "replica": {
+    "com.team3.backend.global.config.ReplicaIntegrationTest": [
+      "streamingRoutingLagAndConnectionRecovery"
+    ]
+  },
+  "e2eScenarios": [
+    "100 plus remainder, page retry, final completion only",
+    "administrator duplicate has no extra Slack/user inbox",
+    "failure, Slack rollback/redelivery, full manual retry",
+    "independent normalization result",
+    "invalid message has no receipt/Slack and reaches DLQ",
+    "startup and authentication boundaries",
+    "user outbox, ownership, read and duplicate"
+  ]
+}

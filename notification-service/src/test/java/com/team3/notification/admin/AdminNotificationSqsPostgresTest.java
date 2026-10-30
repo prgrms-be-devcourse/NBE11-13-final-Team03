@@ -1,5 +1,7 @@
 package com.team3.notification.admin;
 
+import org.junit.jupiter.api.Tag;
+
 import com.sun.net.httpserver.HttpServer;
 import com.team3.notification.config.AdminNotificationProperties;
 import com.team3.notification.message.NotificationMessageFingerprint;
@@ -32,7 +34,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.*;
+import com.github.database.rider.core.api.configuration.DBUnit;
+import com.github.database.rider.core.api.dataset.DataSet;
+import com.github.database.rider.core.api.dataset.ExpectedDataSet;
+import com.github.database.rider.junit5.api.DBRider;
+import org.dbunit.ext.postgresql.PostgresqlDataTypeFactory;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import com.team3.notification.fixture.NotificationPostgres;
 import software.amazon.awssdk.auth.credentials.*;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.exception.SdkClientException;
@@ -51,10 +59,11 @@ import static org.mockito.Mockito.*;
 @Testcontainers
 @SpringJUnitConfig(AdminNotificationSqsPostgresTest.Beans.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class AdminNotificationSqsPostgresTest {
-    private static final String PASSWORD = "admin-test-password";
+    private static final String PASSWORD = NotificationPostgres.PASSWORD;
     private static final String SOURCE = "yon-admin-integration", DLQ = SOURCE + "-dlq", USER = "yon-user-integration";
-    @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    @Container static final PostgreSQLContainer POSTGRES = NotificationPostgres.create();
     @Container static final GenericContainer<?> LOCALSTACK = new GenericContainer<>("localstack/localstack:4.12.0")
             .withExposedPorts(4566).withEnv("SERVICES", "sqs").withEnv("SQS_ENDPOINT_STRATEGY", "off")
             .withEnv("SQS_DELAY_PURGE_RETRY", "0")
@@ -67,16 +76,7 @@ class AdminNotificationSqsPostgresTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) throws Exception {
-        try (var connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-             var statement = connection.createStatement()) {
-            statement.execute(resource("db-boundary/database-boundaries.sql"));
-            statement.execute("ALTER ROLE notification_user PASSWORD '" + PASSWORD + "'");
-        }
-        try (var connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), "notification_user", PASSWORD);
-             var statement = connection.createStatement()) {
-            statement.execute(resource("db-boundary/notification-inbox.sql"));
-            statement.execute(resource("db-boundary/notification-admin.sql"));
-        }
+        NotificationPostgres.adminSchema(POSTGRES);
         registry.add("admin.test.jdbc-url", POSTGRES::getJdbcUrl);
     }
 
@@ -206,6 +206,11 @@ class AdminNotificationSqsPostgresTest {
     }
 
     @Test
+    @DBRider(dataSourceBeanName = "dataSource")
+    @DBUnit(schema = "notification", qualifiedTableNames = true, caseSensitiveTableNames = true,
+            cacheConnection = false, cacheTableNames = false, dataTypeFactoryClass = PostgresqlDataTypeFactory.class)
+    @DataSet(value = "datasets/admin/empty.yml", executorId = "notification-admin", transactional = false)
+    @ExpectedDataSet("datasets/admin/consumed.yml")
     void replayWithTheSameMessageIdDoesNotSendSlackTwice() throws Exception {
         send(fixture()); consumer.runOnce(); send(fixture()); consumer.runOnce();
         assertThat(receipts()).isEqualTo(1);

@@ -1,5 +1,7 @@
 package com.team3.backend.auth.unlink;
 
+import org.junit.jupiter.api.Tag;
+
 import com.team3.backend.auth.oauth2.*;
 import com.team3.backend.auth.service.KakaoLoginTransaction;
 import com.team3.backend.user.domain.entity.*;
@@ -28,6 +30,7 @@ import static org.mockito.Mockito.*;
 @ActiveProfiles("test")
 @SpringBootTest(properties={"app.scheduling.enabled=false","app.kakao-unlink.enabled=false"})
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
+@Tag("postgres")
 class KakaoUnlinkPostgresTest {
     @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) {
@@ -114,7 +117,8 @@ class KakaoUnlinkPostgresTest {
         assertThat(status()).isEqualTo("FAILED");
         assertThat(processor.processNext()).isFalse();
         // Operator reconciliation/requeue, not a new withdrawal or lost in-memory queue.
-        jdbc.update("UPDATE kakao_unlink_tasks SET status='PENDING',next_attempt_at=now(),attempt_count=0");
+        // Requeued work is already due; DB now() can be ahead of the replacement JVM clock.
+        jdbc.update("UPDATE kakao_unlink_tasks SET status='PENDING',next_attempt_at=TIMESTAMP '1970-01-01 00:00:00',attempt_count=0");
         reset(client);
         new KakaoUnlinkProcessor(jdbc,client,new KakaoUnlinkProperties(false,"",3,
                 Duration.ofSeconds(1),Duration.ofSeconds(5),1),Clock.systemUTC(),transactions).processNext();
