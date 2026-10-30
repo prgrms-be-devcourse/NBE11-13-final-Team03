@@ -5,11 +5,15 @@ import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.core.io.ClassPathResource;
 import tools.jackson.databind.json.JsonMapper;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.*;
 
 class NotificationMessageContractTest {
@@ -74,22 +78,26 @@ class NotificationMessageContractTest {
         assertThat(message.sourceEventId().toString()).isEqualTo(message.payload().get("summaryRunId"));
     }
 
-    @Test
-    void newMatchRejectsMalformedRunAndInconsistentCountsBeforePersistence() throws Exception {
+    @ParameterizedTest(name = "NEW_MATCH 불일치: {0}")
+    @MethodSource("invalidSummaryPayloads")
+    void newMatchRejectsMalformedRunAndInconsistentCountsBeforePersistence(Map<String, Object> changes) throws Exception {
         var valid = decoder.decode(newMatchJson(Map.of()));
-        for (Map<String, Object> changes : List.<Map<String, Object>>of(
+        var payload = new LinkedHashMap<>(valid.payload());
+        payload.putAll(changes);
+        var invalid = decoder.decode(newMatchJson(Map.of("payload", payload)));
+        assertThatThrownBy(() -> validator.validate(invalid)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    static Stream<Map<String, Object>> invalidSummaryPayloads() {
+        return Stream.of(
                 Map.of("reason", "TRANSITION"), Map.of("summary", false),
                 Map.of("summaryRunId", UUID.randomUUID().toString()), Map.of("summaryRunId", "invalid"),
                 Map.of("evaluatedOn", "invalid"), Map.of("matchCount", 0),
                 Map.of("matchCount", 4), Map.of("eligibleCount", -1),
                 Map.of("possiblyCount", "1"), Map.of("maxUnresolved", 1.5),
-                Map.of("possiblyLabel", "확인 필요 2개"))) {
-            var payload = new LinkedHashMap<>(valid.payload());
-            payload.putAll(changes);
-            var invalid = decoder.decode(newMatchJson(Map.of("payload", payload)));
-            assertThatThrownBy(() -> validator.validate(invalid))
-                    .as("invalid NEW_MATCH payload: %s", changes).isInstanceOf(IllegalArgumentException.class);
-        }
+                Map.of("possiblyLabel", "확인 필요 2개"),
+                Collections.singletonMap("summaryRunId", null),
+                Map.of("matchCount", 2147483648L));
     }
 
     @Test
@@ -130,26 +138,32 @@ class NotificationMessageContractTest {
                 .isInstanceOf(RuntimeException.class);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"https://evil.example/x", "//evil.example/x", "relative/path",
+            "/%2fevil.example/x", "/x%5cy", "/x%0ay", "/%00", "/bad%escape"})
+    void rejectsExternalMalformedAndEncodedControlLinks(String link) {
+        assertThatThrownBy(() -> validator.validate(NotificationMessages.message(Map.of("link", link))))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test
-    void acceptsOnlyInternalAbsolutePathLinks() {
-        for (String link : List.of("https://evil.example/x", "//evil.example/x", "relative/path",
-                "/%2fevil.example/x", "/x%5cy", "/x%0ay")) {
-            assertThatThrownBy(() -> validator.validate(NotificationMessages.message(Map.of("link", link))))
-                    .as("link: %s", link).isInstanceOf(IllegalArgumentException.class);
-        }
+    void acceptsInternalAbsolutePathLink() {
         assertThatCode(() -> validator.validate(NotificationMessages.message(Map.of("link", "/opportunities/10"))))
                 .doesNotThrowAnyException();
     }
 
-    @Test
-    void rejectsNulInTextAndNestedPayloadBecausePostgresCannotStoreIt() {
-        for (var override : List.<Map<String, ?>>of(Map.of("title", "a\u0000b"), Map.of("content", "a\u0000b"),
+    @ParameterizedTest(name = "PostgreSQL 저장 불가: {0}")
+    @MethodSource("nulPayloads")
+    void rejectsNulInTextAndNestedPayloadBecausePostgresCannotStoreIt(Map<String, ?> override) {
+        assertThatThrownBy(() -> validator.validate(NotificationMessages.message(override)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    static Stream<Map<String, ?>> nulPayloads() {
+        return Stream.of(Map.of("title", "a\u0000b"), Map.of("content", "a\u0000b"),
                 Map.of("payload", Map.of("threshold", "D-\u00007")),
                 Map.of("payload", Map.of("nested", Map.of("k\u0000", "v"))),
-                Map.of("payload", Map.of("list", List.of("ok", "x\u0000"))))) {
-            assertThatThrownBy(() -> validator.validate(NotificationMessages.message(override)))
-                    .as("override: %s", override.keySet()).isInstanceOf(IllegalArgumentException.class);
-        }
+                Map.of("payload", Map.of("list", List.of("ok", "x\u0000"))));
     }
 
     @Test

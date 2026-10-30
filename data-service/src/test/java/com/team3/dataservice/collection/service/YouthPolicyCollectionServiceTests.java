@@ -6,12 +6,13 @@ import com.team3.dataservice.collection.exception.YouthPolicyClientException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+/** HTTP 오류 분류는 YouthPolicyClientTests, 여기서는 재시도 가능 여부별 수집 흐름을 검증한다. */
 class YouthPolicyCollectionServiceTests {
     private final YouthPolicyClient client = mock(YouthPolicyClient.class);
     private final YouthPolicyCollectionService service = new YouthPolicyCollectionService(client);
@@ -20,9 +21,9 @@ class YouthPolicyCollectionServiceTests {
         return new YouthPolicyPage(totalCount, List.of(JsonNodeFactory.instance.objectNode()));
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"HTTP_403", "HTTP_503"})
-    void continuesAfterFailureAndReturnsItsDetails(String errorCode) {
+    @Test
+    void continuesAfterFailureAndReturnsItsDetails() {
+        String errorCode = "HTTP_403";
         when(client.fetchPage(1, 1)).thenReturn(page(3));
         when(client.fetchPage(2, 1)).thenThrow(new YouthPolicyClientException(errorCode, true));
         when(client.fetchPage(3, 1)).thenReturn(page(3));
@@ -41,9 +42,9 @@ class YouthPolicyCollectionServiceTests {
         verify(client, never()).fetchPage(4, 1);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"HTTP_403", "HTTP_503", "CONNECTION_ERROR", "API_ERROR", "HTTP_429"})
-    void stopsAfterThreeFirstPageAttempts(String errorCode) {
+    @Test
+    void stopsAfterThreeFirstPageAttempts() {
+        String errorCode = "HTTP_403";
         when(client.fetchPage(anyInt(), eq(1)))
                 .thenThrow(new YouthPolicyClientException(errorCode, true));
 
@@ -73,9 +74,9 @@ class YouthPolicyCollectionServiceTests {
         verifyNoMoreInteractions(client);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"HTTP_401", "HTTP_400", "API_ERROR", "INVALID_RESPONSE"})
-    void nonRetryableFailureOnMiddlePageStopsCollection(String errorCode) {
+    @Test
+    void nonRetryableFailureOnMiddlePageStopsCollection() {
+        String errorCode = "HTTP_401";
         when(client.fetchPage(1, 1)).thenReturn(page(1000));
         when(client.fetchPage(2, 1)).thenThrow(new YouthPolicyClientException(errorCode, false));
         var result = service.collect(1, 1000);
@@ -96,9 +97,9 @@ class YouthPolicyCollectionServiceTests {
         verify(client, never()).fetchPage(3, 1);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"HTTP_403", "HTTP_503", "CONNECTION_ERROR", "API_ERROR"})
-    void repeatedMiddlePageFailuresStopWithoutReachingPageLimit(String errorCode) {
+    @Test
+    void repeatedMiddlePageFailuresStopWithoutReachingPageLimit() {
+        String errorCode = "HTTP_403";
         when(client.fetchPage(1, 1)).thenReturn(page(null));
         when(client.fetchPage(2, 1)).thenThrow(new YouthPolicyClientException(errorCode, true));
         when(client.fetchPage(3, 1)).thenThrow(new YouthPolicyClientException(errorCode, true));
@@ -126,9 +127,9 @@ class YouthPolicyCollectionServiceTests {
         verify(client, times(3)).fetchPage(2, 1);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"HTTP_403", "HTTP_429", "HTTP_503"})
-    void retriesPageThirtyBeforeSavingItOnceAndCollectingTheRemainingPages(String errorCode) {
+    @Test
+    void retriesPageThirtyBeforeSavingItOnceAndCollectingTheRemainingPages() {
+        String errorCode = "HTTP_403";
         var rows = java.util.Collections.nCopies(100, (tools.jackson.databind.JsonNode) JsonNodeFactory.instance.objectNode());
         when(client.fetchPage(anyInt(), eq(100))).thenReturn(new YouthPolicyPage(3600, rows));
         when(client.fetchPage(30, 100)).thenThrow(new YouthPolicyClientException(errorCode, true))
@@ -179,18 +180,30 @@ class YouthPolicyCollectionServiceTests {
         when(client.fetchPage(1, 1)).thenThrow(new IllegalStateException("Missing key"));
         assertThrows(IllegalStateException.class, () -> service.collect(1, 3));
         verify(client, never()).fetchPage(2, 1);
-        assertThrows(IllegalArgumentException.class, () -> service.collect(0, 3));
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"HTTP_401", "HTTP_400", "API_ERROR", "INVALID_RESPONSE"})
-    void stopsOnNonRetryableFirstPageFailure(String errorCode) {
+    @Test
+    void stopsOnNonRetryableFirstPageFailure() {
+        String errorCode = "HTTP_401";
         when(client.fetchPage(1, 1)).thenThrow(new YouthPolicyClientException(errorCode, false));
         var result = service.collect(1, 1000);
         assertFalse(result.completed());
         assertEquals(1, result.pageFailures().size());
         verify(client).fetchPage(1, 1);
         verifyNoMoreInteractions(client);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0, 1", "-1, 1", "1, 0", "1, -1"})
+    void invalidPageLimitsFailBeforeAnyExternalRequest(int pageSize, int maxPages) {
+        assertThrows(IllegalArgumentException.class, () -> service.collect(pageSize, maxPages));
+        verifyNoInteractions(client);
+    }
+
+    @Test
+    void missingPageHandlerFailsBeforeAnyExternalRequest() {
+        assertThrows(NullPointerException.class, () -> service.collectPages(100, 1000, null));
+        verifyNoInteractions(client);
     }
 
     @Test

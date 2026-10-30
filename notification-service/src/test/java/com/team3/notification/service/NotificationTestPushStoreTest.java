@@ -6,7 +6,11 @@ import com.team3.notification.fixture.NotificationMessages;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.context.annotation.Import;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
@@ -22,7 +26,11 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /** Exercises target/ownership/expiry SQL on H2; only the PostgreSQL advisory-lock guard is mocked. */
-@SpringBootTest(properties = "app.scheduling.enabled=false")
+@DataJpaTest(showSql = false, properties =
+        "spring.datasource.url=jdbc:h2:mem:test-push-store;MODE=PostgreSQL;DB_CLOSE_DELAY=-1")
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@Import(NotificationTestPushStore.class)
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class NotificationTestPushStoreTest {

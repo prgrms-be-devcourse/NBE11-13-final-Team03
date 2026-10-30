@@ -641,6 +641,8 @@ class OpportunitySearchPostgresTest {
         Opportunity unknown = opportunity("PG region unknown", OpportunityType.YOUTH_POLICY);
         Opportunity training = opportunity("PG region training", OpportunityType.VOCATIONAL_TRAINING);
         Opportunity elsewhereTraining = opportunity("PG region elsewhere training", OpportunityType.VOCATIONAL_TRAINING);
+        Opportunity elsewherePolicy = opportunity("PG region elsewhere policy", OpportunityType.YOUTH_POLICY);
+        opportunity("PG region unlocated training", OpportunityType.VOCATIONAL_TRAINING);
         national.updateSummary(national.getTitle(), "career", "job", null);
         specific.updateSummary(specific.getTitle(), "career", "job", null);
         provinceSpecific.updateSummary(provinceSpecific.getTitle(), "housing", "support", null);
@@ -660,6 +662,13 @@ class OpportunitySearchPostgresTest {
         entityManager.persist(OpportunityRegion.builder()
                 .version(elsewhereTraining.getCurrentVersion()).region(otherProvince)
                 .regionRole(RegionRole.IMPLEMENTATION).build());
+        // 거주 지역이나 NATIONAL 조건이 있어도 훈련은 실제 시행 지역으로만 검색한다.
+        entityManager.persist(OpportunityRegion.builder()
+                .version(elsewhereTraining.getCurrentVersion()).region(district)
+                .regionRole(RegionRole.RESIDENCE).build());
+        entityManager.persist(OpportunityRegion.builder()
+                .version(elsewherePolicy.getCurrentVersion()).region(otherProvince)
+                .regionRole(RegionRole.RESIDENCE).build());
         entityManager.flush();
         entityManager.clear();
         regionDirectory.refresh();
@@ -719,6 +728,15 @@ class OpportunitySearchPostgresTest {
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andReturn();
         assertEquals(List.of(elsewhereTraining.getId()), opportunityIds(elsewhereResult));
+
+        MvcResult elsewherePolicies = mockMvc.perform(get("/api/opportunities")
+                        .param("keyword", "PG region").param("region", otherProvince.getRegionCode())
+                        .param("type", "YOUTH_POLICY"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2)).andReturn();
+        assertEquals(Set.of(national.getId(), elsewherePolicy.getId()),
+                new HashSet<>(opportunityIds(elsewherePolicies)));
+        mockMvc.perform(get("/api/opportunities").param("keyword", "PG region"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(8));
 
         MvcResult combinedResult = mockMvc.perform(get("/api/opportunities")
                         .param("keyword", "PG region")

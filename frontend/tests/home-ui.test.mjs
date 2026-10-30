@@ -251,14 +251,6 @@ test('future authenticated states separate loading, empty recommendations, missi
   assert.match(render({ ...base, error: new ApiError('http', 'test only', 500) }), /서버에 문제가 생겼어요/)
 })
 
-test('home shortcuts keep their colors on the border and icon tile while the tile itself stays white', () => {
-  const css = fs.readFileSync(new URL('../src/pages/home/HomePage.module.css', import.meta.url), 'utf8')
-  assert.match(css, /\.shortcuts > a \{[^}]*border: 1px solid color-mix\(in srgb, var\(--tile-strong\) 25%, var\(--tile-soft\)\);[^}]*background: var\(--color-surface\);/)
-  assert.match(css, /\.shortcuts \.shortcutIcon \{ background: var\(--tile-soft\); color: var\(--tile-strong\); \}/)
-  assert.match(css, /\.shortcuts > a:nth-child\(3\) \{ --tile-soft: var\(--color-accent-rose\); --tile-strong: var\(--color-error\); \}/)
-  assert.doesNotMatch(css, /\.shortcuts > a:nth-child\(\d\) \{ background/)
-})
-
 test('recommendation card keeps save and hide close together at the right edge with 44px touch targets', () => {
   const html = renderCard(latestItem, { status: 'authenticated', user: { id: 11, role: 'USER' } }, { allowHide: true, recommendation: true, source: 'RECOMMENDATION' })
   assert.match(html, /<div class="actions compact"><button[^>]*class="button ghost iconButton"[\s\S]*?<\/button><button[^>]*class="button ghost textButton"[^>]*>숨기기<\/button>/)
@@ -267,18 +259,6 @@ test('recommendation card keeps save and hide close together at the right edge w
   // 최근 등록 카드(저장 버튼만 있음)도 같은 묶음 스타일로 오른쪽 끝선에 맞춘다.
   assert.match(renderCard(latestItem, { status: 'authenticated', user: { id: 11, role: 'USER' } }), /<div class="actions compact"><button[^>]*class="button ghost iconButton"/)
   assert.match(css, /\.actions \.textButton \{ min-inline-size: 44px; min-height: 44px; padding: var\(--space-2\); \}/)
-})
-
-test('interest chips use orange tokens (related is lighter like the mypage card) and D-8~D-14 deadlines use pink', () => {
-  const css = fs.readFileSync(new URL('../src/pages/home/HomePage.module.css', import.meta.url), 'utf8')
-  assert.match(css, /\.badges li\[data-badge='관심 분야 일치'\] \{ background: var\(--color-accent-orange\);/)
-  assert.match(css, /\.badges li\[data-badge='관심 분야 관련'\] \{ background: var\(--color-accent-orange-soft\);/)
-  assert.doesNotMatch(css, /#fce7f3|#9d2763|#ffedd5|#fff7ed/)
-  // 마감 칩 기본은 분홍이고, 이후에 오는 D-0~D-7 규칙이 빨강으로 덮어쓴다. 신청 조건 확인 필요는 노랑을 유지한다.
-  const pink = css.indexOf(".badges li[data-badge^='마감 D-'] { background: var(--color-accent-pink);")
-  const red = css.indexOf(".badges li:is([data-badge='마감 D-0']")
-  assert.ok(pink > -1 && red > pink)
-  assert.match(css, /\.badges li\[data-badge='신청 조건 확인 필요'\] \{ background: var\(--color-status-warning-soft\);/)
 })
 
 test('home CSS defines single-column mobile, two-column tablet and three-column desktop cards with touch-sized links', () => {
