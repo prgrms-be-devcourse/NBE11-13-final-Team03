@@ -34,7 +34,7 @@ jobs:
       - name: Verify routing unit tests and actual streaming replica
         working-directory: backend
         run: |
-          bash ./gradlew --no-daemon --console=plain test --tests '*ReadReplicaRoutingDataSourceTest' --tests '*ReadReplicaDataSourceConfigTest' replicaTest
+          bash ./gradlew --no-daemon --console=plain test --rerun --tests '*ReadReplicaRoutingDataSourceTest' --tests '*ReadReplicaDataSourceConfigTest' replicaTest --rerun
       - name: Require executed replica lifecycle and all checkpoints
         if: always()
         run: |
