@@ -1,0 +1,72 @@
+name: PostgreSQL replica integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'database/**'
+      - 'deploy/db/**'
+      - 'deploy/db-replica/**'
+      - 'contracts/**'
+      - '.github/workflows/replica-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replica-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+          cache-dependency-path: |
+            backend/*.gradle
+            backend/gradle/wrapper/gradle-wrapper.properties
+      - name: Require Docker
+        run: docker info
+      - name: Verify routing unit tests and actual streaming replica
+        working-directory: backend
+        run: |
+          bash ./gradlew --no-daemon --console=plain test --tests '*ReadReplicaRoutingDataSourceTest' --tests '*ReadReplicaDataSourceConfigTest' replicaTest
+      - name: Require executed replica lifecycle and all checkpoints
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, xml.etree.ElementTree as ET
+          report = pathlib.Path('backend/build/test-results/replicaTest/TEST-com.team3.backend.global.config.ReplicaIntegrationTest.xml')
+          suite = ET.parse(report).getroot()
+          assert int(suite.attrib['tests']) == 1, 'Replica lifecycle did not execute'
+          for key in ('failures', 'errors', 'skipped'):
+              assert int(suite.attrib[key]) == 0, f'Replica lifecycle: {key}={suite.attrib[key]}'
+          assert {case.attrib['name'] for case in suite.findall('testcase')} == {'streamingRoutingLagAndConnectionRecovery()'}
+          expected = {
+              'streaming-and-committed-rider', 'standby-write-rejected', 'public-reads-on-standby',
+              'lag-is-distinct-from-connection-failure', 'primary-write-nontarget-and-outside',
+              'fallback-and-cooldown', 'recovered-standby-retried',
+          }
+          checkpoints = json.loads(pathlib.Path('backend/build/replica-evidence/checkpoints.json').read_text())
+          assert set(checkpoints) == expected, checkpoints
+          for name in ('ReadReplicaRoutingDataSourceTest', 'ReadReplicaDataSourceConfigTest'):
+              unit = ET.parse(f'backend/build/test-results/test/TEST-com.team3.backend.global.config.{name}.xml').getroot()
+              assert int(unit.attrib['tests']) > 0 and all(int(unit.attrib[key]) == 0 for key in ('failures', 'errors', 'skipped')), name
+              print(f"Routing unit tests: {name}: {unit.attrib['tests']} passed")
+          print('Replica integration: 1 lifecycle passed, 7 checkpoints, 0 skipped, 0 failed')
+          PY
+      - name: Upload replica results and PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replica-integration-evidence
+          path: |
+            backend/build/replica-evidence/
+            backend/build/test-results/replicaTest/
+            backend/build/reports/tests/replicaTest/
+            backend/build/test-results/test/
+          if-no-files-found: error

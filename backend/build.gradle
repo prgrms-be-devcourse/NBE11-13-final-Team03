@@ -99,3 +99,29 @@ tasks.named('processTestResources') {
 tasks.named('bootJar') {
     archiveFileName = 'app.jar'
 }
+
+// Real primary/standby lifecycle is opt-in; ordinary tests keep their existing scope.
+sourceSets {
+    replicaTest {
+        compileClasspath += sourceSets.main.output + sourceSets.test.output
+        runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+    }
+}
+configurations {
+    replicaTestImplementation.extendsFrom testImplementation
+    replicaTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+dependencies {
+    replicaTestImplementation 'com.github.database-rider:rider-junit5:1.44.0:jakarta'
+}
+tasks.named('processReplicaTestResources') {
+    from('../database/scripts/database-boundaries.sql') { into 'replica' }
+}
+tasks.register('replicaTest', Test) {
+    description = 'Actual PostgreSQL streaming replication and application routing'
+    group = 'verification'
+    testClassesDirs = sourceSets.replicaTest.output.classesDirs
+    classpath = sourceSets.replicaTest.runtimeClasspath
+    useJUnitPlatform()
+    maxHeapSize = '1g'
+}
