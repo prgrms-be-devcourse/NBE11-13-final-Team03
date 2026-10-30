@@ -1,9 +1,13 @@
+import { useEffect, useRef } from 'react'
+import type { RefObject } from 'react'
 import { Link } from 'react-router-dom'
 import type { AuthStatus } from '../../auth/AuthContext'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { recommendationsQuery } from '../../api/recommendations'
 import type { RecommendationItem } from '../../api/recommendations'
 import { ApiError } from '../../api/ApiError'
+import { recordBehaviorEvent } from '../../api/behaviorEvents'
+import { observeImpression } from './recommendationImpression'
 import { opportunityDetailQuery } from '../../api/opportunityDetail'
 import AsyncState from '../../components/ui/AsyncState'
 import HomeOpportunityCard from './HomeOpportunityCard'
@@ -40,9 +44,28 @@ function RecommendationCard({ item, disabled }: { item: RecommendationItem; disa
   </HomeOpportunityCard>
 }
 
+// 화면에 렌더링된 추천 카드만 관찰한다. 재렌더링·재조회에도 같은 홈 진입 동안 사용자·공고별 한 번만 보낸다.
+function ObservedRecommendation({ item, disabled, userId, recorded }: { item: RecommendationItem; disabled: boolean; userId: number; recorded: RefObject<Set<string>> }) {
+  const client = useQueryClient()
+  const element = useRef<HTMLLIElement>(null)
+  const opportunityId = item.opportunityId
+  useEffect(() => {
+    const key = `${userId}:${opportunityId}`
+    if (!element.current || recorded.current.has(key)) return
+    return observeImpression(element.current, () => {
+      if (recorded.current.has(key)) return
+      recorded.current.add(key)
+      void recordBehaviorEvent(client, userId, opportunityId, { eventType: 'IMPRESSION', source: 'RECOMMENDATION' })
+    })
+  }, [client, userId, opportunityId, recorded])
+  return <li ref={element}><RecommendationCard item={item} disabled={disabled} /></li>
+}
+
 function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUserId?: number; authStatus?: AuthStatus }) {
   const options = recommendationsQuery(authStatus && authStatus !== 'authenticated' ? undefined : confirmedUserId)
   const result = useQuery(options)
+  // 홈에 들어올 때마다 새로 만든다. 다른 화면에서 돌아오거나 새로고침하면 다시 노출로 인정한다.
+  const recorded = useRef(new Set<string>())
   let content
   if (authStatus === 'checking') {
     content = <AsyncState status="loading" title="로그인 상태를 확인하고 있어요" />
@@ -70,7 +93,7 @@ function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUser
       {result.isFetching && <p role="status" className={styles.help}>추천 정보를 새로 확인하고 있어요.</p>}
       <ul className={`${styles.grid} ${styles.recommendationGrid}`}>{Array.from({ length: 3 }, (_, index) => {
         const item = result.data[index]
-        return item ? <li key={item.opportunityId}><RecommendationCard item={item} disabled={result.isFetching} /></li>
+        return item && confirmedUserId !== undefined ? <ObservedRecommendation key={item.opportunityId} item={item} disabled={result.isFetching} userId={confirmedUserId} recorded={recorded} />
           : <li key={`empty-${index}`} className={styles.vacantSlot} aria-hidden="true" />
       })}</ul>
     </>

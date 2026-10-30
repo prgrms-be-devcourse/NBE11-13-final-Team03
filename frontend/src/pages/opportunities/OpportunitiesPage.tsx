@@ -152,7 +152,7 @@ function OpportunitiesPage() {
                   {data.content.map((item) => <li key={item.opportunityId}>
                     <Card className={styles.resultCard} data-accent={item.type}>
                       <div className={styles.cardMeta}><OpportunityTypeBadge type={item.type} /><PreferenceActions opportunityId={item.opportunityId} title={item.title} saved={item.saved} source="SEARCH" disabled={results.isFetching} iconOnly /></div>
-                      <h3><Link to={`/opportunities/${item.opportunityId}`} state={{ searchReturn: `/opportunities${canonical ? `?${canonical}` : ''}` }}>{item.title || '제목 미확인'}</Link></h3>
+                      <h3><Link to={`/opportunities/${item.opportunityId}`} state={{ searchReturn: `/opportunities${canonical ? `?${canonical}` : ''}`, behaviorSource: 'SEARCH' }}>{item.title || '제목 미확인'}</Link></h3>
                       {classificationLabel(item) && <p className={styles.category}>{classificationLabel(item)}</p>}
                       <div className={styles.cardFooter}>
                         {/^\d{4}-\d{2}-\d{2}T/.test(item.createdAt) && <span>최초 등록일 <time dateTime={item.createdAt}>{formatDate(item.createdAt)}</time></span>}

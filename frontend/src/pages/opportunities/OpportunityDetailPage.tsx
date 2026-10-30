@@ -1,11 +1,13 @@
-import { useContext } from 'react'
+import { useContext, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../../api/ApiError'
 import { AuthContext } from '../../auth/AuthContext'
 import { isOpportunityId, opportunityDetailQuery } from '../../api/opportunityDetail'
 import type { ConditionType, RequirementType } from '../../api/opportunityDetail'
+import { behaviorSourceFromState, recordBehaviorEvent } from '../../api/behaviorEvents'
+import type { ExternalLinkType } from '../../api/behaviorEvents'
 import Card from '../../components/ui/Card'
 import AsyncState from '../../components/ui/AsyncState'
 import StatusBadge from '../../components/ui/StatusBadge'
@@ -23,9 +25,10 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 function Info({ label, value }: { label: string; value?: string | null }) {
   return value?.trim() ? <div><dt>{label}</dt><dd>{value}</dd></div> : null
 }
-function ExternalLink({ label, url }: { label: string; url?: string | null }) {
+// 기록은 기본 링크 동작을 막지 않는다. 가운데 버튼 클릭은 click 대신 auxclick으로 열린다.
+function ExternalLink({ label, url, onOpen }: { label: string; url?: string | null; onOpen?: () => void }) {
   const href = safeExternalUrl(url)
-  return href ? <a className={styles.externalLink} href={href} target="_blank" rel="noopener noreferrer">{label} <span>(새 탭)</span></a> : null
+  return href ? <a className={styles.externalLink} href={href} target="_blank" rel="noopener noreferrer" onClick={onOpen} onAuxClick={event => { if (event.button === 1) onOpen?.() }}>{label} <span>(새 탭)</span></a> : null
 }
 function detailError(error: Error): { title: string; description: string } {
   if (error instanceof ApiError) {
@@ -47,6 +50,19 @@ function OpportunityDetailPage() {
   // 인증 확인이 끝난 뒤 조회해 로그인 사용자의 찜 여부가 첫 응답부터 반영되게 한다.
   const query = useQuery({ ...detailOptions, enabled: detailOptions.enabled && auth?.status !== 'checking' })
   const data = query.data
+  const client = useQueryClient()
+  const userId = auth?.status === 'authenticated' ? auth.user?.id : undefined
+  const source = behaviorSourceFromState(location.state)
+  const viewedId = isOpportunityId(id) && query.isSuccess && !query.isError ? query.data.opportunityId : undefined
+  const recordedView = useRef<string | null>(null)
+  useEffect(() => {
+    if (userId === undefined || viewedId === undefined) return
+    // 이동마다 바뀌는 location.key로 진입을 구분한다. 재렌더링·재조회는 같은 진입이다.
+    const key = `${userId}:${location.key}:${viewedId}`
+    if (recordedView.current === key) return
+    recordedView.current = key
+    void recordBehaviorEvent(client, userId, viewedId, { eventType: 'DETAIL_VIEW', source })
+  }, [client, userId, location.key, viewedId, source])
   const backLink = <ArrowLink direction="back" className={styles.backLink} to={searchReturnPath(location.state)} aria-label="검색 목록으로 돌아가기">검색 목록</ArrowLink>
   if (!isOpportunityId(id)) return <div className={styles.page}>{backLink}<h1>기회 상세</h1><AsyncState status="error" title="공고 번호를 확인해 주세요" description="유효한 공고 주소가 아니에요. 검색 목록에서 공고를 다시 선택해 주세요." /></div>
   if (query.isPending) return <div className={styles.page}>{backLink}<h1>기회 상세</h1><AsyncState status="loading" title="기회 상세를 불러오는 중이에요" /></div>
@@ -55,15 +71,18 @@ function OpportunityDetailPage() {
   const policy = data.type === 'YOUTH_POLICY' ? data.detail : null
   const isPolicy = data.type === 'YOUTH_POLICY'
   const training = data.type === 'VOCATIONAL_TRAINING' ? data.detail : null
-  const officialLinks = [
-    { label: '정책 신청 페이지', url: policy?.applicationUrl },
-    { label: '원문 공고 확인', url: data.detailUrl },
-    { label: '참고 자료 1', url: policy?.referenceUrl1 },
-    { label: '참고 자료 2', url: policy?.referenceUrl2 },
+  const officialLinks: { label: string; url: string; linkType: ExternalLinkType }[] = [
+    { label: '정책 신청 페이지', url: policy?.applicationUrl, linkType: 'APPLICATION' as const },
+    { label: '원문 공고 확인', url: data.detailUrl, linkType: 'DETAIL' as const },
+    { label: '참고 자료 1', url: policy?.referenceUrl1, linkType: 'REFERENCE' as const },
+    { label: '참고 자료 2', url: policy?.referenceUrl2, linkType: 'REFERENCE' as const },
   ].flatMap(link => {
     const url = safeExternalUrl(link.url)
-    return url ? [{ label: link.label, url }] : []
+    return url ? [{ ...link, url }] : []
   }).filter((link, index, links) => links.findIndex(other => other.url === link.url) === index)
+  const recordLinkClick = (linkType: ExternalLinkType) => {
+    if (userId !== undefined) void recordBehaviorEvent(client, userId, data.opportunityId, { eventType: 'EXTERNAL_LINK_CLICK', source, linkType })
+  }
   // 직업훈련에 NCS 분류가 없으면 카드와 같이 '직업훈련'으로 표시한다.
   const classification = [...new Set([data.category?.trim() && categoryDisplayLabel(data.category.trim()), data.subCategory].map(value => value?.trim()).filter(value => value && value !== typeLabels[data.type]))].join(' · ')
     || (data.type === 'VOCATIONAL_TRAINING' ? typeLabels.VOCATIONAL_TRAINING : '')
@@ -131,8 +150,8 @@ function OpportunityDetailPage() {
         <div className={styles.summary}>
           <Section title="신청 및 저장">
             <div className={styles.summaryActions}>
-              {officialLinks.map(link => <ExternalLink key={link.url} label={link.label} url={link.url} />)}
-              <PreferenceActions opportunityId={data.opportunityId} title={data.title} saved={data.saved} source="OTHER" disabled={query.isFetching} showSaveLabel />
+              {officialLinks.map(link => <ExternalLink key={link.url} label={link.label} url={link.url} onOpen={() => recordLinkClick(link.linkType)} />)}
+              <PreferenceActions opportunityId={data.opportunityId} title={data.title} saved={data.saved} source={source} disabled={query.isFetching} showSaveLabel />
             </div>
             {officialLinks.length === 0 && <p className={styles.muted}>공식 링크가 제공되지 않았어요.</p>}
             <p className={styles.muted}>신청 조건과 기간은 제공 기관의 공식 공고에서 확인해 주세요.</p>

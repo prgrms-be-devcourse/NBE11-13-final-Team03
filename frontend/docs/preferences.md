@@ -5,7 +5,7 @@
 로컬 PreferenceController·PreferenceService·SavedOpportunityResponseDto·SavedOpportunitiesResponseDto, 관련 Controller·행동 이벤트 테스트, RecommendationController와 공개 검색·상세 Controller를 확인했다. 백엔드는 수정하지 않았다.
 
 - POST/DELETE `/api/opportunities/{id}/save`, POST/DELETE `/api/opportunities/{id}/hide`는 인증·CSRF가 필요하며 성공은 정확한 204다. 본문을 읽지 않는다. 400·401·403·404(USER_001/PREFERENCE_001)·통신 실패는 성공으로 처리하지 않는다.
-- POST의 source는 검색 SEARCH, 추천 RECOMMENDATION, 공개 홈·상세 OTHER다. 저장 목록은 SAVED 출처로 저장 해제를 사용하되 DELETE 계약에는 source가 없어 전송하지 않는다.
+- POST의 source는 검색 SEARCH, 추천 RECOMMENDATION, 공개 홈 OTHER다. 상세는 진입 출처를 쓴다: 추천·검색·저장 목록에서 이동하면 각각 RECOMMENDATION·SEARCH·SAVED, 직접 주소·공개 홈·알림 등은 OTHER([행동 이벤트 문서](behavior-events.md)). 저장 목록은 SAVED 출처로 저장 해제를 사용하되 DELETE 계약에는 source가 없어 전송하지 않는다.
 - SAVE/HIDE 행동 이벤트는 실제 상태가 바뀔 때 서버가 기록한다. 별도의 행동 이벤트 요청은 추가하지 않는다. 저장·해제는 숨김을 바꾸지 않고 숨김·해제도 저장을 바꾸지 않는다.
 - 검색·상세·홈 공개 카드·추천에서 저장과 해제를 제공한다. 숨김은 추천 카드에서만 제공한다. 검색·상세는 숨긴 공고도 계속 조회한다.
 - 숨김 목록/현재 숨김 상태 조회 Controller는 없다. 내부 Service의 일괄 조회는 HTTP API가 아니므로 UI에서 사용하지 않는다. `unhideOpportunity` 함수는 제공하지만 대상을 추측하는 숨김 해제 UI는 만들지 않는다.

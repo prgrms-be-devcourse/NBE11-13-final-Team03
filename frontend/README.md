@@ -90,6 +90,8 @@ await apiClient.get('/users/me', { requiresAuth: true })
 
 검색·상세·홈에서 저장·해제, 개인화 추천에서 숨김, `/saved`에서 저장 목록을 제공한다.
 
+로그인 사용자의 추천 카드 노출, 상세 진입, 공식 외부 링크 클릭을 진입 출처와 함께 행동 이벤트로 기록한다. 기준과 한계는 [행동 이벤트 문서](docs/behavior-events.md)를 참고한다.
+
 통합 검색에서 인증 사용자용 신청 가능성 복수 선택 필터를 제공한다.
 
 `/notifications`에서 알림 목록·읽음·클릭 처리, 헤더에서 미읽음 수, `/settings/notifications`에서 인앱 알림 설정을 제공한다. 계약과 검증 범위는 [알림 문서](docs/notifications.md)를 참고한다.

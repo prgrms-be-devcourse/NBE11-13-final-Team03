@@ -35,7 +35,7 @@ function SavedList({ user }: { user: AuthUser }) {
         <OpportunityTypeBadge type={item.type} />
         <PreferenceActions opportunityId={item.opportunityId} title={item.title} saved source="SAVED" disabled={result.isFetching} showSaveLabel />
       </div>
-      <h2><Link to={`/opportunities/${item.opportunityId}`}>{item.title || '제목 미확인'}</Link></h2>
+      <h2><Link to={`/opportunities/${item.opportunityId}`} state={{ behaviorSource: 'SAVED' }}>{item.title || '제목 미확인'}</Link></h2>
       {classificationLabel({ ...item, detailCategory: null }) && <p className={styles.muted}>{classificationLabel({ ...item, detailCategory: null })}</p>}
       <p className={styles.muted}>저장 시각 <time dateTime={item.savedAt}>{formatDateTime(item.savedAt)}</time></p>
     </Card></li>)}</ul>
