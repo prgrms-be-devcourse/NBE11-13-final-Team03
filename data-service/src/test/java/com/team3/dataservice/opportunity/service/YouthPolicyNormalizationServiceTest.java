@@ -17,12 +17,10 @@ import com.team3.dataservice.region.domain.entity.Region;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import com.team3.dataservice.support.ApplicationPostgresTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
-import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -34,23 +32,15 @@ import org.assertj.core.api.InstanceOfAssertFactories;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 실제 PostgreSQL에서만 실행된다. 일회용 DB를 YON_TEST_DB_URL로 지정할 것 (ddl-auto=create-drop).
+ * 실제 PostgreSQL에서만 실행된다. 클래스 전용 PostgreSQL·application_user로 실행한다 (매핑 테이블은 Hibernate create-drop).
  */
 @DataJpaTest
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@EnabledIfEnvironmentVariable(named = "YON_TEST_DB_URL", matches = ".+")
-@TestPropertySource(properties = {
-        "spring.datasource.url=${YON_TEST_DB_URL}",
-        "spring.datasource.username=${YON_TEST_DB_USERNAME:postgres}",
-        "spring.datasource.password=${YON_TEST_DB_PASSWORD:1234}",
-        "spring.jpa.hibernate.ddl-auto=create-drop"
-})
 @Import({com.team3.dataservice.opportunity.conditionset.ConditionSetIdCache.class,
         com.team3.dataservice.opportunity.service.OpportunitySourceLookup.class,YouthPolicyNormalizationService.class, AgeNormalizer.class, ApplicationPeriodNormalizer.class,
         RegionNormalizer.class, RegionDirectory.class,
         CodeConditionNormalizer.class, IncomeNormalizer.class, YouthPolicyCodeTable.class,
         OfficialSupplementer.class, AgeEvidenceExtractor.class, PeriodEvidenceExtractor.class})
-class YouthPolicyNormalizationServiceTest {
+class YouthPolicyNormalizationServiceTest extends ApplicationPostgresTest {
 
     private static final long SOURCE_ID = 1L;
     private static final LocalDateTime DAY1 = LocalDateTime.of(2026, 10, 14, 9, 0);
