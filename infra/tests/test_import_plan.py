@@ -108,6 +108,44 @@ class ImportPlanTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     guard.check(plan, "import")
 
+    def test_accepts_only_known_read_only_drift(self):
+        def drift(kind, before, after, actions=("update",), address=None):
+            return {"address": address or f"module.data.{kind}.this", "type": kind,
+                    "change": {"actions": list(actions), "before": before, "after": after}}
+        role = lambda *names: {"inline_policy": [{"name": n} for n in names]}
+        accepted = [
+            drift("aws_instance", {"public_ip": "13.124.235.106", "public_dns": "a", "ami": "x"},
+                  {"public_ip": "3.34.42.141", "public_dns": "b", "ami": "x"}),
+            drift("aws_security_group", {"ingress": [{"from_port": 8080}]}, {"ingress": [{"from_port": 8080, "x": 1}]}),
+            drift("aws_iam_role", role("YONNetworkInventoryReadTemporary", "team03-main-sqsPolicy"),
+                  role("YONTerraformImportReadTemporary", "team03-main-sqsPolicy")),
+        ]
+        plan = valid_plan()
+        plan["resource_drift"] = accepted
+        guard.check(plan, "import")
+        self.assertEqual(guard.check_drift(accepted), 3)
+
+        rejected = [
+            drift("aws_instance", {"public_ip": "1", "instance_type": "t3.small"}, {"public_ip": "2", "instance_type": "t3.large"}),
+            drift("aws_instance", {"public_ip": "1"}, None, actions=("delete",)),
+            drift("aws_iam_role", role("team03-main-sqsPolicy"), role("team03-main-sqsPolicy", "Unexpected")),
+            drift("aws_vpc", {"cidr_block": "a"}, {"cidr_block": "b"}),
+            {"address": "module.network.aws_vpc.this"},
+        ]
+        for item in rejected:
+            with self.subTest(item=item["address"]):
+                plan = valid_plan()
+                plan["resource_drift"] = [item]
+                with self.assertRaises(ValueError):
+                    guard.check(plan, "import")
+
+    def test_temporary_policy_names_match_inventory_collector(self):
+        spec_inventory = importlib.util.spec_from_file_location(
+            "inventory_for_guard", Path(__file__).parents[1] / "scripts/collect_inventory.py")
+        inventory = importlib.util.module_from_spec(spec_inventory)
+        spec_inventory.loader.exec_module(inventory)
+        self.assertEqual(guard.TEMPORARY_POLICIES, frozenset(inventory.TEMPORARY_POLICIES))
+
     def test_rejects_missing_extra_and_duplicate_targets(self):
         for field in ("changes", "values"):
             for mutation in ("missing", "extra", "duplicate"):

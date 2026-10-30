@@ -77,13 +77,45 @@ def require_cloudfront_target(targets):
         raise ValueError("Rebinding requires the reviewed CloudFront-only main HTTP snapshot")
 
 
+# Same names as collect_inventory.TEMPORARY_POLICIES (kept here so this checker stays standalone).
+TEMPORARY_POLICIES = frozenset({"YONNetworkInventoryReadTemporary", "YONNetworkImportReadTemporary",
+                                "YONTerraformImportReadTemporary"})
+# Read-only attributes that change without any configuration change:
+# - EC2 without an EIP gets a new public IP/DNS on every stop/start (servers stop 18:00, start 09:00).
+# - aws_security_group.ingress/egress mirror the separately managed rule resources, which are checked exactly.
+BENIGN_DRIFT = {"aws_instance": frozenset({"public_ip", "public_dns"}),
+                "aws_security_group": frozenset({"ingress", "egress"})}
+
+
+def check_drift(drift):
+    """Accept only known read-only drift; anything else (including deletion) stops for review."""
+    accepted = 0
+    for resource in drift:
+        address = resource.get("address")
+        change = resource.get("change") or {}
+        before, after = change.get("before"), change.get("after")
+        if change.get("actions") != ["update"] or not isinstance(before, dict) or not isinstance(after, dict):
+            raise ValueError(f"Resource drift requires review: {address}")
+        changed = {key for key in set(before) | set(after) if before.get(key) != after.get(key)}
+        kind = resource.get("type")
+        if changed and changed <= BENIGN_DRIFT.get(kind, frozenset()):
+            accepted += 1
+            continue
+        if kind == "aws_iam_role" and changed == {"inline_policy"}:
+            names = lambda value: {item.get("name") for item in value or []}
+            if names(before["inline_policy"]) ^ names(after["inline_policy"]) <= TEMPORARY_POLICIES:
+                accepted += 1
+                continue
+        raise ValueError(f"Resource drift requires review: {address} {sorted(changed)}")
+    return accepted
+
+
 def check(plan, phase, targets=None, *, rebind_main_http=False):
     if phase not in {"import", "after"}:
         raise ValueError("Unknown phase")
     if plan.get("errored") or plan.get("complete") is not True or plan.get("deferred_changes"):
         raise ValueError("Plan is errored, incomplete or deferred")
-    if plan.get("resource_drift"):
-        raise ValueError("Resource drift requires review")
+    check_drift(plan.get("resource_drift") or [])
     expected = expected_targets() if targets is None else targets
     if not expected or not isinstance(expected, dict):
         raise ValueError("Exact target manifest is required")
