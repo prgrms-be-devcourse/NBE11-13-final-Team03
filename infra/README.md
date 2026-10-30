@@ -6,6 +6,26 @@ PR #103에서 네트워크·IAM·프론트·EC2의 기존 자원 import를 한 �
 다만 기존 `backend-image.yml`은 main의 모든 push에 실행되고, 성공하면 `deploy.yml`이 backend를 배포한다.
 따라서 인프라 PR도 병합 시 기존 backend 빌드·재배포가 이어질 수 있다. 병합 시점은 운영 가동 시간과 맞춘다.
 
+## 모듈 경계와 기존 state
+
+운영 담당자가 #111에 main `e671dfe` 기준 flat import 완료(52개, 2026-10-29 14:42 KST)와 사후 무변경·외부 백업·권한 회수를 기록했다. 이후 콘솔에서 교체된 main 8080 규칙 한 건은 `--rebind-main-http`로 안전하게 재등록한다. 병합 전 실제 state 계획을 담당자가 검증·승인한 뒤 병합하고 같은 state 경로로 적용한다. [주소 전환 절차](module-migration.md)를 따른다.
+
+| 경계 | 소유 대상 |
+| --- | --- |
+| `module.network` | VPC, 서브넷, IGW, 라우팅 테이블·경로·연결 |
+| `module.main/data/db/replica` | 같은 server 모듈을 명시적으로 4번 호출. EC2·SG·규칙, main/data 역할·프로파일, main EIP |
+| `module.github_oidc` | GitHub OIDC와 프론트 배포 역할 |
+| `module.frontend` | 기존 S3 버킷·설정, CloudFront 배포·OAC·Function |
+| 루트 | provider, 모듈 배선, 공유 KeyPair, 공유 관리형 정책 본문, 동적 inline 정책·정책 연결, import·moved 선언 |
+
+실행 때 발견하는 정책 이름/ARN 키를 루트에 남겨 공개되지 않은 운영 정책별 `moved` 선언을 새로 요구하지 않는다. 이는 첨부 초안의 서버별 정책 이동보다 기존 절차의 변경을 줄이기 위한 조정이다.
+`var.adoption`과 network snapshot 입력 형식, 수집기·IAM 조회 정책, state 경로와 일괄 실행 명령은 유지한다.
+정적 주소 이동 48개는 `terraform/moved.tf`와 `inventory/address-moves.json`에서 대조한다. 56개는 CI 합성 대상 수이며 운영 총수는 별도로 결정된다.
+모든 자원의 `prevent_destroy`, EC2/KeyPair의 `ignore_changes`, CloudFront의 `retain_on_delete`를 유지한다. 기존 Docker/Compose는 이번에도 Terraform 관리 범위 밖이다.
+
+후속 순서는 **#103 통합 → 모듈화 PR과 운영 state 이동·사후 변경 0·외부 백업 → 설정 입력의 코드화 여부 팀 결정 → 접근 규칙 변경 PR**이다.
+입력을 코드화할 때는 비밀이 아닌 값만 검토하고 정책 본문·헤더·Function 소스의 공개 여부를 별도로 결정한다. 이번 PR에서 JSON 입력을 삭제하거나 8080/5432 규칙을 변경하지 않는다.
+
 ## 확인 기준
 
 - 기준 코드: main `6084e0a`, 2026-10-28 운영자가 제공한 CloudShell 내보내기.
