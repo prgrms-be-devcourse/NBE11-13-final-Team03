@@ -156,7 +156,7 @@ backend의 `UserBehaviorEventRetentionScheduler`가 매월 1일 03:00 KST에 실
 | `yon.behavior.retention.enabled` (`YON_BEHAVIOR_RETENTION_ENABLED`) | false | true일 때만 등록. `app.scheduling.enabled=false`면 꺼짐 |
 | `yon.behavior.retention.retained-months` (`YON_BEHAVIOR_RETENTION_RETAINED_MONTHS`) | 4 | 현재 월 포함 보관 월 수, 1 이상 |
 | `yon.behavior.retention.dry-run` (`YON_BEHAVIOR_RETENTION_DRY_RUN`) | true | 삭제·생성 대상만 로그로 남김 |
-| `yon.behavior.retention.lock-timeout` | 3s | 파티션 DDL 하나의 잠금 대기 한도 |
+| `yon.behavior.retention.lock-timeout` | 3s | 계획 조회(관리자 미리보기 포함)와 파티션 DDL 하나의 잠금 대기 한도 |
 
 보호 장치:
 
@@ -180,6 +180,9 @@ backend의 `UserBehaviorEventRetentionScheduler`가 매월 1일 03:00 KST에 실
 실행 순서와 실패 시 동작 (자동·수동 공통):
 
 1. advisory lock 획득 → 부모·`_old` 확인 → 파티션 목록 한 번 조회. 잠금은 생성·삭제·DEFAULT 점검이 모두 끝날 때까지 유지한다.
+   계획 조회(파티션 크기·DEFAULT 행 확인)는 `lock-timeout`과 문장 10초 제한이 걸린 읽기 트랜잭션에서 하며 끝나면 항상 롤백한다.
+   다른 연결이 파티션을 `ACCESS EXCLUSIVE`로 잡고 있으면 제한 시간 뒤 오류로 끝나고 생성·삭제를 하나도 하지 않는다
+   (advisory lock은 해제, 수동 종료 코드 3). 잠금이 풀린 뒤 다시 실행한다.
 2. 미래 월 생성: 월마다 별도 트랜잭션. 실패한 달(DEFAULT에 그 달 행이 있거나 같은 이름의 테이블이 있음)은 롤백되고 나머지 달과 삭제는 계속한다.
    미생성 달의 이벤트는 DEFAULT로 들어가므로 INSERT는 실패하지 않는다. DEFAULT 행은 5절 절차로 옮긴 뒤 다시 실행한다.
 3. 오래된 월 삭제: 파티션마다 별도 트랜잭션. 잠금 시간 초과·의존 객체 등으로 실패한 파티션은 데이터와 함께 그대로 남고 다른 파티션 삭제는 계속한다.
@@ -249,7 +252,7 @@ echo "exit=$?"
 
 ### GET `/api/admin/behavior-events/retention/preview`
 
-DB를 바꾸지 않고 잠금도 잡지 않는다. 응답 예:
+DB를 바꾸지 않고 advisory lock도 잡지 않는다. 다른 연결이 파티션을 잠그고 있으면 `lock-timeout` 뒤 500으로 끝난다(잠시 후 다시 조회). 응답 예:
 
 ```json
 {
@@ -287,6 +290,7 @@ DB를 바꾸지 않고 잠금도 잡지 않는다. 응답 예:
 | 409 `RETENTION_003` | 미리보기 이후 기준 월·대상이 바뀜 | 다시 미리보기 후 확인 |
 | 409 `RETENTION_004` | 자동·수동·다른 관리자 실행이 진행 중 | 잠시 후 다시 미리보기 |
 | 409 `RETENTION_005` | 일반 테이블·`_old`·시계 불일치로 실행 불가 | 미리보기 상태 표시 |
+| 500 | 계획 조회가 파티션 잠금 대기 한도를 넘음 등 실행 오류. 아무것도 바꾸지 않음 | 잠시 후 다시 미리보기 |
 
 권장 화면 흐름: 미리보기 표시 → 삭제 대상·보관 시작일을 보여 주는 확인 대화상자 → 실행 → 결과 표시와 미리보기 새로고침.
 감사 로그는 `action=BEHAVIOR_RETENTION_PREVIEW|EXECUTE adminUserId=… result=…`로 남는다(관리자 내부 ID만, 토큰·개인정보 없음).
@@ -298,12 +302,14 @@ DB를 바꾸지 않고 잠금도 잡지 않는다. 응답 예:
 
 `RetentionAdminApiPostgresTest`는 실제 보안 필터·메서드 보안·CSRF로 비로그인 401, USER 403, 목록에서 빠진 ADMIN의 실행 403,
 CSRF 누락·불일치 403, 실행 비활성 403, 미리보기의 무변경·무잠금과 4개월 계획, 토큰 일치 실행, 위조·월 변경·대상 변경 시 409,
-진행 중 실행과 `_old` 차단, 비정상 파티션 보호, 부분 실패 후 재실행, 감사 로그를 검증한다.
+진행 중 실행과 `_old` 차단, 비정상 파티션 보호, 부분 실패 후 재실행, 감사 로그,
+파티션·DEFAULT가 외부에서 `ACCESS EXCLUSIVE`로 잠겼을 때 미리보기·실행의 제한 시간 내 종료와 advisory lock·풀 연결 상태 정상, 해제 후 재실행을 검증한다.
 `RetentionManualDdlPostgresTest`는 7절 명령과 같은 OS 환경 변수로 기동한 dry-run·실제 실행이 Hibernate 스키마를 바꾸지 않고
 일반 기동은 기존처럼 update로 동작함을 검증한다.
 
 `UserBehaviorEventRetentionPostgresTest`는 PostgreSQL 16 폐기 DB에서 공식 전환 SQL을 적용한 뒤 4개월 보관,
 6절 경계 예시의 행 단위 삭제·보관(연도 변경·윤년 포함), 반복·dry-run, 잠금 시간 초과·의존 객체로 인한 삭제 실패와 재실행,
+계획 조회 잠금 시간 초과(실행·dry-run·계획) 후 같은 연결의 상태 정상과 재실행,
 미래 월 생성 실패 시 삭제 지속·실패 보고·DEFAULT INSERT·복구, advisory lock 충돌과 자동·수동 동시 실행,
 수동 dry-run·실제 실행과 자동 실행의 판정 일치, `_old`·DEFAULT·분리된 테이블·MINVALUE 범위·일반 테이블 보호,
 웹 서버 없는 일회성 기동, 새 월 INSERT 라우팅과 회원 탈퇴 삭제를 검증한다.

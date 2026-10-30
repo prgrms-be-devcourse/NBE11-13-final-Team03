@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  *       실패한 파티션은 그대로 두고 다음 실행에서 다시 판정한다.</li>
  *   <li>dryRun이면 판정 결과만 기록하고 DDL을 실행하지 않는다.</li>
  * </ul>
- * 판정은 {@link #plan}(읽기 전용, 잠금 없음)으로 하고, 실행은 잠금을 잡은 뒤 같은 판정을 다시 해서 수행한다.
+ * 판정은 {@link #plan}(읽기 전용, advisory lock 없음, 잠금·문장 제한 시간 적용)으로 하고, 실행은 잠금을 잡은 뒤 같은 판정을 다시 해서 수행한다.
  * 관리자 미리보기는 계획만 쓰며, 실행 요청의 계획 토큰이 잠금 아래 다시 만든 계획과 다르면 아무것도 바꾸지 않는다.
  */
 @Slf4j
@@ -50,6 +50,8 @@ public class UserBehaviorEventRetention {
     static final int FUTURE_MONTHS = 12;
     /** 여러 서버의 동시 실행을 막는 advisory lock 키 (임의 고정값) */
     static final long LOCK_KEY = 7_204_311_902_118_640_001L;
+    /** 계획 조회 한 문장의 최대 실행 시간. 잠금 대기는 lockTimeout으로 따로 제한한다 */
+    static final Duration PLAN_STATEMENT_TIMEOUT = Duration.ofSeconds(10);
 
     private static final Pattern RANGE = Pattern.compile(
             "^FOR VALUES FROM \\('(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})'\\) TO \\('(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})'\\)$");
@@ -141,26 +143,29 @@ public class UserBehaviorEventRetention {
         return result;
     }
 
-    /** 미리보기: 같은 기준일·판정으로 계획만 만든다. 잠금을 잡거나 DDL을 실행하지 않는다 */
-    public Plan preview(Clock clock, int retainedMonths) {
+    /**
+     * 미리보기: 같은 기준일·판정으로 계획만 만든다. advisory lock을 잡거나 DDL을 실행하지 않는다.
+     * 다른 연결이 파티션을 잠그고 있으면 lockTimeout 뒤 예외로 끝난다.
+     */
+    public Plan preview(Clock clock, int retainedMonths, Duration lockTimeout) {
         requirePositive(retainedMonths);
         LocalDate today = verifiedToday(clock, "preview");
         if (today == null) {
             return new Plan(Status.SKIPPED_CLOCK_MISMATCH, null, retainedMonths, null, List.of(), List.of(), List.of(), false, null);
         }
-        return plan(today, retainedMonths);
+        return plan(today, retainedMonths, lockTimeout);
     }
 
-    /** 오늘(KST 날짜) 기준 계획. 읽기 전용이며 잠금을 잡지 않는다 */
-    public Plan plan(LocalDate today, int retainedMonths) {
+    /** 오늘(KST 날짜) 기준 계획. 읽기 전용이며 advisory lock을 잡지 않는다 */
+    public Plan plan(LocalDate today, int retainedMonths, Duration lockTimeout) {
         requirePositive(retainedMonths);
-        return jdbcTemplate.execute((ConnectionCallback<Plan>) connection -> plan(connection, today, retainedMonths));
+        return jdbcTemplate.execute((ConnectionCallback<Plan>) connection -> planWithTimeout(connection, today, retainedMonths, lockTimeout));
     }
 
     /**
      * 오늘(KST 날짜) 기준으로 한 번 실행한다. retainedMonths는 현재 월을 포함해 보관하는 월 수이며
      * (예: 4면 2026-11에 8~11월 보관, 7월 이전 삭제) 1 이상이어야 한다.
-     * lockTimeout은 파티션 DDL 하나가 부모 잠금을 기다리는 최대 시간이다.
+     * lockTimeout은 계획 조회와 파티션 DDL 하나가 테이블 잠금을 기다리는 최대 시간이다.
      */
     public Result run(LocalDate today, int retainedMonths, boolean dryRun, Duration lockTimeout) {
         return run(today, retainedMonths, dryRun, lockTimeout, null);
@@ -204,7 +209,7 @@ public class UserBehaviorEventRetention {
             }
             try {
                 // 잠금을 잡은 뒤 다시 판정한다. 미리보기 이후 상태가 바뀌었어도 이 계획만 실행한다.
-                Plan plan = plan(connection, today, retainedMonths);
+                Plan plan = planWithTimeout(connection, today, retainedMonths, lockTimeout);
                 if (plan.skipped() != null) {
                     log.warn("Behavior event retention skipped: {}; nothing changed", plan.skipped());
                     return new Result(plan.skipped(), keepFrom, dryRun, created, dropped, failed, ignored);
@@ -239,6 +244,30 @@ public class UserBehaviorEventRetention {
     }
 
     // ── 판정 (읽기 전용) ──
+
+    /**
+     * 계획 조회를 잠금·문장 제한 시간이 있는 트랜잭션에서 한다. pg_total_relation_size와 DEFAULT 행 확인은 파티션 잠금을
+     * 기다리므로, 다른 연결이 ACCESS EXCLUSIVE를 잡고 있으면 lockTimeout 뒤 예외로 끝나고 아무것도 실행하지 않는다.
+     * 읽기 전용이라 항상 롤백해서 SET LOCAL과 실패한 트랜잭션 상태가 연결에 남지 않게 한다.
+     */
+    private static Plan planWithTimeout(Connection connection, LocalDate today, int retainedMonths, Duration lockTimeout)
+            throws SQLException {
+        boolean autoCommit = connection.getAutoCommit();
+        connection.setAutoCommit(false);
+        try {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("set local lock_timeout = '" + lockTimeout.toMillis() + "ms'");
+                statement.execute("set local statement_timeout = '" + PLAN_STATEMENT_TIMEOUT.toMillis() + "ms'");
+            }
+            return plan(connection, today, retainedMonths);
+        } finally {
+            try {
+                connection.rollback();
+            } finally {
+                connection.setAutoCommit(autoCommit);
+            }
+        }
+    }
 
     private static Plan plan(Connection connection, LocalDate today, int retainedMonths) throws SQLException {
         LocalDate currentMonth = today.withDayOfMonth(1);

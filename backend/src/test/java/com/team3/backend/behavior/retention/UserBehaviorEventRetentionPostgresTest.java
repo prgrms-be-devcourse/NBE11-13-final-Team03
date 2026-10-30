@@ -17,8 +17,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -33,13 +35,16 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -173,6 +178,40 @@ class UserBehaviorEventRetentionPostgresTest {
         Result rerun = retention.run(LocalDate.of(2026, 11, 1), RETAINED, false, LOCK_TIMEOUT);
         assertEquals(Status.COMPLETED, rerun.status());
         assertEquals(List.of("user_behavior_events_2026_07"), rerun.dropped());
+        assertEquals(0, count("user_behavior_events"));
+    }
+
+    @Test
+    void planningTimesOutOnLockedPartitionAndLeavesLockAndConnectionClean() throws Exception {
+        months(YearMonth.of(2026, 6), YearMonth.of(2026, 11));
+        insert(owner, LocalDateTime.of(2026, 6, 10, 0, 0));
+        List<String> before = monthPartitions();
+        try (Connection pinned = user()) {
+            // 풀에 반환된 연결을 다음 실행이 다시 쓰는 상황: 같은 연결 하나로 실패 후 상태와 재실행을 본다
+            UserBehaviorEventRetention onPinned = new UserBehaviorEventRetention(new JdbcTemplate(new SingleConnectionDataSource(pinned, true)));
+            LocalDate november = LocalDate.of(2026, 11, 1);
+            // 삭제 대상 파티션과 DEFAULT 파티션 (DEFAULT 행 확인도 같은 제한을 받는다)
+            for (String locked : List.of("user_behavior_events_2026_06", "user_behavior_events_default")) {
+                try (Connection locker = user(); var statement = locker.createStatement()) {
+                    locker.setAutoCommit(false);
+                    statement.execute("LOCK TABLE " + locked + " IN ACCESS EXCLUSIVE MODE");
+                    assertLockTimeoutWithinLimit(() -> onPinned.run(november, RETAINED, false, LOCK_TIMEOUT));
+                    assertLockTimeoutWithinLimit(() -> onPinned.run(november, RETAINED, true, LOCK_TIMEOUT));
+                    assertLockTimeoutWithinLimit(() -> onPinned.plan(november, RETAINED, LOCK_TIMEOUT));
+                    assertCleanConnection(pinned);
+                    assertAdvisoryLockFree();
+                    locker.rollback();
+                }
+            }
+            assertEquals(before, monthPartitions());                  // 생성·삭제 모두 실행하지 않았다
+            assertEquals(1, count("user_behavior_events"));
+
+            Result rerun = onPinned.run(november, RETAINED, false, LOCK_TIMEOUT);   // 외부 잠금 해제 후 같은 연결로 재실행
+            assertEquals(Status.COMPLETED, rerun.status());
+            assertEquals(List.of("user_behavior_events_2026_06", "user_behavior_events_2026_07"), rerun.dropped());
+            assertEquals(12, rerun.created().size());
+            assertCleanConnection(pinned);
+        }
         assertEquals(0, count("user_behavior_events"));
     }
 
@@ -450,6 +489,41 @@ class UserBehaviorEventRetentionPostgresTest {
     }
 
     // ── 도우미 ──
+
+    /** 별도 스레드에서 실행해 잠금을 무제한 기다리면 테스트가 멈추지 않고 실패하게 한다 */
+    private static void assertLockTimeoutWithinLimit(Callable<?> work) throws Exception {
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            long started = System.nanoTime();
+            Future<?> future = executor.submit(work);
+            ExecutionException failure = assertThrows(ExecutionException.class, () -> future.get(5, TimeUnit.SECONDS));
+            assertInstanceOf(DataAccessException.class, failure.getCause());
+            assertTrue(failure.getCause().getMessage().contains("lock timeout"), failure.getCause().getMessage());
+            assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(3)) < 0);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    /** 자동 커밋으로 돌아왔고, 트랜잭션·세션 제한 시간·advisory lock이 남지 않았다 */
+    private static void assertCleanConnection(Connection connection) throws Exception {
+        assertTrue(connection.getAutoCommit());
+        try (var statement = connection.createStatement(); var result = statement.executeQuery("""
+                SELECT current_setting('lock_timeout'), current_setting('statement_timeout'),
+                       (SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid())""")) {
+            assertTrue(result.next());
+            assertEquals("0", result.getString(1));
+            assertEquals("0", result.getString(2));
+            assertEquals(0, result.getInt(3));
+        }
+    }
+
+    private void assertAdvisoryLockFree() throws Exception {
+        try (Connection other = user(); var statement = other.createStatement();
+             var result = statement.executeQuery("SELECT pg_try_advisory_lock(" + UserBehaviorEventRetention.LOCK_KEY + ")")) {
+            assertTrue(result.next() && result.getBoolean(1));
+        }
+    }
 
     private LocalDate dbToday() {
         return db.queryForObject("SELECT (now() AT TIME ZONE 'Asia/Seoul')::date", LocalDate.class);

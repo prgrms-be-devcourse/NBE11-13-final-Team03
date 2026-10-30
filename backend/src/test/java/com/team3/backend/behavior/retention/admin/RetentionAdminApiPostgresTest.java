@@ -6,6 +6,7 @@ import com.team3.backend.behavior.retention.UserBehaviorEventRetention;
 import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
 import com.team3.backend.user.domain.repository.UserRepository;
+import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.RequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -31,11 +33,16 @@ import tools.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -205,7 +212,7 @@ class RetentionAdminApiPostgresTest {
                 .andExpect(status().isBadRequest());
 
         // 다음 달로 넘어간 뒤의 계획 토큰 = 기준 월이 바뀐 상황
-        String nextMonth = context.getBean(UserBehaviorEventRetention.class).plan(today.plusMonths(1), 4).token();
+        String nextMonth = context.getBean(UserBehaviorEventRetention.class).plan(today.plusMonths(1), 4, Duration.ofMillis(300)).token();
         mvc.perform(post(EXECUTE).with(admin()).with(csrf()).contentType("application/json").content(body(nextMonth)))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("RETENTION_003"));
 
@@ -237,6 +244,51 @@ class RetentionAdminApiPostgresTest {
         mvc.perform(post(EXECUTE).with(admin()).with(csrf()).contentType("application/json").content(body(token)))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("RETENTION_005"));
         assertEquals(monthRange(-6, 0), monthPartitions());
+    }
+
+    @Test
+    void lockedPartitionTimesOutPreviewAndExecuteWithoutLeakingLocksOrPoolState() throws Exception {
+        String token = previewToken(admin());
+        for (String locked : List.of(monthName(-6), "user_behavior_events_default")) {
+            try (Connection locker = appConnection(); var statement = locker.createStatement()) {
+                locker.setAutoCommit(false);
+                statement.execute("LOCK TABLE " + locked + " IN ACCESS EXCLUSIVE MODE");
+                assertServerErrorWithinLimit(get(PREVIEW).with(admin()));
+                assertServerErrorWithinLimit(post(EXECUTE).with(admin()).with(csrf()).contentType("application/json").content(body(token)));
+                locker.rollback();
+            }
+        }
+        assertEquals(monthRange(-6, 0), monthPartitions());
+        try (Connection other = appConnection(); var statement = other.createStatement();
+             var result = statement.executeQuery("SELECT pg_try_advisory_lock(" + lockKey() + ")")) {
+            assertTrue(result.next() && result.getBoolean(1));        // 실패한 실행이 advisory lock을 남기지 않았다
+        }
+        // 풀의 모든 연결: 자동 커밋, 세션 제한 시간 기본값, 트랜잭션·advisory lock 없음
+        HikariDataSource pool = context.getBean(DataSource.class).unwrap(HikariDataSource.class);
+        List<Connection> borrowed = new ArrayList<>();
+        try {
+            for (int i = 0; i < pool.getHikariPoolMXBean().getTotalConnections(); i++) {
+                borrowed.add(pool.getConnection());
+            }
+            for (Connection connection : borrowed) {
+                assertTrue(connection.getAutoCommit());
+                try (var statement = connection.createStatement(); var result = statement.executeQuery("""
+                        SELECT current_setting('lock_timeout'), current_setting('statement_timeout'),
+                               (SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid())""")) {
+                    assertTrue(result.next());
+                    assertEquals(List.of("0", "0", "0"), List.of(result.getString(1), result.getString(2), result.getString(3)));
+                }
+            }
+        } finally {
+            for (Connection connection : borrowed) {
+                connection.close();
+            }
+        }
+
+        mvc.perform(post(EXECUTE).with(admin()).with(csrf()).contentType("application/json").content(body(previewToken(admin()))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.dropped.length()").value(3));
+        assertEquals(monthRange(-3, 12), monthPartitions());
     }
 
     @Test
@@ -291,6 +343,19 @@ class RetentionAdminApiPostgresTest {
     private String previewToken(RequestPostProcessor who) throws Exception {
         String content = mvc.perform(get(PREVIEW).with(who)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return json.readTree(content).get("planToken").asString();
+    }
+
+    /** 잠금을 무제한 기다리면 테스트가 멈추지 않고 실패하도록 별도 스레드에서 요청한다 (lock-timeout 300ms) */
+    private void assertServerErrorWithinLimit(RequestBuilder request) throws Exception {
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            long started = System.nanoTime();
+            Future<Integer> status = executor.submit(() -> mvc.perform(request).andReturn().getResponse().getStatus());
+            assertEquals(500, status.get(5, TimeUnit.SECONDS));
+            assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(3)) < 0);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     private static String body(String token) {

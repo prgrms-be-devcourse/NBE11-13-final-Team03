@@ -73,7 +73,7 @@ public class RetentionAdminService {
     }
 
     public PreviewResponse preview(Long adminUserId) {
-        Plan plan = retention.preview(clock, retainedMonths);
+        Plan plan = retention.preview(clock, retainedMonths, lockTimeout);
         String status = plan.skipped() == null ? "READY" : plan.skipped().name();
         log.info("action=BEHAVIOR_RETENTION_PREVIEW adminUserId={} status={} keepFrom={} toDrop={} toCreate={}",
                 adminUserId, status, plan.keepFrom(), plan.toDrop().stream().map(UserBehaviorEventRetention.DropTarget::name).toList(),
