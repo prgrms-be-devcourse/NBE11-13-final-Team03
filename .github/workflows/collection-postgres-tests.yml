@@ -67,6 +67,52 @@ jobs:
           print(f"Behavior partition tests passed: {partition.attrib['tests']}")
           counts = {key: sum(int(result.attrib.get(key, 0)) for result in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
           print(f"Backend test totals: {counts}")
+          assert counts['failures'] == counts['errors'] == 0, 'Backend tests failed'
+          by_name = {suite.attrib['name']: suite for suite in suites}
+          required = {
+              'com.team3.backend.search.controller.OpportunitySearchPostgresTest': set(),
+              'com.team3.backend.search.controller.OpportunitySearchCandidatePostgresTest': set(),
+              'com.team3.backend.search.controller.OpportunityDetailPostgresTest': {
+                  'anonymousPolicyShowsCurrentDetailsAllWindowsAndRegions',
+                  'trainingKeepsUnknownApplicationStatusAndMissingDetailIsSafe',
+                  'unknownRegionIsNotShownAsNational',
+                  'verifiedAgeIncomeAndUnreviewedTextConditionsStayDistinct',
+                  'trainingRegionValidationUsesOnlyMatchingCurrentSnapshot',
+                  'uncertainIncomeTextIsNotCoercedToANumber',
+                  'latestEligibilityAndSavedBelongOnlyToCurrentUser',
+                  'freshAndExpiredEligibilityAreDistinguishedWithoutRecalculation',
+                  'eligibilityForOldProfileOrOtherConditionSetIsHidden',
+                  'missingAndUnnormalizedOpportunitiesReturnNotFound',
+              },
+              'com.team3.backend.recommendation.service.RecommendationCandidateServicePostgresTest': set(),
+              'com.team3.backend.recommendation.service.RecommendationSelectionEquivalencePostgresTest': {
+                  'topPerGroupSelectionMatchesFullScanReferenceOnRandomFixtures',
+              },
+              'com.team3.backend.recommendation.controller.RecommendationPostgresIntegrationTest': set(),
+          }
+          for name, methods in required.items():
+              suite = by_name.get(name)
+              assert suite is not None and int(suite.attrib['tests']) > 0, f'Required DB tests absent: {name}'
+              for key in ('failures', 'errors', 'skipped'):
+                  assert int(suite.attrib.get(key, 0)) == 0, f'{name}: {key} is not zero'
+              executed = {case.attrib['name'].split('(')[0] for case in suite.findall('testcase')}
+              assert methods <= executed, f'Moved/pilot scenarios absent: {name}: {methods - executed}'
+              print(f"Required DB tests passed: {name}: {suite.attrib['tests']}")
+          # Only explicit dump/benchmark opt-ins may skip; mandatory DB tests must actually execute.
+          manual = {
+              'com.team3.backend.eligibility.benchmark.EligibilityBenchmarkTest',
+              'com.team3.backend.eligibility.benchmark.EligibilityBottleneckBenchmarkTest',
+              'com.team3.backend.search.benchmark.OpportunityDetailBenchmarkTest',
+              'com.team3.backend.search.OpportunitySearchCandidateEquivalenceTest',
+              'com.team3.backend.search.service.SearchRelevanceEquivalenceTest',
+              'com.team3.backend.recommendation.benchmark.RecoBenchSchemaPlanTest',
+              'com.team3.backend.recommendation.benchmark.RecommendationBenchmarkTest',
+              'com.team3.backend.recommendation.benchmark.RecommendationDumpReferenceTest',
+          }
+          unexpected = [suite.attrib['name'] + '.' + case.attrib['name'] for suite in suites
+                        for case in suite.findall('testcase')
+                        if case.find('skipped') is not None and suite.attrib['name'] not in manual]
+          assert not unexpected, f'Unexpected backend skips: {unexpected}'
           PY
       - name: Upload test reports
         if: always()
