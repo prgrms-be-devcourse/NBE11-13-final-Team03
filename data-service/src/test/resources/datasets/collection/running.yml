@@ -1,0 +1,25 @@
+# Epoch milliseconds preserve the instant across JVM/session time zones.
+application.external_source:
+  - id: 100
+    source_code: EMPLOYMENT24
+    source_name: employment
+    base_url: https://example.test
+    enabled: true
+    created_at: 1793026200000
+application.sync_history:
+  - id: 100
+    source_id: 100
+    sync_type: SCHEDULED
+    status: RUNNING
+    collected_count: 0
+    changed_count: 0
+    failed_count: 0
+    new_count: 0
+    updated_count: 0
+    unchanged_count: 0
+    page_failures: '[]'
+    employment24_page_failures: '[]'
+    incomplete_ncs_codes: '[]'
+    record_failures: '[]'
+    started_at: 1793026200000
+application.collection_outbox_events: []

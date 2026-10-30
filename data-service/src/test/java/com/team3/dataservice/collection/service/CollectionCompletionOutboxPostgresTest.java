@@ -7,6 +7,11 @@ import com.team3.dataservice.collection.domain.repository.ExternalSourceReposito
 import com.team3.dataservice.collection.domain.repository.SyncHistoryRepository;
 import com.team3.dataservice.outbox.domain.entity.CollectionOutboxStatus;
 import com.team3.dataservice.outbox.domain.repository.CollectionOutboxEventRepository;
+import com.github.database.rider.core.api.configuration.DBUnit;
+import com.github.database.rider.core.api.dataset.DataSet;
+import com.github.database.rider.core.api.dataset.ExpectedDataSet;
+import com.github.database.rider.junit5.api.DBRider;
+
 import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
 import java.time.OffsetDateTime;
@@ -78,8 +83,15 @@ class CollectionCompletionOutboxPostgresTest {
     }
 
     @Test
+    @DBRider(dataSourceBeanName = "dataSource")
+    @DBUnit(schema = "application", qualifiedTableNames = true, caseSensitiveTableNames = true,
+            cacheConnection = false, cacheTableNames = false, dataTypeFactoryClass = CollectionPostgresDataTypeFactory.class)
+    @DataSet(value = "datasets/collection/running.yml", executorId = "collection-completion-pilot", transactional = false)
+    @ExpectedDataSet("datasets/collection/completed.yml")
     void commitsScheduledCompletionAndPendingEnvelopeTogether() {
-        var history = history("EMPLOYMENT24", "SCHEDULED", START);
+        var history = histories.findById(100L).orElseThrow();
+        assertThat(history.getStartedAt().toInstant()).isEqualTo(START.toInstant());
+        assertThat(db.queryForObject("SELECT current_user", String.class)).isEqualTo("application_user");
         jobs.complete(history.getId(), true);
         assertThat(histories.findById(history.getId()).orElseThrow().getStatus()).isEqualTo(SyncJobStatus.SUCCESS);
         var event = outboxes.findAll().getFirst();
@@ -181,8 +193,13 @@ class CollectionCompletionOutboxPostgresTest {
     }
 
     @Test
+    @DBRider(dataSourceBeanName = "dataSource")
+    @DBUnit(schema = "application", qualifiedTableNames = true, caseSensitiveTableNames = true,
+            cacheConnection = false, cacheTableNames = false, dataTypeFactoryClass = CollectionPostgresDataTypeFactory.class)
+    @DataSet(value = "datasets/collection/running.yml", executorId = "collection-completion-pilot", transactional = false)
+    @ExpectedDataSet("datasets/collection/rolled-back.yml")
     void outboxStorageFailureAlsoRollsBackCompletion() {
-        var history = history("YOUTH_POLICY", "SCHEDULED", START);
+        var history = histories.findById(100L).orElseThrow();
         db.execute("ALTER TABLE collection_outbox_events ADD CONSTRAINT test_reject_outbox CHECK(sync_job_id < 0)");
         try {
             assertThatThrownBy(() -> jobs.complete(history.getId(), true)).isInstanceOf(DataIntegrityViolationException.class);

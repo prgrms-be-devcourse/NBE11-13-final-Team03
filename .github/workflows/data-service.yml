@@ -75,6 +75,13 @@ jobs:
           assert int(completion.attrib['tests']) > 0, 'Collection completion Outbox tests did not run'
           for key in ('skipped', 'failures', 'errors'):
               assert int(completion.attrib[key]) == 0, f'Collection completion Outbox tests: {key}={completion.attrib[key]}'
+          pilot = {
+              'commitsScheduledCompletionAndPendingEnvelopeTogether()',
+              'outboxStorageFailureAlsoRollsBackCompletion()',
+          }
+          executed = {case.attrib['name'] for case in completion.findall('testcase')
+                      if not any(case.find(tag) is not None for tag in ('skipped', 'failure', 'error'))}
+          assert pilot <= executed, f'DB Rider pilot did not pass: {pilot - executed}'
           print(f"Collection completion PostgreSQL tests passed: {completion.attrib['tests']}")
           partition = ET.parse(results / 'TEST-com.team3.dataservice.collection.service.RawPartitionPostgresTest.xml').getroot()
           assert int(partition.attrib['tests']) > 0, 'Raw partition migration tests did not run'
