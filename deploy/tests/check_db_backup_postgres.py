@@ -157,6 +157,8 @@ def main():
             manifest = json.loads((source / 'manifest.json').read_text())
             assert manifest['replication_before']['in_recovery'] is True
             assert manifest['replication_before']['wal_receiver_status'] == 'streaming'
+            assert manifest['replication_before']['last_msg_age_seconds'] < 60
+            assert manifest['replication_before']['replay_paused'] is False
             for name, details in manifest['files'].items():
                 assert hashlib.sha256((source/name).read_bytes()).hexdigest() == details['sha256']
             run('docker', 'run', '-d', '--name', restored, '--network', 'none',
@@ -170,6 +172,21 @@ def main():
             assert sql(restored, 'SELECT count(*) FROM notification.notifications') == '1'
             assert sql(restored, "SELECT tableowner FROM pg_tables WHERE schemaname='application' AND tablename='raw_external_record'") == 'application_user'
             assert sql(restored, "SELECT has_table_privilege('notification_user','application.raw_external_record','SELECT')") == 't'
+            # No new commits: a short test-only legacy limit must not classify idle streaming as stale.
+            filename.write_text(config + '\nmax_replay_age_seconds=0.01\n')
+            time.sleep(1)
+            idle = backup('daily')
+            idle_manifest = json.loads((local_set(idle)/'manifest.json').read_text())
+            assert idle_manifest['replication_before']['replay_age_seconds'] > 0.01
+            assert idle_manifest['freshness_problems'] == []
+            assert backup('monitor')['problems'] == []
+            filename.write_text(config)
+            # Receiving keepalives does not make an explicitly paused replay healthy.
+            sql(replica, 'SELECT pg_wal_replay_pause()')
+            wait(lambda: require(sql(replica, 'SELECT pg_is_wal_replay_paused()'), 't'))
+            assert 'WAL' in backup('monitor', expected=1)
+            sql(replica, 'SELECT pg_wal_replay_resume()')
+            assert backup('monitor')['problems'] == []
             # Loss of upstream must preserve a completed dump, but monitoring must fail.
             run('docker', 'stop', primary)
             wait(lambda: require(sql(replica, "SELECT COALESCE((SELECT status FROM pg_stat_wal_receiver),'')"), ''))
@@ -188,6 +205,8 @@ def main():
             assert 'primary' in backup('daily', expected=1)
             print(json.dumps({'postgresql': sql(replica, 'SHOW server_version'),
                 'standby_dump_restore': '100 raw / 100 behavior / 1 notification; partitions, owners and grants preserved',
+                'idle_streaming': 'passed without new commits; legacy replay-age limit ignored',
+                'paused_replay': 'monitor failed, passed after resume',
                 'disconnected_dump': 'completed; monitor failed', 'reconnected_monitor': 'passed',
                 'primary_and_promoted_replica': 'refused', 'storage': 'local only'}, indent=2))
         except Exception:

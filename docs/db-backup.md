@@ -47,7 +47,7 @@ DB 1.2GB를 세트 크기로 가정하면 11세트는 약 13.2GB지만 실제 �
 ## 백업 흐름
 
 1. 호스트 flock으로 중복 실행을 막는다. 중복이면 SKIP 로그와 종료 코드 1, 기존 작업은 유지한다.
-2. standby 여부, 마지막 트랜잭션 재생 시각, WAL receiver 상태를 조회한다.
+2. standby 여부, WAL receiver 상태·메시지 수신 시각, 재생 중지 여부·LSN을 조회한다.
 3. **백업 경로 또는 DB 데이터 디스크가 80% 이상이면 덤프 전 실패 처리**한다. 기존 세트도 삭제하지 않는다.
 4. 같은 파일시스템의 .incomplete-* 폴더에 pg_dump -Fc와 globals.sql을 만든다.
 5. 복제 충돌(`conflict with recovery`)로 취소된 경우 5초 뒤 전체 덤프를 **1회만 재시도**한다. 다른 실패는 재시도하지 않는다.
@@ -68,19 +68,34 @@ manifest에는 덤프 전후의 다음 정보가 남는다.
 
 - in_recovery, checked_at
 - pg_last_xact_replay_timestamp()의 replay_timestamp와 그 경과 초(replay_age_seconds)
-- pg_stat_wal_receiver의 wal_receiver_status
+- pg_stat_wal_receiver의 wal_receiver_status, last_msg_receipt_time과 경과 초(last_msg_age_seconds)
+- receive_lsn, replay_lsn, replay_lag_bytes, replay_paused
 - freshness_problems, dump_attempts, 파일 크기·SHA256, DB·서버 버전·배포 참조
 
-**streaming이 끊겼거나 재생 시각이 없거나 오래됐어도 덤프는 보관한다.** 다만 manifest에 문제를 남기고 monitor는 종료 코드 1로 실패한다.
-기본 재생 시각 허용 시간은 600초이며 backup.ini에서 조정한다.
-마지막 재생 시각은 primary의 마지막 commit/abort 시각이므로, 변경이 없는 정상 DB도 시간이 오래될 수 있다.
-요청한 정책대로 오래된 시각은 실패로 분류하며, 이 값이 실제 복제 지연과 같다고 해석하지 않는다. 제공된 지연 0.2ms와도 다른 지표다.
+**streaming이 끊겼거나 WAL 메시지 수신이 오래됐거나 재생이 중지돼도 덤프는 보관한다.** 다만 manifest에 문제를 남기고 monitor는 종료 코드 1로 실패한다.
+정상 기준은 streaming, 메시지 수신 경과가 `max_wal_message_age_seconds`(기본 60초) 미만, 재생 중지 아님이다. 수신 시각이 없거나 경과가 음수여도 실패한다.
+마지막 트랜잭션 재생 시각은 진단용으로만 기록한다. 쓰기가 없는 시간에는 오래되거나 없을 수 있으므로 실패 조건으로 쓰지 않는다.
+LSN 차이는 수신 완료 WAL 대비 미재생 바이트이며 0이면 해당 WAL은 재생 완료다. 순간적인 비동기 재생 차이로 오탐하지 않도록 0보다 크다는 이유만으로 실패시키지 않는다. 이 점검은 primary의 현재 WAL과의 완전한 일치나 지연 시간 상한을 보장하지 않는다.
 각 시각은 덤프 전후의 관측값이며 pg_dump 스냅샷과 정확히 같은 시점임을 보장하지 않는다.
 
 monitor는 현재 복제 상태 외에도 최근 daily/weekly manifest의 freshness_problems를 확인한다.
 연결이 돌아와도 마지막 보관 세트가 오래된 상태에서 만들어졌다면 실패를 유지한다. 최신 상태의 daily/weekly를 새로 만들어야 해소된다.
 daily 30시간·weekly 8일 초과, 세트 파일 누락/크기 이상, 디스크 80% 이상도 실패다.
 monitor는 매 5분마다 큰 덤프 전체 해시를 다시 읽지 않는다. SHA256 전체 검증은 생성·weekly 복사·복원 전에 한다.
+
+### 기존 600초 재생 시각 기준에서 전환
+
+`backup.py`를 교체하고 기존 `backup.ini`의 `max_replay_age_seconds=600`을 `max_wal_message_age_seconds=60`으로 바꾼다. 새 항목이 없어도 기본 60초를 적용하며, 옛 항목은 사용하지 않는다.
+기존 manifest의 `freshness_problems`는 당시 기록이므로 수정하거나 지우지 않는다. 기존 daily 또는 weekly에 오탐이 기록됐다면 복제 정상 상태에서 아래처럼 **두 종류 모두 새 기준 세트**를 생성한 뒤 monitor를 확인한다. weekly 수동 실행은 전환 때 한 번 수행한다.
+
+```bash
+sudo systemctl start yon-db-backup@daily.service
+sudo systemctl start yon-db-backup@weekly.service
+sudo systemctl start yon-db-backup@monitor.service
+sudo journalctl -u yon-db-backup@monitor.service -n 30 --no-pager
+```
+
+스크립트·설정만 교체하면 systemd daemon-reload는 필요 없다. 현재 연결이 복구돼도 과거 덤프 시점의 문제를 정상으로 덮어쓰지 않는다.
 
 ## 설치 — 복제본 EC2에서 AWS 담당자
 
