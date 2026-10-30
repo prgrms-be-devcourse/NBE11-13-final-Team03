@@ -1,6 +1,8 @@
 package com.team3.backend.user.service;
 
 import com.team3.backend.auth.domain.repository.RefreshTokenRepository;
+import com.team3.backend.auth.unlink.KakaoIdentityGuard;
+import com.team3.backend.auth.unlink.KakaoUnlinkJobs;
 import com.team3.backend.eligibility.domain.repository.EligibilityProfileRepository;
 import com.team3.backend.eligibility.domain.repository.EligibilityResultRepository;
 import com.team3.backend.global.exception.BusinessException;
@@ -29,6 +31,8 @@ public class UserService {
     private final EligibilityProfileRepository eligibilityProfileRepository;
     private final OutboxEventRepository outboxRepository;
     private final Clock clock;
+    private final KakaoIdentityGuard kakaoIdentityGuard;
+    private final KakaoUnlinkJobs kakaoUnlinkJobs;
 
 
     @Operation(
@@ -63,9 +67,14 @@ public class UserService {
 
     @Transactional
     public void withdraw(Long userId) {
-        // Serialize with preference writes and fan-out; cancellation must see every committed user Outbox.
-        userRepository.findByIdForUpdate(userId)
+        // Discover the identity first, then lock identity -> User -> job consistently with login.
+        var identity = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+        if (identity.getKakaoId() != null) kakaoIdentityGuard.lock(identity.getKakaoId());
+        var user = userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+
+        if (user.getKakaoId() != null) kakaoUnlinkJobs.enqueue(user.getKakaoId());
 
         outboxRepository.cancelPendingNotifications(userId);
         outboxRepository.saveAndFlush(OutboxEvent.userWithdrawn(userId, clock.instant()));
