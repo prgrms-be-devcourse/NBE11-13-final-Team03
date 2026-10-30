@@ -2,6 +2,7 @@ package com.team3.backend.behavior.benchmark;
 
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.user.domain.entity.Role;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,6 +60,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * </ul>
  * 측정 전에는 env/sql/reset.sql로 기준 시각 이후의 이벤트와 S1·H1 대상 preference를 지워야 한다.
  */
+@Tag("manual")
 @ActiveProfiles("test")
 @SpringBootTest(properties = {
         "spring.datasource.url=${YON_BEHAVIOR_BENCH_DB_URL}",
