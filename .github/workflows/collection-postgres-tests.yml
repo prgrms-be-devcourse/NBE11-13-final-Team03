@@ -65,4 +65,5 @@ jobs:
           path: |
             backend/build/reports/tests/test
             backend/build/test-results/test
+            backend/build/reports/jacoco
             backend/build/test-summary

@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'jacoco'
     id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
 }
@@ -41,6 +42,7 @@ dependencies {
 }
 
 tasks.named('test') {
+    finalizedBy tasks.named('jacocoTestReport')
     def group = providers.gradleProperty('testGroup').orElse('all').get()
     useJUnitPlatform {
         if (group == 'postgres') { includeTags 'postgres'; excludeTags 'manual' }
@@ -66,4 +68,14 @@ tasks.named('processTestResources') {
 
 tasks.named('bootJar') {
     archiveFileName = 'notification-service.jar'
+}
+
+jacoco { toolVersion = '0.8.14' } // Java 25 support
+
+tasks.named('jacocoTestReport') {
+    dependsOn tasks.named('test')
+    reports {
+        html.required = true
+        xml.required = true
+    }
 }

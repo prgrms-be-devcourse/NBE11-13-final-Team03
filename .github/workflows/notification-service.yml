@@ -62,6 +62,7 @@ jobs:
           path: |
             notification-service/build/reports/tests/test
             notification-service/build/test-results/test
+            notification-service/build/reports/jacoco
             notification-service/build/test-summary
 
   publish:

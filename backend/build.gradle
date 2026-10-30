@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'jacoco'
     id 'com.google.protobuf' version '0.9.6'
     id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
@@ -80,6 +81,7 @@ dependencyManagement {
 }
 
 tasks.named('test') {
+    finalizedBy tasks.named('jacocoTestReport')
     def group = providers.gradleProperty('testGroup').orElse('all').get()
     useJUnitPlatform {
         if (group == 'postgres') { includeTags 'postgres'; excludeTags 'manual' }
@@ -129,10 +131,34 @@ tasks.named('processReplicaTestResources') {
     from('../database/scripts/database-boundaries.sql') { into 'replica' }
 }
 tasks.register('replicaTest', Test) {
+    finalizedBy tasks.named('jacocoReplicaTestReport')
     description = 'Actual PostgreSQL streaming replication and application routing'
     group = 'verification'
     testClassesDirs = sourceSets.replicaTest.output.classesDirs
     classpath = sourceSets.replicaTest.runtimeClasspath
     useJUnitPlatform()
     maxHeapSize = '1g'
+}
+
+jacoco { toolVersion = '0.8.14' } // Java 25 support
+
+tasks.named('jacocoTestReport') {
+    dependsOn tasks.named('test')
+}
+
+tasks.register('jacocoReplicaTestReport', JacocoReport) {
+    dependsOn tasks.named('replicaTest')
+    executionData tasks.named('replicaTest').get()
+}
+
+tasks.withType(JacocoReport).configureEach {
+    sourceSets sourceSets.main
+    reports {
+        html.required = true
+        xml.required = true
+    }
+    // Generated gRPC/protobuf classes are not application code.
+    classDirectories.setFrom(sourceSets.main.output.asFileTree.matching {
+        exclude 'com/team3/contracts/**'
+    })
 }
