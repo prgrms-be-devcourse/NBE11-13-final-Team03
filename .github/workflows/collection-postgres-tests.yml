@@ -69,6 +69,7 @@ jobs:
           optional = {
               'com.team3.backend.eligibility.benchmark.EligibilityBenchmarkTest',
               'com.team3.backend.eligibility.benchmark.EligibilityBottleneckBenchmarkTest',
+              'com.team3.backend.search.benchmark.OpportunityDetailBenchmarkTest',
               'com.team3.backend.search.OpportunitySearchCandidateEquivalenceTest',
               'com.team3.backend.search.service.SearchRelevanceEquivalenceTest',
           }
