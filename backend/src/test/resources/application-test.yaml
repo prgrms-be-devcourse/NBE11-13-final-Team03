@@ -46,6 +46,8 @@ internal:
 
 
 app:
+  kakao-unlink:
+    enabled: false
   admin-kakao-ids: ""
   auth-cookie:
     secure: false
