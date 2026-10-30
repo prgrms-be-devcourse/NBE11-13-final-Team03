@@ -5,8 +5,10 @@ import com.team3.notification.service.NotificationTestPushService;
 import com.team3.notification.service.NotificationUserApiException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import com.team3.notification.config.NotificationSecurityConfig;
+import com.team3.notification.api.NotificationTestPushController;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
@@ -17,12 +19,12 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = {"NOTIFICATION_TEST_PUSH_ENABLED=true", "NOTIFICATION_TEST_PUSH_API_KEY=test-push-key",
+@WebMvcTest(controllers = NotificationTestPushController.class, properties = {"NOTIFICATION_TEST_PUSH_ENABLED=true", "NOTIFICATION_TEST_PUSH_API_KEY=test-push-key",
         "NOTIFICATION_TEST_PUSH_ALLOWED_USER_IDS=1", "NOTIFICATION_USER_API_ENABLED=true",
         "NOTIFICATION_RECEIVER_ENABLED=true", "NOTIFICATION_INTERNAL_API_KEY=normal-internal-key",
         "app.scheduling.enabled=false"})
 @ActiveProfiles("test")
-@AutoConfigureMockMvc
+@Import({NotificationSecurityConfig.class})
 class NotificationTestPushApiTest {
     private static final String PATH = NotificationTestPushController.PATH;
     private static final String BODY = "{\"userId\":1,\"notificationId\":7,\"endpointId\":32}";

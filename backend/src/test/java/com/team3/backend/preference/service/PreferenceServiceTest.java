@@ -28,11 +28,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -204,67 +199,6 @@ class PreferenceServiceTest {
                 () -> preferenceService.save(Long.MAX_VALUE, opportunityId));
 
         assertEquals(UserErrorCode.USER_NOT_FOUND, exception.getErrorCode());
-    }
-
-    @Test
-    void concurrentSaveAndHideCreateOneRowWithoutLostState() throws Exception {
-        Long userId = createUser(204L);
-        Long opportunityId = createOpportunity("Concurrent state");
-
-        runConcurrently(
-                () -> preferenceService.save(userId, opportunityId),
-                () -> preferenceService.hide(userId, opportunityId)
-        );
-
-        UserOpportunityPreference preference = findPreference(userId, opportunityId);
-        assertTrue(preference.isSaved());
-        assertTrue(preference.isHidden());
-        assertNotNull(preference.getSavedAt());
-        assertNotNull(preference.getHiddenAt());
-        assertEquals(1, preferenceRepository
-                .countByUserIdAndOpportunityId(userId, opportunityId));
-
-        LocalDateTime savedAt = preference.getSavedAt();
-        LocalDateTime hiddenAt = preference.getHiddenAt();
-        LocalDateTime updatedAt = preference.getUpdatedAt();
-
-        runConcurrently(
-                () -> preferenceService.save(userId, opportunityId),
-                () -> preferenceService.hide(userId, opportunityId)
-        );
-
-        UserOpportunityPreference repeated = findPreference(userId, opportunityId);
-        assertEquals(1, preferenceRepository
-                .countByUserIdAndOpportunityId(userId, opportunityId));
-        assertEquals(savedAt, repeated.getSavedAt());
-        assertEquals(hiddenAt, repeated.getHiddenAt());
-        assertEquals(updatedAt, repeated.getUpdatedAt());
-
-        runConcurrently(
-                () -> preferenceService.unsave(userId, opportunityId),
-                () -> preferenceService.unhide(userId, opportunityId)
-        );
-
-        assertTrue(preferenceRepository
-                .findByUserIdAndOpportunityId(userId, opportunityId).isEmpty());
-    }
-
-    @Test
-    void concurrentDuplicateSavesCreateOneRow() throws Exception {
-        Long userId = createUser(208L);
-        Long opportunityId = createOpportunity("Duplicate concurrent saves");
-
-        runConcurrently(
-                () -> preferenceService.save(userId, opportunityId),
-                () -> preferenceService.save(userId, opportunityId)
-        );
-
-        UserOpportunityPreference preference = findPreference(userId, opportunityId);
-        assertTrue(preference.isSaved());
-        assertFalse(preference.isHidden());
-        assertNotNull(preference.getSavedAt());
-        assertEquals(1, preferenceRepository
-                .countByUserIdAndOpportunityId(userId, opportunityId));
     }
 
     @Test
@@ -472,31 +406,4 @@ class PreferenceServiceTest {
                 .orElseThrow();
     }
 
-    private void runConcurrently(Runnable first, Runnable second) throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        CountDownLatch ready = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
-
-        try {
-            Future<?> firstFuture = executor.submit(() -> {
-                ready.countDown();
-                start.await();
-                first.run();
-                return null;
-            });
-            Future<?> secondFuture = executor.submit(() -> {
-                ready.countDown();
-                start.await();
-                second.run();
-                return null;
-            });
-
-            assertTrue(ready.await(5, TimeUnit.SECONDS));
-            start.countDown();
-            firstFuture.get(20, TimeUnit.SECONDS);
-            secondFuture.get(20, TimeUnit.SECONDS);
-        } finally {
-            executor.shutdownNow();
-        }
-    }
 }

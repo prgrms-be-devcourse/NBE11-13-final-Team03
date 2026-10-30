@@ -4,11 +4,14 @@ import com.team3.notification.config.NotificationReceiverProperties;
 import com.team3.notification.domain.entity.ReceptionStatus;
 import com.team3.notification.fixture.NotificationMessages;
 import com.team3.notification.message.NotificationRequestedMessage;
+import com.team3.notification.message.NotificationMessageDecoder;
 import com.team3.notification.service.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import com.team3.notification.config.NotificationSecurityConfig;
+import com.team3.notification.api.NotificationMessageController;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.MediaType;
@@ -24,9 +27,9 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = {"NOTIFICATION_RECEIVER_ENABLED=true", "NOTIFICATION_INTERNAL_API_KEY=test-notification-key"})
+@WebMvcTest(controllers = NotificationMessageController.class, properties = {"NOTIFICATION_RECEIVER_ENABLED=true", "NOTIFICATION_INTERNAL_API_KEY=test-notification-key"})
 @ActiveProfiles("test")
-@AutoConfigureMockMvc
+@Import({NotificationSecurityConfig.class, NotificationMessageDecoder.class})
 class NotificationMessageApiTest {
     private static final String PATH = "/internal/notification-messages";
     @Autowired MockMvc mvc;

@@ -1,6 +1,5 @@
 package com.team3.backend.interest.domain.repository;
 
-import com.team3.backend.BackendApplication;
 import com.team3.backend.interest.dto.InterestOptionRow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
@@ -9,12 +8,12 @@ import com.team3.backend.opportunity.domain.entity.PersonalizationStatus;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -27,8 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Testcontainers
 @ActiveProfiles("test")
-@SpringBootTest(classes = BackendApplication.class)
-@Transactional
+@DataJpaTest(showSql = false)
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class InterestOptionRepositoryTest {
 
@@ -77,18 +76,6 @@ class InterestOptionRepositoryTest {
     void 동일한_분류조합은_한번만_조회한다() {
         createOpportunity("정책 A", "일자리", "취업지원", null, true);
         createOpportunity("정책 B", "일자리", "취업지원", null, true);
-
-        List<InterestOptionRow> result = findCategories();
-
-        assertEquals(
-                List.of(new InterestOptionRow("일자리", "취업지원", null)),
-                result
-        );
-    }
-
-    @Test
-    void 세분류가_null이어도_분류행을_조회한다() {
-        createOpportunity("청년정책", "일자리", "취업지원", null, true);
 
         List<InterestOptionRow> result = findCategories();
 

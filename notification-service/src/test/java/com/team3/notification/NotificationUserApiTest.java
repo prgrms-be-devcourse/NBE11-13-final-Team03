@@ -6,8 +6,10 @@ import com.team3.notification.service.NotificationUserApiException;
 import com.team3.notification.service.NotificationUserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import com.team3.notification.config.NotificationSecurityConfig;
+import com.team3.notification.api.NotificationUserController;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -18,10 +20,10 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = {"NOTIFICATION_USER_API_ENABLED=true", "NOTIFICATION_RECEIVER_ENABLED=false",
+@WebMvcTest(controllers = NotificationUserController.class, properties = {"NOTIFICATION_USER_API_ENABLED=true", "NOTIFICATION_RECEIVER_ENABLED=false",
         "NOTIFICATION_INTERNAL_API_KEY=test-user-api-key"})
 @ActiveProfiles("test")
-@AutoConfigureMockMvc
+@Import({NotificationSecurityConfig.class})
 class NotificationUserApiTest {
     @Autowired MockMvc mvc;
     @MockitoBean NotificationUserService service;
