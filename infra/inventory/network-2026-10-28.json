@@ -87,11 +87,12 @@
       "to_port": 22
     },
     "main_http": {
-      "cidr_ipv4": "0.0.0.0/0",
+      "description": "CloudFront origin-facing only (2026-10-29)",
       "from_port": 8080,
       "group": "main",
-      "id": "sgr-05f5a7aabab29ed7d",
+      "id": "sgr-01e8cd7a85445657c",
       "ip_protocol": "tcp",
+      "prefix_list_id": "pl-22a6434b",
       "tags": {},
       "to_port": 8080
     },
@@ -141,6 +142,15 @@
     }
   },
   "region": "ap-northeast-2",
+  "reviewed_amendments": [
+    {
+      "date": "2026-10-29",
+      "note": "Operator-reported console change; source above remains the original 2026-10-28 inventory hash, not a newly collected snapshot hash.",
+      "path": "ingress_rules.main_http",
+      "previous_rule_id": "sgr-05f5a7aabab29ed7d",
+      "source": "https://github.com/prgrms-be-devcourse/NBE11-13-final-Team03/pull/108#issuecomment-6490279918"
+    }
+  ],
   "security_groups": {
     "data": {
       "description": "data",

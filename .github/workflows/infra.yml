@@ -2,7 +2,7 @@ name: Infrastructure validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, chore/terraform-network-import]
     paths: ['infra/**', '.github/workflows/infra.yml', 'deploy/README.md']
   push:
     branches: [main]
@@ -59,3 +59,5 @@ jobs:
                   assert resource['change']['importing']['id'] == targets[resource['address']]['import_id'], resource['address']
           print(f'PASS: {len(targets)} mock imports, zero create/update/delete actions')
           PY
+      - name: Verify existing-state module migration without AWS
+        run: python3 infra/tests/verify_module_migration.py "$RUNNER_TEMP/terraform-tests.jsonl"
