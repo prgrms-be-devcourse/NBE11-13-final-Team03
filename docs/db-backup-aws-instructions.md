@@ -9,7 +9,7 @@
 | 확인 | 기준 |
 | --- | --- |
 | 대상 | 실제 replica EC2, pg_is_in_recovery()=true |
-| 복제 | receiver=streaming, 마지막 재생 시각·경과 시간 확인 |
+| 복제 | receiver=streaming, WAL 메시지 수신 경과 60초 미만, 재생 중지 아님 |
 | 용량 | 제공값 DB 1.2GB / 디스크 29GB 중 22GB 여유, 적용 때 다시 측정 |
 | 서버 가동 | 기동·정지 시각, 09:30 수집의 실제 종료, 일요일 가동 여부 |
 | 백업 시각 | **11:00 KST 임시**. 실제 가동·수집 종료 확인 후 확정 |
@@ -50,8 +50,8 @@ sudo journalctl -u yon-db-backup@daily.service -u yon-db-backup@monitor.service 
 ```
 
 초기 weekly는 기준 세트를 만드는 수동 실행이다. 이후 예약은 일요일에만 weekly를 추가한다.
-완료 세트 안의 database.dump·globals.sql·manifest.json과 재생 시각을 확인한다.
-복제가 끊겼거나 오래됐어도 백업은 만들어지지만 monitor는 실패한다. 접속·지연 원인을 확인한 뒤 최신 세트를 다시 만든다.
+완료 세트 안의 database.dump·globals.sql·manifest.json과 WAL 메시지 수신 시각·재생 중지 여부를 확인한다.
+수신이 끊겼거나 오래됐거나 재생이 중지됐어도 백업은 만들어지지만 monitor는 실패한다. 원인을 해결한 뒤 최신 세트를 다시 만든다.
 
 ## 4. 복원 시험과 정기 실행
 
@@ -74,7 +74,8 @@ Persistent=false라 꺼진 시간의 예약을 부팅 즉시 보충하지 않는
 - 복제 충돌 취소만 5초 뒤 1회 재시도한다. 두 번째 실패나 다른 오류는 로그·종료 코드로 확인한다.
 - 완료 manifest와 필수 파일이 정상인 오래된 세트만 개수에 따라 삭제한다. 강제 종료로 남은 불완전 폴더는 담당자가 실행 중 여부·경로를 확인한 뒤 정리한다.
 - 일요일은 daily를 한 번 덤프한 후 weekly 파일 복사본을 추가한다. 복사 실패 시 daily는 유지되지만 작업은 실패한다.
-- 복제 최신성 기본 한도는 600초다. 마지막 재생 시각은 실제 복제 지연과 같지 않아, DB가 조용한 시간에도 오래될 수 있다.
+- 복제 상태는 streaming·최근 WAL 메시지 수신 60초 미만·재생 중지 아님으로 판정한다. `max_wal_message_age_seconds=60`으로 설정하며 옛 `max_replay_age_seconds`는 사용하지 않는다. 마지막 트랜잭션 재생 시각은 진단용으로만 기록하므로 쓰기가 없는 시간에도 정상 판정한다. LSN 차이는 진단용이며 순간적인 차이는 실패시키지 않는다.
+- 기존 기준에서 전환할 때는 [전환 절차](db-backup.md#기존-600초-재생-시각-기준에서-전환)에 따라 스크립트·설정을 교체하고 daily·weekly를 각각 새로 만든 뒤 monitor를 확인한다. 과거 manifest의 실패 기록은 수정하지 않는다.
 - 외부 알림은 없다. 매 가동일 journal·monitor.json·남은 공간을 직접 확인한다. 서버가 꺼지면 monitor도 멈춘다.
 - primary로 승격된 서버에서는 백업이 거부된다. 새 standby가 준비되면 설치 대상을 옮긴다.
 

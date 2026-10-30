@@ -14,6 +14,6 @@ release_reference=REPLACE_WITH_DEPLOYED_RELEASE
 [monitor]
 max_backup_age_hours=30
 max_weekly_age_days=8
-# Age of the last replayed transaction, not a direct replication-lag measurement.
-max_replay_age_seconds=600
+# Require a recent WAL message even when no transactions are written (strictly less than this age).
+max_wal_message_age_seconds=60
 max_disk_used_percent=80

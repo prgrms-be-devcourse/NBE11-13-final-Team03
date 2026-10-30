@@ -29,7 +29,9 @@ class BackupTest(unittest.TestCase):
         self.backup = MODULE.Backup(self.filename)
         self.status = {'in_recovery': True, 'checked_at': '2026-10-27T11:00:00+09:00',
                        'replay_timestamp': '2026-10-27T10:59:59+09:00', 'replay_age_seconds': 1,
-                       'wal_receiver_status': 'streaming'}
+                       'wal_receiver_status': 'streaming', 'last_msg_receipt_time': '2026-10-27T11:00:00+09:00',
+                       'last_msg_age_seconds': 1, 'receive_lsn': '0/3000000', 'replay_lsn': '0/3000000',
+                       'replay_lag_bytes': 0, 'replay_paused': False}
         self.commands = []
         self.dump_calls = 0
         self.dump_failures = 0
@@ -185,16 +187,45 @@ class BackupTest(unittest.TestCase):
         self.assertEqual(1, self.backup.monitor())
         self.assertTrue(any('streaming' in p for p in self.backup.read_state('monitor')['problems']))
 
-    def test_old_replay_timestamp_is_recorded_and_monitor_fails(self):
-        self.status['replay_age_seconds'] = 601
+    def test_idle_replica_with_old_replay_timestamp_is_healthy(self):
+        self.status['replay_age_seconds'] = 86400
         self.backup.execute('daily', include_weekly=True)
-        self.assertEqual(601, self.latest()[1]['replication_before']['replay_age_seconds'])
-        self.assertEqual(1, self.backup.monitor())
+        self.assertEqual(86400, self.latest()[1]['replication_before']['replay_age_seconds'])
+        self.assertEqual([], self.latest()[1]['freshness_problems'])
+        self.assertEqual(0, self.backup.monitor())
 
     def test_missing_replay_timestamp_still_allows_dump(self):
         self.status.update(replay_timestamp=None, replay_age_seconds=None)
-        self.assertEqual(0, self.backup.execute('daily'))
+        self.assertEqual(0, self.backup.execute('daily', include_weekly=True))
         self.assertIsNone(self.latest()[1]['replication_before']['replay_timestamp'])
+        self.assertEqual(0, self.backup.monitor())
+
+    def test_wal_message_age_boundary_missing_and_invalid_values(self):
+        for age, healthy in ((59.9, True), (60, False), (61, False), (None, False), (-1, False)):
+            with self.subTest(age=age):
+                self.status['last_msg_age_seconds'] = age
+                self.assertEqual(not healthy, bool(self.backup.freshness_problems(self.status)))
+
+    def test_old_configuration_uses_default_message_age_without_replay_age_check(self):
+        self.backup.config['monitor'].pop('max_wal_message_age_seconds')
+        self.backup.config['monitor']['max_replay_age_seconds'] = '600'
+        self.status['replay_age_seconds'] = 86400
+        self.assertEqual([], self.backup.freshness_problems(self.status))
+        self.status['last_msg_age_seconds'] = 60
+        self.assertTrue(self.backup.freshness_problems(self.status))
+
+    def test_paused_replay_fails_even_with_recent_messages(self):
+        self.status['replay_paused'] = True
+        self.backup.execute('daily', include_weekly=True)
+        self.assertEqual(1, self.backup.monitor())
+
+    def test_stale_dump_stays_unhealthy_until_replaced(self):
+        self.status['last_msg_age_seconds'] = 60
+        self.backup.execute('daily', include_weekly=True)
+        self.status['last_msg_age_seconds'] = 1
+        self.assertEqual(1, self.backup.monitor())
+        self.backup.execute('daily', include_weekly=True)
+        self.assertEqual(0, self.backup.monitor())
 
     def test_old_snapshot_remains_unhealthy_after_receiver_recovers(self):
         self.status['wal_receiver_status'] = None
