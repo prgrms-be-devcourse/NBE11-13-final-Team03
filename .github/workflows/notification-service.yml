@@ -52,6 +52,31 @@ jobs:
               assert int(suite.attrib[key]) == 0, f'Administrator tests: {key}={suite.attrib[key]}'
           print(f"Administrator SQS/PostgreSQL/Slack tests passed: {suite.attrib['tests']}")
           suites = [ET.parse(p).getroot() for p in report.parent.glob('TEST-*.xml')]
+          required = (
+              'service.NotificationReceptionPostgresTest',
+              'service.NotificationDeliveryPostgresTest',
+              'service.NotificationSlotPostgresTest',
+              'sqs.NotificationSqsPostgresTest',
+          )
+          for name in required:
+              result = ET.parse(report.parent / f'TEST-com.team3.notification.{name}.xml').getroot()
+              assert int(result.attrib['tests']) > 0, f'Required PostgreSQL tests missing: {name}'
+              for key in ('failures', 'errors', 'skipped'):
+                  assert int(result.attrib[key]) == 0, f'{name}: {key}={result.attrib[key]}'
+          pilots = {
+              'service.NotificationDeliveryPostgresTest': {
+                  'receiveCreatesPerEndpointDeliveriesOnceWithNotificationAndReceipt()',
+                  'deliveryInsertFailureRollsBackNotificationAndConsumption()',
+              },
+              'admin.AdminNotificationSqsPostgresTest': {'replayWithTheSameMessageIdDoesNotSendSlackTwice()'},
+          }
+          for name, methods in pilots.items():
+              result = ET.parse(report.parent / f'TEST-com.team3.notification.{name}.xml').getroot()
+              passed = {case.attrib['name'] for case in result.findall('testcase')
+                        if not any(case.find(tag) is not None for tag in ('skipped', 'failure', 'error'))}
+              assert methods <= passed, f'DB Rider tests did not pass: {methods - passed}'
+          for result in suites:
+              assert int(result.attrib.get('skipped', 0)) == 0, f"Unexpected skipped tests: {result.attrib['name']}"
           print('Notification test totals:', {key: sum(int(s.attrib.get(key, 0)) for s in suites) for key in ('tests', 'failures', 'errors', 'skipped')})
           PY
       - name: Upload executable JAR
