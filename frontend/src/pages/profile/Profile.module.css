@@ -74,7 +74,27 @@
 .interestIntro { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
 .page .counter { color: var(--color-text-secondary); font-size: var(--font-size-small); }
 .counter strong { color: var(--color-primary); font-size: 1rem; }
-.interestList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5) var(--space-4); }
+/* 대분류 한 줄 목록. 줄 모양은 맞춤 조건의 '추가 정보'(.extra > summary)와 같은 위아래 구분선·여백을 쓴다. */
+.interestList { display: grid; border-block-start: 1px solid var(--color-border); }
+.page .interestGroup { border-block-end: 1px solid var(--color-border); }
+.page .interestGroup > summary { display: flex; align-items: center; gap: var(--space-3); min-height: 2.75rem; padding: var(--space-3) 0; border: 0; border-radius: 0; background: none; font-weight: 400; list-style: none; }
+.page .interestGroup > summary::-webkit-details-marker { display: none; }
+.page .interestGroup > summary > svg { flex-shrink: 0; color: var(--color-text-secondary); transition: transform 0.15s ease; }
+.page .interestGroup[open] > summary > svg { transform: rotate(180deg); }
+.page .interestGroup > summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.groupTitle { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); min-width: 0; }
+/* 대분류 이름은 600 한 단계만 쓴다(strong 700과 summary 600이 겹치지 않게). 선택지 수는 보조 텍스트다. */
+.groupTitle strong { font-size: 1rem; font-weight: 600; }
+.page .interestGroup > .groupBody { display: grid; gap: var(--space-3); padding: 0 0 var(--space-4); }
+/* 세부 분야 접기 줄은 폭에 맞춰 여러 열로 두어 NCS 분류가 많아도 세로로 길게 늘어지지 않게 한다. */
+.detailGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 0 var(--space-3); align-items: start; }
+/* 선택 요약: 칩과 같은 둥근 모양, 선택 상태 색. 해제 버튼은 터치 영역을 확보한다. */
+.selectedList { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.selectedList li { display: inline-flex; align-items: center; gap: var(--space-1); max-inline-size: 100%; padding-inline-start: var(--space-3); border: 1px solid var(--color-primary); border-radius: 999px; background: var(--color-primary-soft); color: var(--color-primary-dark); font-size: var(--font-size-small); font-weight: 600; overflow-wrap: anywhere; }
+.selectedList button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; inline-size: 2.25rem; block-size: 2.25rem; padding: 0; border: 0; border-radius: 999px; background: none; color: inherit; cursor: pointer; }
+.selectedList button:hover:enabled { background: var(--color-surface); }
+.selectedList button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.selectedList button:disabled { cursor: not-allowed; opacity: 0.5; }
 .page .interestSection { display: grid; gap: var(--space-2); align-content: start; min-width: 0; margin: 0; padding: 0; border: 0; }
 .page .interestSection > legend { padding: 0; margin-block-end: var(--space-2); font-size: 1rem; font-weight: 700; }
 .chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -90,7 +110,7 @@
 .page .detailGroup[open] > summary > svg { transform: rotate(180deg); }
 .page .detailGroup > summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .page .detailGroup > div { display: flex; flex-wrap: wrap; gap: var(--space-2); padding-top: var(--space-1); }
-@media (prefers-reduced-motion: reduce) { .page .detailGroup > summary > svg { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .page .detailGroup > summary > svg, .page .interestGroup > summary > svg { transition: none; } }
 .page .state { color: var(--color-text-primary); font-weight: 600; }
 .page .note { color: var(--color-text-secondary); font-size: 0.8125rem; line-height: var(--line-height-small); }
 .withdrawArea { display: grid; justify-items: start; gap: var(--space-2); flex: 1 1 100%; padding-block-start: var(--space-3); border-block-start: 1px solid var(--color-border); }
@@ -100,7 +120,7 @@
 .page .withdrawTitle { color: var(--color-error); font-weight: 700; }
 .withdrawButton { border-color: var(--color-error); color: var(--color-error); }
 @media (max-width: 767px) {
-  .manageGrid, .interestList { grid-template-columns: minmax(0, 1fr); }
+  .manageGrid { grid-template-columns: minmax(0, 1fr); }
   .summary, .manageCard, .accountPanel { padding: var(--space-3); }
   .grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
   .panel { padding: var(--space-4); gap: var(--space-3); }

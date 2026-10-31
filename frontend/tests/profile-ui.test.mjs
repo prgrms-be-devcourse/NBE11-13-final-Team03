@@ -108,7 +108,7 @@ test('mypage summarizes the account at the top, manages settings in cards and ke
   assert.match(css, /\.manageCard\[data-tone='interests'\] \{ box-shadow: inset 0 3px 0 var\(--color-accent-orange-text\); \}/)
   assert.match(css, /\.manageCard\[data-tone='profile'\] \.cardIcon \{ background: var\(--color-accent-purple\); color: var\(--color-accent-purple-text\); \}/)
   assert.match(css, /\.manageCard\[data-tone='interests'\] \.cta \{ color: var\(--color-accent-orange-text\); \}/)
-  assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*?\.manageGrid, \.interestList \{ grid-template-columns: minmax\(0, 1fr\); \}/)
+  assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*?\.manageGrid \{ grid-template-columns: minmax\(0, 1fr\); \}/)
   assert.doesNotMatch(css, /gradient|backdrop-filter/)
   assert.match(css, /\.page \.note \{[^}]*color: var\(--color-text-secondary\);[^}]*font-size: 0\.8125rem/)
   assert.match(css, /\.withdrawLink \{[^}]*color: var\(--color-error\);[^}]*font-size: var\(--font-size-small\)/)
@@ -178,25 +178,34 @@ test('interests render parent and child relationships with preserved existing NC
   assert.match(html, /현재 선택지에 없는 기존 관심 분야/)
   assert.match(html, /checked=""/)
   assert.match(html, /20010101 \(NCS\) · 기존 값 유지/)
-  assert.match(html, /<fieldset class="interestSection"><legend>일자리<\/legend><div class="chips"><label class="chip"><input type="checkbox"[^>]*\/>일자리 대분류<\/label><label class="chip"><input type="checkbox"[^>]*\/>취업지원<\/label>/)
-  assert.match(html, /<details class="detailGroup"><summary><svg[^>]*aria-hidden="true"[\s\S]*?<\/svg>정보기술 세부 분야 1개<\/summary><div class="chips" role="group" aria-label="정보기술 세부 분야"><label class="chip"><input type="checkbox"[^>]*\/>정보기술개발<\/label>/)
+  // 대분류를 먼저 한 줄씩 보여 주고 펼치면 API 계층 그대로 대분류·중분류 칩이 나온다. 처음에는 모두 접혀 있고 한 번에 하나만 펼친다.
+  assert.match(html, /<details name="interest-category" class="interestGroup"><summary><span class="groupTitle"><strong>일자리<\/strong><span class="note">선택지 2개<\/span><\/span><svg[\s\S]*?<\/summary><div class="groupBody"><div class="chips" role="group" aria-label="일자리 분류"><label class="chip"><input type="checkbox"[^>]*\/>일자리 대분류<\/label><label class="chip"><input type="checkbox"[^>]*\/>취업지원<\/label><\/div><\/div><\/details>/)
+  assert.doesNotMatch(html, /<details[^>]*open/)
+  assert.match(html, /<div class="detailGrid"><details class="detailGroup"><summary><svg[^>]*aria-hidden="true"[\s\S]*?<\/svg>정보기술 세부 분야 1개<\/summary><div class="chips" role="group" aria-label="정보기술 세부 분야"><label class="chip"><input type="checkbox"[^>]*\/>정보기술개발<\/label>/)
+  // 이전 값도 요약에서 바로 해제할 수 있다.
+  assert.match(html, /<ul class="selectedList" aria-label="선택한 관심 분야"><li><span>20010101 \(기존 값\)<\/span><button type="button" aria-label="20010101 \(기존 값\) 선택 해제">/)
   assert.doesNotMatch(html, /일자리 세부 분야|대분류 전체|전체 선택/)
   assert.match(html, /선택한 관심 분야 <strong>1<\/strong> \/ 30/)
   assert.match(html, /class="actions formActions"><button type="submit"[^>]*>관심 분야 저장/)
   assert.doesNotMatch(html, /type="text"/)
   const education = render({ path: '/mypage/interests', interests: [{ type: 'CATEGORY', code: '교육' }], optionData: { categories: [...options.categories, { category: '교육', subCategories: [] }] } })
-  assert.match(education, /<legend>교육<\/legend><div class="chips"><label class="chip"><input type="checkbox" checked=""[^>]*\/>교육 대분류<\/label>/)
-  // 직업훈련 대분류는 표시 이름만 바꾸고, 추천에 쓰이지 않으므로 새로 선택할 칩을 두지 않는다.
-  assert.match(education, /<legend>직업훈련<\/legend><div class="chips"><label class="chip"><input type="checkbox"[^>]*\/>정보기술<\/label>/)
+  assert.match(education, /<strong>교육<\/strong><span class="note">선택지 1개<\/span><\/span><span class="status" data-state="done">1개 선택<\/span>[\s\S]*?<div class="chips" role="group" aria-label="교육 분류"><label class="chip"><input type="checkbox" checked=""[^>]*\/>교육 대분류<\/label>/)
+  assert.match(education, /<li><span>교육 대분류<\/span><button type="button" aria-label="교육 대분류 선택 해제">/)
+  // 직업훈련 대분류는 표시 이름만 바꾸고, 추천에 쓰이지 않으므로 새로 선택할 칩을 두지 않는다. 숨긴 대분류는 선택지 수에서도 뺀다.
+  assert.match(education, /<strong>직업훈련<\/strong><span class="note">선택지 2개<\/span>[\s\S]*?aria-label="직업훈련 분류"><label class="chip"><input type="checkbox"[^>]*\/>정보기술<\/label>/)
   assert.doesNotMatch(education, /교육 \(정책\)|교육･직업훈련|직업훈련 대분류|현재 선택지에 없는 기존 관심 분야/)
   const savedTrainingCategory = render({ path: '/mypage/interests', interests: [{ type: 'CATEGORY', code: '교육･직업훈련' }] })
   assert.match(savedTrainingCategory, /<input type="checkbox" checked=""[^>]*\/>직업훈련 대분류<\/label>/)
   assert.doesNotMatch(savedTrainingCategory, /현재 선택지에 없는 기존 관심 분야/)
   const picked = render({ path: '/mypage/interests', interests: [{ type: 'DETAIL_CATEGORY', code: '정보기술개발' }] })
   assert.match(picked, /정보기술 세부 분야 1개 · 1개 선택/)
+  // 접힌 대분류 줄에서도 실제 선택 개수(세부 분야 포함)를 보여 준다.
+  assert.match(picked, /<strong>직업훈련<\/strong><span class="note">선택지 2개<\/span><\/span><span class="status" data-state="done">1개 선택<\/span>/)
+  assert.doesNotMatch(picked, /<strong>일자리<\/strong><span class="note">선택지 2개<\/span><\/span><span class="status"/)
   const css = fs.readFileSync(new URL('../src/pages/profile/Profile.module.css', import.meta.url), 'utf8')
-  assert.match(css, /\.interestList \{[^}]*repeat\(2, minmax\(0, 1fr\)\)/)
-  assert.match(css, /\.manageGrid, \.interestList \{ grid-template-columns: minmax\(0, 1fr\); \}/)
+  // 불균형한 2열 대신 한 줄 목록이며, 세부 분야 접기 줄만 폭에 맞춰 여러 열로 둔다.
+  assert.doesNotMatch(css, /\.interestList \{[^}]*grid-template-columns/)
+  assert.match(css, /\.detailGrid \{[^}]*repeat\(auto-fill, minmax\(16rem, 1fr\)\)/)
 })
 test('interest option loading, failure and empty success remain distinct and never fall back to free text', () => {
   assert.match(render({ path: '/mypage/interests', optionData: null }), /관심 분야 선택지를 불러오고/)
@@ -279,7 +288,19 @@ test('profile form already accepts supplied region data while unchanged edits an
   assert.doesNotMatch(blocked, /설정을 완료했어요|기존 조건으로 다음 단계/)
   const interests = renderComponent(InterestsForm, { user, initial: [], onBack: () => {} })
   assert.match(interests, /이전 단계로 돌아가기/)
-  assert.doesNotMatch(interests, /disabled=""[^>]*>관심 분야 저장/)
+  // 지역 없이도 관심 분야는 고를 수 있다. 저장은 실제 변경이 생긴 뒤에만 켜진다.
+  assert.doesNotMatch(interests, /<input type="checkbox"[^>]*disabled=""/)
+  assert.match(interests, /disabled=""[^>]*>관심 분야 저장/)
+})
+test('interest save is enabled only when the selection differs from the last saved set', () => {
+  const unchanged = renderComponent(InterestsForm, { user, initial: [{ type: 'SUB_CATEGORY', code: '취업지원' }] })
+  assert.match(unchanged, /<button type="submit"[^>]*disabled=""[^>]*>관심 분야 저장/)
+  // 변경이 없으면 전체 해제 안내도 보이지 않는다.
+  assert.doesNotMatch(renderComponent(InterestsForm, { user, initial: [] }), /저장하면 관심 분야가 모두 해제돼요/)
+  const source = fs.readFileSync(new URL('../src/pages/profile/InterestsForm.tsx', import.meta.url), 'utf8')
+  // 저장 성공 시 서버 응답으로 비교 기준을 갱신하고, 변경 없는 제출은 막는다.
+  assert.match(source, /setSelected\(result\); setBaseline\(result\)/)
+  assert.match(source, /disabled=\{!options\.isSuccess \|\| mutation\.isPending \|\| !changed\}/)
 })
 test('profile routes consume the shared region query and restore three-level residence plus non-leaf school codes', () => {
   const regionData = [...regionRows, { code: '4111000000', name: '수원시', parentCode: '4100000000', leaf: false }, { code: '4111100000', name: '장안구', parentCode: '4111000000', leaf: true }]
