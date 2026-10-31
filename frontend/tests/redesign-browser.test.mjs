@@ -16,7 +16,7 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 const browser = [process.env.CHROME_PATH, 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(value => value && fs.existsSync(value))
 const paths = ['/', '/opportunities', '/opportunities/42', '/login', '/mypage', '/mypage/profile', '/onboarding', '/notifications', '/settings/notifications', '/saved', '/privacy', '/terms']
 
-test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu Escape/return focus and header search with test-only responses', { skip: !browser && 'Chrome/Edge 미설치: 실제 레이아웃 검증 미실행' }, async () => {
+test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu Escape/return focus and header search with test-only responses', { skip: !browser && 'Chrome/Edge 미설치: 실제 레이아웃 검증 미실행' }, async t => {
   const cache = path.join(root, 'node_modules/.cache')
   fs.mkdirSync(cache, { recursive: true })
   const temporary = fs.mkdtempSync(path.join(cache, 'redesign-browser-'))
@@ -132,11 +132,34 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
         return
       }
       if (url.pathname === '/__test__/redesign') {
-        const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><style>body{margin:0}iframe{display:block;border:0}</style><pre id="result"></pre><script>const results=[],queue=[];let busy=false;const next=()=>{if(busy||!queue.length)return;busy=true;queue.shift().postMessage({startRedesign:true},location.origin)};addEventListener('message',e=>{if(e.origin!==location.origin)return;if(e.data?.readyRedesign){queue.push(e.source);next()}if(e.data?.redesign){results.push(e.data);busy=false;next();if(results.length===${cases.length})document.querySelector('#result').textContent=JSON.stringify(results)}});</script>${cases.map(c => `<iframe width="${c.width}" height="1100" src="/__test__/redesign-page?route=${encodeURIComponent(c.route)}&anonymous=${c.anonymous ? '1' : '0'}&state=${c.state || ''}"></iframe>`).join('')}</html>`
+        const frames = cases.map(c => ({ name: `${c.route}@${c.width}${c.anonymous ? ' anonymous' : ''}${c.state ? ' ' + c.state : ''}`, width: c.width, src: `/__test__/redesign-page?route=${encodeURIComponent(c.route)}&anonymous=${c.anonymous ? '1' : '0'}&state=${c.state || ''}` }))
+        // 42개 화면을 한꺼번에 띄우면 같은 렌더러에서 수백 개 모듈을 동시에 요청해 느린 환경에서 일부 화면의 모듈 로드가 실패한다.
+        // 동시에 띄우는 화면을 제한하고 결과가 온 만큼 다음 화면을 띄운다. 상호작용은 기존처럼 한 화면씩 허용한다.
+        // #progress에는 결과가 모자랄 때 어디서 멈췄는지 보이도록 준비·완료 시각(가상 시간 ms), 현재·대기·미준비·미시작 화면을 남긴다.
+        const script = `
+          const frames=${JSON.stringify(frames)},limit=4,results=[],queue=[],log=[],seen=new Set(),t0=performance.now();
+          let busy=false,current=null,opened=0,active=0;
+          const ms=()=>Math.round(performance.now()-t0);
+          const frameOf=source=>[...document.querySelectorAll('iframe')].find(f=>f.contentWindow===source);
+          const label=source=>frameOf(source)?.dataset.case||'unknown';
+          const report=()=>{document.querySelector('#progress').textContent=JSON.stringify({elapsedMs:ms(),done:results.length,total:frames.length,current:current&&label(current),waiting:queue.map(label),
+            notReady:[...document.querySelectorAll('iframe')].filter(f=>!seen.has(f.dataset.case)).map(f=>{const d=f.contentDocument;return {case:f.dataset.case,readyState:d?.readyState,h1:d?.querySelector('main h1')?.textContent}}),
+            notStarted:frames.length-opened,log})};
+          const open=()=>{while(active<limit&&opened<frames.length){const c=frames[opened++],f=document.createElement('iframe');f.dataset.case=c.name;f.width=c.width;f.height=1100;f.src=c.src;document.body.append(f);active++}};
+          const next=()=>{if(busy||!queue.length)return;busy=true;current=queue.shift();current.postMessage({startRedesign:true},location.origin)};
+          const finish=(source,result)=>{seen.add(label(source));log.push((result.ok?'done ':'fail ')+label(source)+' '+ms()+(result.ok?'':' '+result.error));results.push(result);active--;
+            if(source===current){busy=false;current=null}next();open();if(results.length===frames.length)document.querySelector('#result').textContent=JSON.stringify(results)};
+          addEventListener('message',e=>{if(e.origin!==location.origin)return;
+            if(e.data?.redesignLoadError)finish(e.source,{redesign:true,route:label(e.source),ok:false,error:'page load failed: '+e.data.redesignLoadError});
+            if(e.data?.readyRedesign){seen.add(label(e.source));log.push('ready '+label(e.source)+' '+ms());queue.push(e.source);next()}
+            if(e.data?.redesign)finish(e.source,e.data);
+            report()});
+          setInterval(report,250);open();`
+        const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><style>body{margin:0}iframe{display:block;border:0}</style><pre id="result"></pre><pre id="progress"></pre><script>${script}</script></html>`
         response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end(html); return
       }
       if (url.pathname !== '/__test__/redesign-page') return next()
-      void server.transformIndexHtml(url.pathname, '<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div><script type="module" src="/__test__/redesign-entry.tsx"></script></body></html>').then(html => { response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end(html) }).catch(next)
+      void server.transformIndexHtml(url.pathname, '<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div><script>addEventListener("error",e=>{if(e.target instanceof HTMLScriptElement)parent.postMessage({redesignLoadError:e.target.src+" "+JSON.stringify(performance.getEntriesByType("resource").filter(r=>!(r.responseStatus>=200&&r.responseStatus<400)).map(r=>r.name.replace(location.origin,"")+" "+r.responseStatus))},location.origin)},true)</script><script type="module" src="/__test__/redesign-entry.tsx"></script></body></html>').then(html => { response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end(html) }).catch(next)
     }) },
   }], server: { host: '127.0.0.1', port: 0 } })
   try {
@@ -145,7 +168,9 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
     await fetch(`${base}/__test__/redesign-entry.tsx`)
     const { stdout } = await promisify(execFile)(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=25000', '--dump-dom', `${base}/__test__/redesign`], { windowsHide: true, timeout: 60_000, maxBuffer: 5_000_000 })
     const match = stdout.match(/<pre id="result">([^<]+)<\/pre>/)
-    assert.ok(match, '모든 화면의 브라우저 결과가 필요하다.')
+    const progress = stdout.match(/<pre id="progress">([^<]*)<\/pre>/)?.[1].replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&') || '(진행 기록 없음)'
+    t.diagnostic(`redesign progress: ${progress}`)
+    assert.ok(match, `모든 화면의 브라우저 결과가 필요하다. 진행 상태: ${progress}`)
     const results = JSON.parse(match[1])
     assert.equal(results.length, cases.length)
     assert.deepEqual(results.filter(result => !result.ok), [])
