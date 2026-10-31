@@ -8,6 +8,7 @@ import HomeOpportunityCard from './HomeOpportunityCard'
 import RecommendationsSection from './RecommendationsSection'
 import { homeErrorMessage, homeLatestQuery } from './homeQueries'
 import styles from './HomePage.module.css'
+import yonArch from '../../assets/illustrations/yon-arch.svg'
 
 function HomePage() {
   const auth = useAuth()
@@ -28,15 +29,7 @@ function HomePage() {
           : <Link className={styles.secondaryLink} to="/onboarding">맞춤 조건 설정하기</Link>)}
       </div>
       </div>
-      <svg className={styles.heroArt} viewBox="0 0 480 360" fill="none" aria-hidden="true" focusable="false">
-        <circle cx="255" cy="174" r="150" className={styles.artDisc} />
-        <path d="M60 307C145 210 233 302 450 241V360H0Z" className={styles.artHill} />
-        <path d="M230 290V130a60 60 0 0 1 120 0v125" stroke="currentColor" strokeWidth="36" />
-        <path d="M233 360c-99-84 155-52 62-119" className={styles.artPath} strokeWidth="48" />
-        <path d="M389 280V176m0 60c-35-4-47-23-43-44 25 0 44 16 43 44Zm0-27c33-7 42-26 34-47-25 4-38 23-34 47Z" className={styles.artPlant} strokeWidth="3" />
-        <circle cx="112" cy="128" r="9" className={styles.artHill} />
-        <path d="M157 62v18m-9-9h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      </svg>
+      <img className={styles.heroArt} src={yonArch} alt="" width={376} height={272} />
     </section>
     <nav className={styles.shortcuts} aria-label="기회 탐색 바로가기">
       <Link to="/opportunities?type=YOUTH_POLICY"><span className={styles.shortcutIcon}><Sprout size={24} aria-hidden="true" /></span><span><strong>청년정책</strong><small>생활에 필요한 지원 찾기</small></span><ArrowRight size={16} aria-hidden="true" /></Link>

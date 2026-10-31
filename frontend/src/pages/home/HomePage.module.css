@@ -18,11 +18,7 @@
 .primaryLink { background: var(--color-primary); color: var(--color-surface); }
 .secondaryLink { border: 1px solid var(--color-border); background: var(--color-surface); }
 .primaryLink:hover, .secondaryLink:hover, .textLink:hover { text-decoration: underline; }
-.heroArt { display: none; color: var(--color-primary); opacity: 1; }
-.artDisc { fill: var(--color-surface); }
-.artHill { fill: var(--color-accent-green); }
-.artPath { stroke: var(--color-surface); }
-.artPlant { fill: var(--color-primary-dark); stroke: var(--color-primary-dark); }
+.heroArt { display: none; }
 .shortcuts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin-block-start: var(--space-4); }
 /* 바로가기: 칸은 흰색, 각 색은 테두리(연한 색과 진한 색을 섞은 중간 톤)와 아이콘 칸에만 쓴다. */
 .shortcuts > a { --tile-soft: var(--color-primary-soft); --tile-strong: var(--color-primary-dark); display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--tile-strong) 25%, var(--tile-soft)); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text-primary); text-decoration: none; box-shadow: var(--shadow-card); }
@@ -73,13 +69,14 @@
   .shortcuts > a > svg { grid-column: 2; grid-row: 1; }
 }
 @media (min-width: 768px) {
-  .hero { padding: var(--space-5); }
+  .hero { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); align-items: center; gap: var(--space-4); padding: var(--space-5); }
+  .heroArt { display: block; justify-self: end; inline-size: 100%; max-inline-size: 22rem; block-size: auto; }
   .shortcuts, .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .section { padding: var(--space-5); }
 }
 @media (min-width: 1024px) {
-  .hero { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: center; }
-  .heroArt { display: block; inline-size: 100%; max-block-size: 16rem; }
+  .hero { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+  .heroArt { max-inline-size: 28rem; margin-inline-end: var(--space-6); }
   .shortcuts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .shortcuts > a { padding: var(--space-3); gap: var(--space-2); }
   .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
