@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
 import { createServer } from 'vite'
+import { chromeServiceFlags } from './chrome-flags.mjs'
 import react from '@vitejs/plugin-react'
 import ts from 'typescript'
 import { user, options } from './profile-fixtures.mjs'
@@ -144,7 +145,7 @@ test('Chrome records real recommendation impressions, detail views and external 
   try {
     await server.listen(); const address = server.httpServer.address()
     await fetch(`http://127.0.0.1:${address.port}/__test__/behavior-entry.tsx`)
-    const { stdout } = await promisify(execFile)(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=90000', '--dump-dom', `http://127.0.0.1:${address.port}/__test__/behavior`], { windowsHide: true, timeout: 120_000, maxBuffer: 5_000_000 })
+    const { stdout } = await promisify(execFile)(browser, ['--headless', ...chromeServiceFlags, '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=90000', '--dump-dom', `http://127.0.0.1:${address.port}/__test__/behavior`], { windowsHide: true, timeout: 120_000, maxBuffer: 5_000_000 })
     const result = stdout.match(/<pre id="result">([^<]+)<\/pre>/)
     assert.ok(result, '브라우저 시나리오 결과가 필요하다.')
     assert.deepEqual(JSON.parse(result[1]), { ok: true, impressions: 7, views: 4, clicks: 5 })

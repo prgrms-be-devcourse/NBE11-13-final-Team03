@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { createServer } from 'vite'
+import { chromeServiceFlags } from './chrome-flags.mjs'
 import react from '@vitejs/plugin-react'
 import ts from 'typescript'
 
@@ -45,7 +46,7 @@ test('Chrome with missing Firebase configuration disables enable and makes no pe
   try {
     await server.listen(); const port = server.httpServer.address().port
     await fetch(`http://127.0.0.1:${port}/__test__/push-entry.tsx`)
-    const { stdout } = await promisify(execFile)(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=20000', '--dump-dom', `http://127.0.0.1:${port}/__test__/push`], { windowsHide: true, timeout: 60_000, maxBuffer: 5_000_000 })
+    const { stdout } = await promisify(execFile)(browser, ['--headless', ...chromeServiceFlags, '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=20000', '--dump-dom', `http://127.0.0.1:${port}/__test__/push`], { windowsHide: true, timeout: 60_000, maxBuffer: 5_000_000 })
     const result = stdout.match(/<pre id="result">([^<]+)<\/pre>/)
     assert.ok(result, '설정 누락 화면의 실제 브라우저 결과가 필요하다.')
     assert.deepEqual(JSON.parse(result[1]), { ok: true, permissions: 0, workers: 0, requests: 0 })

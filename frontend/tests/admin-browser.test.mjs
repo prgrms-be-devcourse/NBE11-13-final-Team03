@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { createServer } from 'vite'
+import { chromeServiceFlags } from './chrome-flags.mjs'
 import react from '@vitejs/plugin-react'
 import ts from 'typescript'
 
@@ -110,7 +111,7 @@ async function run(paths) {
     await fetch(`http://127.0.0.1:${port}/__test__/admin-entry.tsx`)
     const results = []
     for (const [index, url] of paths.entries()) {
-      const { stdout } = await promisify(execFile)(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, `browser-${index}`)}`, '--virtual-time-budget=90000', '--dump-dom', `http://127.0.0.1:${port}${url}`], { windowsHide: true, timeout: 120_000, maxBuffer: 5_000_000 })
+      const { stdout } = await promisify(execFile)(browser, ['--headless', ...chromeServiceFlags, '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, `browser-${index}`)}`, '--virtual-time-budget=90000', '--dump-dom', `http://127.0.0.1:${port}${url}`], { windowsHide: true, timeout: 120_000, maxBuffer: 5_000_000 })
       const result = stdout.match(/<pre id="result">([^<]+)<\/pre>/)
       assert.ok(result, `실제 브라우저 결과가 필요하다: ${url}`)
       results.push(JSON.parse(result[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')))

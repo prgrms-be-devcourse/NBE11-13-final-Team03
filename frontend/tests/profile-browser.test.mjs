@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
 import { createServer } from 'vite'
+import { chromeServiceFlags } from './chrome-flags.mjs'
 import react from '@vitejs/plugin-react'
 import ts from 'typescript'
 import { profile, user, options, regionRows } from './profile-fixtures.mjs'
@@ -102,7 +103,7 @@ test('Chrome exercises real region selects, onboarding PUT/back/complete and pro
     const address = server.httpServer.address()
     // 병렬 프록시 테스트·개발 서버와 사전 번들 캐시를 공유하지 않는다.
     await fetch(`http://127.0.0.1:${address.port}/__test__/profile-entry.tsx`)
-    const { stdout } = await promisify(execFile)(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=15000', '--dump-dom', `http://127.0.0.1:${address.port}/__test__/profile`], { windowsHide: true, timeout: 60_000, maxBuffer: 5_000_000 })
+    const { stdout } = await promisify(execFile)(browser, ['--headless', ...chromeServiceFlags, '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=15000', '--dump-dom', `http://127.0.0.1:${address.port}/__test__/profile`], { windowsHide: true, timeout: 60_000, maxBuffer: 5_000_000 })
     const result = stdout.match(/<pre id="result">([^<]+)<\/pre>/)
     assert.ok(result, '브라우저 시나리오 결과가 필요하다.')
     assert.deepEqual(JSON.parse(result[1]), { ok: true, put: 1, patch: 1, regions: 1, threeLevels: true, sejong: true, schoolIntermediate: true, back: true, completed: true })
