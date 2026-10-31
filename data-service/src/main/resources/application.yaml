@@ -71,3 +71,6 @@ yon:
     # 기동 시 조건 묶음 백필. 메인 서비스와 동시에 켜면 묶음 생성이 경합하므로 한쪽에서만 true (README 실행 플래그 표)
     condition-set-backfill:
       enabled: ${YON_NORMALIZATION_CONDITION_SET_BACKFILL_ENABLED:true}
+    # 기동 시 청년정책 분류 행(opportunity_categories) 백필. 행 없는 버전만 채우므로 반복 실행해도 안전
+    category-backfill:
+      enabled: ${YON_NORMALIZATION_CATEGORY_BACKFILL_ENABLED:true}
