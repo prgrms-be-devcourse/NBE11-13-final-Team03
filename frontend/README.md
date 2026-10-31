@@ -1,6 +1,6 @@
 # Y:ON Frontend
 
-청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. `/`는 홈, `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세, `/login`은 카카오 로그인 진입 화면이다. 서버 사용자 조회에 기반한 인증 상태·로그아웃과 인증 후 홈 추천을 연결했다. `/mypage`에서 내 정보, `/mypage/profile`에서 맞춤 조건, `/mypage/interests`에서 관심 분야를 관리하며 `/onboarding`은 초기 설정 흐름이다.
+청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. `/`는 홈, `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세, `/login`은 카카오 로그인 진입 화면이다. 서버 사용자 조회에 기반한 인증 상태·로그아웃과 인증 후 홈 추천을 연결했다. `/mypage`에서 내 정보, `/mypage/profile`에서 맞춤 조건, `/mypage/interests`에서 관심 분야를 관리하며 `/onboarding`은 초기 설정 흐름이다. `/admin`은 `role=ADMIN` 사용자 전용 운영 화면이다([관리자 문서](docs/admin.md)).
 
 ## 기술 스택
 

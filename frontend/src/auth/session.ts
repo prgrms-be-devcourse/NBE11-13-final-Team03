@@ -10,7 +10,7 @@ export const authQueryKey = ['auth', 'user'] as const
 export const authTransitionKey = ['auth', 'transition'] as const
 export function isPersonalizedQuery(query: Query): boolean {
   const [root, part] = query.queryKey
-  return root === 'notifications' || root === 'saved-opportunities' || root === 'profile' || root === 'user-interests' || root === 'recommendations' || root === 'opportunities' || root === 'opportunity-detail' || (root === 'home' && part === 'opportunities')
+  return root === 'notifications' || root === 'saved-opportunities' || root === 'profile' || root === 'user-interests' || root === 'recommendations' || root === 'admin' || root === 'opportunities' || root === 'opportunity-detail' || (root === 'home' && part === 'opportunities')
 }
 export async function resetPersonalizedQueries(client: QueryClient): Promise<void> {
   await client.cancelQueries({ predicate: isPersonalizedQuery })
@@ -19,8 +19,9 @@ export async function resetPersonalizedQueries(client: QueryClient): Promise<voi
   client.removeQueries({ queryKey: ['user-interests'] })
   client.removeQueries({ queryKey: ['saved-opportunities'] })
   client.removeQueries({ queryKey: ['notifications'] })
+  client.removeQueries({ queryKey: ['admin'] })
   // reset은 활성 observer의 과거 데이터도 즉시 비운다. 새 쿠키의 공개 조회는 다시 실행한다.
-  void client.resetQueries({ predicate: (query) => isPersonalizedQuery(query) && !['recommendations', 'profile', 'user-interests', 'saved-opportunities', 'notifications'].includes(String(query.queryKey[0])) }).catch(() => {})
+  void client.resetQueries({ predicate: (query) => isPersonalizedQuery(query) && !['recommendations', 'profile', 'user-interests', 'saved-opportunities', 'notifications', 'admin'].includes(String(query.queryKey[0])) }).catch(() => {})
 }
 // 푸시 정리 실패는 인증 판정과 분리한다. 성공으로 기록하지 않으므로 남은 이전 소유 정보로 다음 인증 확인에서 다시 정리한다.
 // 이전 소유자에게 묶인 동안에는 PushBridge가 새 사용자의 앱 내 푸시 안내·재연결을 하지 않는다.
