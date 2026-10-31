@@ -134,6 +134,11 @@ body:has(.admin) { background-color: #eeefea; }
 .errorTitle { font-weight: 700; }
 .errorBox { display: grid; justify-items: start; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--admin-danger); border-radius: var(--radius-sm); background: var(--admin-danger-soft); color: var(--admin-danger); font-size: var(--font-size-small); }
 
+/* 실행 결과 불확실: 실패(빨강)와 구분해 경고색 위쪽 선을 쓰고, 확인 순서를 번호 목록으로 둔다. */
+.uncertain { border-block-start: 3px solid var(--admin-warn); }
+.uncertain h3 { color: var(--admin-warn); }
+.steps { display: grid; gap: var(--space-1); margin: 0; padding-inline-start: var(--space-4); font-size: var(--font-size-small); line-height: var(--line-height-small); }
+
 /* 삭제가 따르는 실행만 붉은 계열을 쓴다. */
 .dangerZone { border-block-start: 3px solid var(--admin-danger); }
 .warning { color: var(--admin-danger); font-size: var(--font-size-small); font-weight: 600; }

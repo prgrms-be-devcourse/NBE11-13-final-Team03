@@ -17,7 +17,7 @@
 
 | 화면 | API | 구분 |
 |---|---|---|
-| 수집 이력 | GET `/api/admin/collection/syncs?date=` · GET `/syncs/{jobId}` | 조회 (대기·실행 중인 상세는 5초마다 재조회) |
+| 수집 이력 | GET `/api/admin/collection/syncs?date=` · GET `/syncs/{jobId}` | 조회. 목록은 대기·실행 중인 작업이 있을 때만 10초마다 재조회, 상세는 5초. 상세가 종료를 먼저 보면 목록을 한 번 갱신한다 |
 | 수집 시작 | POST `/api/admin/collection/syncs/{YOUTH_POLICY\|EMPLOYMENT24}?pageSize&maxPages` | 실행: 입력 → 확인 단계 → 202 확인 |
 | 실패 작업 재시도 | POST `/api/admin/collection/syncs/{jobId}/retry` | 실행: `FAILED`·`PARTIAL_SUCCESS`·`INTERRUPTED`에만 버튼 표시, 확인 단계 |
 | 원본 레코드 | GET `/api/admin/collection/raw-records/{id}` | 조회. 저장(POST)은 제공하지 않는다 |
@@ -37,7 +37,22 @@
 - 알 수 없는 코드는 원문만 보여 준다.
 - 건너뜀 상태에서는 서버가 대상을 계산하지 않아 빈 목록을 준다. 이때 표 대신 "계산하지 않아요"라고 안내해 '대상 없음'과 구분한다.
 
-확인 체크는 `planToken`이 바뀌면 초기화된다. 계획 변경(`RETENTION_003`)·진행 중(`004`)·실행 불가(`005`)·비활성(`002`)에서는 미리보기를 다시 불러오게 안내한다.
+확인 체크는 `planToken`이 바뀌거나 실행이 실패하면 초기화된다.
+
+**결과 불확실 처리**
+
+서버는 파티션별로 따로 커밋하므로, 응답을 못 받아도 일부가 이미 반영됐을 수 있다.
+- 실행 요청만 60초 제한을 쓴다(`retentionExecuteTimeoutMs`). 공통 요청은 10초다.
+  - 배포 경로의 CloudFront 원본 응답 대기(기본 30초)보다 길게 둔다.
+  - 프록시 504도 아래처럼 처리한다.
+- 다음 경우를 '결과 불확실'로 본다(`isUncertainExecution`): 시간 초과·네트워크 오류·5xx·응답 형식 불명.
+- 결과 불확실이면 이렇게 동작한다.
+  - 전용 안내를 보여 준다: 일부 정리가 이미 진행됐을 수 있음, 확인 순서, 서버 로그 `BEHAVIOR_RETENTION_EXECUTE`.
+  - 미리보기를 무효화하고 다시 불러온다.
+  - 실패 시점의 미리보기 갱신 횟수(`dataUpdateCount`)보다 새 미리보기를 성공적으로 받기 전까지 실행을 막는다(`retentionExecutionLocked`).
+  - 미리보기를 다시 받는 중이거나 조회에 실패한 동안에도 막는다.
+- 이전 실행이 아직 끝나지 않았는지는 미리보기로 알 수 없다. 서버의 advisory lock(`RETENTION_004`)과 planToken 재검증(`003`)을 믿는다.
+- 4xx는 서버가 확정한 거부 응답이다. 계획 변경(`RETENTION_003`)·진행 중(`004`)·실행 불가(`005`)·비활성(`002`)은 각 안내를 보여 주고, 미리보기를 자동으로 다시 불러온다.
 
 실행 작업은 같은 관리자 계정에서 한 번에 하나만 진행한다(공통 mutation key와 ref 가드). 자동 재시도는 하지 않고, 요청 전후로 같은 관리자 세션인지 확인한다.
 
@@ -56,4 +71,10 @@
 
 - `tests/admin.test.mjs`: 경로·메서드·`requiresAuth`·CSRF·202 확인, DTO 검증, 403 코드 구분, 세션 확인, 캐시 정리, 복귀 경로를 확인한다.
 - `tests/admin-ui.test.mjs`: 인증 상태별 비노출, 헤더 메뉴, 재시도·보관 실행 노출 조건, payload 이스케이프, 관리자 스타일 범위를 확인한다.
+- `tests/admin-browser.test.mjs`: 실제 Chrome에서 모의 HTTP로 다음을 확인한다.
+  - 보관 실행의 시간 초과·500 → 결과 불확실 안내, 확인 체크 초기화
+  - 미리보기 재조회 실패 동안 실행 차단, 새 미리보기 뒤에만 확인 가능
+  - 409 → 미리보기 자동 갱신, 미리보기 변경 시 체크 초기화, 자동 재전송 없음
+  - 수집 이력 폴링은 실행 중일 때만 동작하고, 완료 응답 뒤 멈춤
+  - 이 테스트는 `scripts/test-policy.json`의 필수 브라우저 목록에는 없다(frontend 밖이라 등록하지 않았다).
 - 실제 관리자 계정·백엔드·data-service와의 통합, 실제 수집 실행과 보관 정리 실행은 하지 않았다. 운영 데이터에 영향을 주므로 테스트 목적으로 호출하지 않는다.

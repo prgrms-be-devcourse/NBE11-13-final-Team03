@@ -33,10 +33,10 @@ export function useAdminAction<T, V>(owner: AuthUser, run: (variables: V) => Pro
     assertAdminOwner(client, owner)
     return result
   } })
-  const start = (variables: V, onSuccess: (result: T) => void) => {
+  const start = (variables: V, onSuccess: (result: T) => void, onError?: (error: unknown) => void) => {
     if (running.current || busy) return
     running.current = true
-    mutation.mutate(variables, { onSuccess, onSettled: () => { running.current = false } })
+    mutation.mutate(variables, { onSuccess, onError, onSettled: () => { running.current = false } })
   }
   return { mutation, pending: busy || mutation.isPending, start, client }
 }

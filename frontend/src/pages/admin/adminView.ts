@@ -1,4 +1,19 @@
-import type { SyncSource, SyncStatus } from '../../api/admin'
+import type { SyncJob, SyncSource, SyncStatus } from '../../api/admin'
+
+/** 대기·실행 중인 작업이 목록에 있을 때만 목록을 다시 조회한다. 완료된 작업만 있으면 폴링하지 않는다. */
+export const syncListPollMs = 10_000
+export function syncListRefetchInterval(jobs: readonly Pick<SyncJob, 'status'>[] | undefined): number | false {
+  return jobs?.some((job) => job.status === 'PENDING' || job.status === 'RUNNING') ? syncListPollMs : false
+}
+
+/**
+ * 보관 실행 가능 여부의 미리보기 조건. 미리보기를 다시 받는 중이거나 조회에 실패했으면 막는다.
+ * 결과가 불확실한 실행 뒤에는 그때의 미리보기 데이터 갱신 횟수(dataUpdateCount)보다 많아져야, 즉 그 뒤에 새 미리보기(새 planToken)를
+ * 성공적으로 받아야 다시 실행할 수 있다. 시각 비교는 같은 밀리초에 응답이 오면 영원히 잠길 수 있어 쓰지 않는다.
+ */
+export function retentionExecutionLocked(state: { uncertainBaseline: number | null; dataUpdateCount: number; isFetching: boolean; isError: boolean }): boolean {
+  return state.isFetching || state.isError || (state.uncertainBaseline !== null && state.dataUpdateCount <= state.uncertainBaseline)
+}
 
 export const sourceLabels: Record<SyncSource, string> = { YOUTH_POLICY: '온통청년 (청년정책)', EMPLOYMENT24: '고용24 (직업훈련)' }
 export const statusLabels: Record<SyncStatus, string> = {

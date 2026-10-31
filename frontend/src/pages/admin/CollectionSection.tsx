@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -9,7 +9,7 @@ import Button from '../../components/ui/Button'
 import AsyncState from '../../components/ui/AsyncState'
 import { formatDateTime } from '../../utils/date'
 import { useAdminAccess, useAdminAction, useDenyOnForbidden } from './adminAccess'
-import { formatCount, sourceLabels, statusLabels, statusTone } from './adminView'
+import { formatCount, sourceLabels, statusLabels, statusTone, syncListRefetchInterval } from './adminView'
 import AdminError from './AdminError'
 import styles from './Admin.module.css'
 
@@ -58,6 +58,15 @@ function SyncDetail({ owner, jobId, onRetried }: { owner: AuthUser; jobId: numbe
   // 대기·실행 중인 작업은 상태가 바뀔 때까지 5초마다 다시 조회한다.
   const detail = useQuery({ queryKey: adminKeys.sync(owner.id, jobId), queryFn: ({ signal }) => getSync(jobId, signal),
     refetchInterval: (query) => query.state.data && ['PENDING', 'RUNNING'].includes(query.state.data.status) ? 5000 : false })
+  // 상세에서 작업 종료를 먼저 확인하면 목록 상태도 한 번만 다시 받는다(목록 폴링 주기를 기다리지 않게).
+  const client = useQueryClient()
+  const status = detail.data?.status
+  const previous = useRef(status)
+  useEffect(() => {
+    const was = previous.current
+    previous.current = status
+    if ((was === 'PENDING' || was === 'RUNNING') && status && status !== 'PENDING' && status !== 'RUNNING') void client.invalidateQueries({ queryKey: ['admin', owner.id, 'syncs'] })
+  }, [client, owner.id, status])
   const [confirming, setConfirming] = useState(false)
   const { mutation, pending, start } = useAdminAction(owner, (id: number) => retrySync(id))
   useDenyOnForbidden(detail.error)
@@ -107,7 +116,8 @@ export default function CollectionSection() {
   const requested = params.get('date') ?? ''
   const date = isIsoDate(requested) ? requested : seoulToday()
   const selected = parseAdminId(params.get('job'))
-  const jobs = useQuery({ queryKey: adminKeys.syncs(owner.id, date), queryFn: ({ signal }) => listSyncs(date, signal) })
+  // 대기·실행 중인 작업이 있을 때만 10초마다 다시 조회한다. 날짜가 바뀌거나 화면을 떠나면 이 Query의 관찰이 끝나 폴링도 멈춘다.
+  const jobs = useQuery({ queryKey: adminKeys.syncs(owner.id, date), queryFn: ({ signal }) => listSyncs(date, signal), refetchInterval: (query) => syncListRefetchInterval(query.state.data) })
   const [notice, setNotice] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   useDenyOnForbidden(jobs.error)

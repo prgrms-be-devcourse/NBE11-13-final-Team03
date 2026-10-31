@@ -152,9 +152,15 @@ export async function getRetentionPreview(signal?: AbortSignal): Promise<Retenti
   if (!isRetentionPreview(data)) throw malformed()
   return { ...data, baseDate: nullable(data.baseDate), keepFrom: nullable(data.keepFrom), planToken: nullable(data.planToken) }
 }
+/**
+ * 보관 실행만 공통 10초보다 길게 기다린다. 서버는 계획 조회(문장 제한 10초) 뒤 파티션을 하나씩 만들고 지우며
+ * 각 DDL이 잠금을 최대 3초(lock-timeout) 기다린다. 배포 경로의 CloudFront 원본 응답 대기(기본 30초)보다 길게 두어
+ * 프록시보다 먼저 끊지 않는다. 시간 초과·5xx는 isUncertainExecution으로 '결과 불확실'로 다룬다.
+ */
+export const retentionExecuteTimeoutMs = 60_000
 export async function executeRetention(planToken: string): Promise<RetentionResult> {
   if (!planToken || planToken.length > 128) throw new ApiError('configuration', '미리보기 확인 값이 없어요. 미리보기를 다시 불러와 주세요.')
-  const { status, data } = await apiClient.post<unknown>('/admin/behavior-events/retention/execute', { planToken }, { requiresAuth: true })
+  const { status, data } = await apiClient.post<unknown>('/admin/behavior-events/retention/execute', { planToken }, { requiresAuth: true, timeout: retentionExecuteTimeoutMs })
   if (status !== 200 || !isRetentionResult(data)) throw malformed()
   return data
 }
@@ -185,6 +191,16 @@ export function adminErrorKind(error: unknown): AdminErrorKind {
   if (error.status === 403 && error.code === 'RETENTION_002') return 'disabled'
   if (error.status === 403 && error.code && deniedCodes.has(error.code)) return 'denied'
   return 'other'
+}
+/**
+ * 보관 실행 요청 뒤 서버 반영 여부를 확정할 수 없는 오류다. 파티션별로 따로 커밋되므로 일부가 이미 반영됐을 수 있다.
+ * 시간 초과·네트워크 오류·5xx(프록시 504 포함)·응답 형식 불명이 해당한다.
+ * 4xx는 서버가 거부한 확정 응답이고, csrf·configuration·cancelled는 서버 응답을 받기 전에 끝난 경우라 제외한다.
+ */
+export function isUncertainExecution(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true
+  if (error.kind === 'timeout' || error.kind === 'network' || error.kind === 'unknown') return true
+  return error.kind === 'http' && error.status !== undefined && error.status >= 500
 }
 const messages: Record<string, string> = {
   COLLECTION_001: '수집 실행기를 사용할 수 없어요. 잠시 후 다시 시도해 주세요.',

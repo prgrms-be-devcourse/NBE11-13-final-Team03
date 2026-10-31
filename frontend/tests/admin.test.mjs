@@ -7,7 +7,8 @@ import { ApiError } from '../src/api/ApiError.ts'
 import { authQueryKey, resetPersonalizedQueries } from '../src/auth/session.ts'
 import { safeReturnPath } from '../src/auth/returnPath.ts'
 import { job, preview } from './admin-fixtures.mjs'
-import { adminErrorKind, adminErrorMessage, adminKeys, assertAdminOwner, executeRetention, getRawRecord, getRetentionPreview, getSync, isRetentionPreview, isSyncJob,
+import { retentionExecutionLocked, syncListPollMs, syncListRefetchInterval } from '../src/pages/admin/adminView.ts'
+import { adminErrorKind, adminErrorMessage, adminKeys, assertAdminOwner, executeRetention, getRawRecord, getRetentionPreview, getSync, isRetentionPreview, isSyncJob, isUncertainExecution, retentionExecuteTimeoutMs,
   listSyncs, parseAdminId, retryableStatuses, retrySync, seoulToday, startSync, syncLimitError } from '../src/api/admin.ts'
 
 const originalAdapter = apiClient.defaults.adapter, originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
@@ -77,6 +78,41 @@ test('retention execute sends only the preview planToken and rejects missing tok
   assert.deepEqual(bodies, [{ planToken: 'plan-1' }])
   await assert.rejects(executeRetention(''), error => error.kind === 'configuration')
   assert.equal(bodies.length, 1)
+})
+
+test('retention execute alone waits 60 seconds; timeouts, network errors, 5xx and unreadable responses are uncertain, 4xx are definite', async () => {
+  csrf()
+  let timeout
+  apiClient.defaults.adapter = async config => { timeout = config.timeout; return response(config, { status: 'COMPLETED', keepFrom: null, created: [], dropped: [], failed: [], ignored: [], executedAt: null }) }
+  await executeRetention('plan-1')
+  assert.equal(timeout, retentionExecuteTimeoutMs)
+  assert.equal(retentionExecuteTimeoutMs, 60_000)
+  // 다른 관리자 요청은 공통 10초를 그대로 쓴다.
+  apiClient.defaults.adapter = async config => { timeout = config.timeout; return response(config, preview) }
+  await getRetentionPreview()
+  assert.equal(timeout, 10_000)
+  const http = (status, code) => new ApiError('http', 'x', status, { code, message: 'x', fieldErrors: {} })
+  for (const error of [new ApiError('timeout', 'x'), new ApiError('network', 'x'), new ApiError('unknown', 'x'), http(500, 'COMMON_001'), http(502), http(504), new Error('x')]) assert.equal(isUncertainExecution(error), true, String(error.kind ?? error))
+  for (const error of [http(409, 'RETENTION_003'), http(409, 'RETENTION_004'), http(403, 'RETENTION_002'), http(403, 'RETENTION_001'), http(400), http(401), new ApiError('csrf', 'x'), new ApiError('configuration', 'x'), new ApiError('cancelled', 'x')]) assert.equal(isUncertainExecution(error), false, `${error.kind} ${error.status ?? ''}`)
+})
+
+test('execution stays locked while the preview refreshes or failed, and after an uncertain run until a newer preview arrives', () => {
+  const base = { uncertainBaseline: null, dataUpdateCount: 3, isFetching: false, isError: false }
+  assert.equal(retentionExecutionLocked(base), false)
+  assert.equal(retentionExecutionLocked({ ...base, isFetching: true }), true)
+  assert.equal(retentionExecutionLocked({ ...base, isError: true }), true)
+  // 같은 횟수(같은 밀리초 응답 포함)는 새 미리보기가 아니다.
+  assert.equal(retentionExecutionLocked({ ...base, uncertainBaseline: 3 }), true)
+  assert.equal(retentionExecutionLocked({ ...base, uncertainBaseline: 3, dataUpdateCount: 4 }), false)
+  assert.equal(retentionExecutionLocked({ ...base, uncertainBaseline: 3, dataUpdateCount: 4, isError: true }), true)
+})
+
+test('collection history polls only while a listed job is pending or running', () => {
+  assert.equal(syncListRefetchInterval(undefined), false)
+  assert.equal(syncListRefetchInterval([]), false)
+  assert.equal(syncListRefetchInterval([{ status: 'SUCCESS' }, { status: 'FAILED' }, { status: 'PARTIAL_SUCCESS' }, { status: 'INTERRUPTED' }]), false)
+  assert.equal(syncListRefetchInterval([{ status: 'SUCCESS' }, { status: 'RUNNING' }]), syncListPollMs)
+  assert.equal(syncListRefetchInterval([{ status: 'PENDING' }]), syncListPollMs)
 })
 
 test('403 permission codes are denials, RETENTION_002 is a disabled feature, 401 asks for login', async () => {
