@@ -16,7 +16,7 @@ export function safeReturnPath(value?: string | null): string {
       const query = serializeSearchParams(parseSearchParams(url.searchParams).params).toString()
       return `/opportunities${query ? `?${query}` : ''}`
     }
-    if (['/', '/saved', '/onboarding', '/mypage', '/mypage/profile', '/mypage/interests', '/notifications', '/settings/notifications'].includes(url.pathname) || /^\/opportunities\/[1-9]\d*$/.test(url.pathname)) return url.pathname
+    if (['/', '/saved', '/onboarding', '/mypage', '/mypage/profile', '/mypage/interests', '/notifications', '/settings/notifications', '/admin', '/admin/collection', '/admin/raw-records', '/admin/retention'].includes(url.pathname) || /^\/opportunities\/[1-9]\d*$/.test(url.pathname)) return url.pathname
   } catch { /* 잘못된 URL은 홈으로 복귀한다. */ }
   return '/'
 }

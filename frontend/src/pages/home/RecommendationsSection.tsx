@@ -1,7 +1,13 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { Link } from 'react-router-dom'
+import { AuthContext } from '../../auth/AuthContext'
 import type { AuthStatus } from '../../auth/AuthContext'
+import { authQueryKey, authTransitionKey } from '../../auth/session'
+import type { AuthUser } from '../../api/auth'
+import { PreferenceRefreshError, runPreferenceChange } from '../../api/preferences'
+import Button from '../../components/ui/Button'
+import { X } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { recommendationsQuery } from '../../api/recommendations'
 import type { RecommendationItem } from '../../api/recommendations'
@@ -17,7 +23,7 @@ import { applicationWindowText, regionText } from '../opportunities/detailPresen
 import { formatDate, formatDatesInText } from '../../utils/date'
 import styles from './HomePage.module.css'
 
-function RecommendationCard({ item, disabled }: { item: RecommendationItem; disabled: boolean }) {
+function RecommendationCard({ item, disabled, onHidden }: { item: RecommendationItem; disabled: boolean; onHidden?: () => void }) {
   const training = item.type === 'VOCATIONAL_TRAINING'
   const date = training ? item.trainingStartDate : item.applicationEndDate
   const detailOptions = opportunityDetailQuery(String(item.opportunityId))
@@ -26,7 +32,7 @@ function RecommendationCard({ item, disabled }: { item: RecommendationItem; disa
   const alwaysOpenShown = periods.some(period => period.periodType === 'ALWAYS' && period.validationStatus === 'VALID')
   const badges = item.recommendationReasons.badges.filter(badge => !(item.eligibilityStatus === 'ELIGIBLE' && badge === '신청 조건 충족'))
   const sentences = item.recommendationReasons.description.trim().split(/(?<=[.!?;。！？])\s+|\r?\n+/u).filter(Boolean).map(sentence => sentence.replace(/;$/, '.'))
-  return <HomeOpportunityCard item={item} source="RECOMMENDATION" allowHide disabled={disabled} recommendation>
+  return <HomeOpportunityCard item={item} source="RECOMMENDATION" allowHide disabled={disabled} recommendation onHidden={onHidden}>
     <div className={styles.recommendationInfo}>
       {training ? date && isValidDate(date) && <p className={styles.facts}>교육 시작일 <time dateTime={date}>{formatDate(date)}</time></p>
         : periods.length > 0 ? periods.map((period, index) => <p className={styles.facts} key={index}>신청기간 {formatDatesInText(applicationWindowText(period))}</p>)
@@ -45,7 +51,7 @@ function RecommendationCard({ item, disabled }: { item: RecommendationItem; disa
 }
 
 // 화면에 렌더링된 추천 카드만 관찰한다. 재렌더링·재조회에도 같은 홈 진입 동안 사용자·공고별 한 번만 보낸다.
-function ObservedRecommendation({ item, disabled, userId, recorded }: { item: RecommendationItem; disabled: boolean; userId: number; recorded: RefObject<Set<string>> }) {
+function ObservedRecommendation({ item, disabled, userId, recorded, onHidden }: { item: RecommendationItem; disabled: boolean; userId: number; recorded: RefObject<Set<string>>; onHidden: (item: RecommendationItem) => void }) {
   const client = useQueryClient()
   const element = useRef<HTMLLIElement>(null)
   const opportunityId = item.opportunityId
@@ -58,7 +64,56 @@ function ObservedRecommendation({ item, disabled, userId, recorded }: { item: Re
       void recordBehaviorEvent(client, userId, opportunityId, { eventType: 'IMPRESSION', source: 'RECOMMENDATION' })
     })
   }, [client, userId, opportunityId, recorded])
-  return <li ref={element}><RecommendationCard item={item} disabled={disabled} /></li>
+  return <li ref={element}><RecommendationCard item={item} disabled={disabled} onHidden={() => onHidden(item)} /></li>
+}
+
+const undoVisibleMs = 5000
+type Hidden = { userId: number; opportunityId: number; title: string; sequence: number }
+
+function undoErrorMessage(error: unknown): string {
+  if (error instanceof PreferenceRefreshError) return '숨김은 해제했지만 추천을 새로 불러오지 못했어요. 다시 시도해 주세요.'
+  if (error instanceof ApiError && error.status === 401) return '로그인 상태를 다시 확인해 주세요.'
+  if (error instanceof ApiError && ['network', 'timeout', 'unknown'].includes(error.kind)) return '되돌리기 완료 여부를 확인하지 못했어요. 다시 시도해 주세요.'
+  return '숨김을 되돌리지 못했어요. 다시 시도해 주세요.'
+}
+
+/**
+ * 숨김 직후 되돌리기. 기존 숨김 해제 API(DELETE /opportunities/{id}/hide)로 서버 상태를 실제로 되돌리고 추천을 다시 받는다.
+ * 5초 뒤 안내만 닫으며 서버 숨김은 그대로 둔다. 키보드 포커스·포인터가 안내에 있으면 닫지 않고, 실패하면 닫지 않고 재시도를 둔다.
+ */
+function HideUndo({ hidden, onUndone, onClose }: { hidden: Hidden; onUndone: () => void; onClose: () => void }) {
+  const client = useQueryClient()
+  const auth = useContext(AuthContext)
+  const [state, setState] = useState<'idle' | 'pending' | 'error'>('idle')
+  const [error, setError] = useState<unknown>(null)
+  const [paused, setPaused] = useState(false)
+  const running = useRef(false)
+  useEffect(() => {
+    if (state !== 'idle' || paused) return
+    const timer = setTimeout(onClose, undoVisibleMs)
+    return () => clearTimeout(timer)
+  }, [state, paused, onClose])
+  const undo = () => {
+    const owner = auth?.status === 'authenticated' ? auth.user : undefined
+    if (!owner || owner.id !== hidden.userId || running.current) return
+    running.current = true
+    setState('pending'); setError(null)
+    runPreferenceChange(client, owner, hidden.opportunityId, 'unhide', 'RECOMMENDATION')
+      .then(onUndone, (reason: unknown) => { setError(reason); setState('error') })
+      .finally(() => { running.current = false })
+  }
+  // 키보드로 머무는 동안(:focus-visible)과 포인터가 올라가 있는 동안에는 자동으로 닫지 않는다.
+  return <div className={styles.undo} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
+    onFocus={(event) => { if (event.target.matches(':focus-visible')) setPaused(true) }} onBlur={() => setPaused(false)}>
+    {/* 긴 제목으로 크기가 흔들리지 않도록 화면에는 짧은 문구만 둔다. 어떤 공고인지는 버튼의 접근 가능한 이름으로 알린다. */}
+    <p className={styles.undoText}>공고를 숨겼어요.</p>
+    <div className={styles.undoActions}>
+      <Button variant="ghost" className={styles.undoButton} loading={state === 'pending'} disabled={state === 'pending'} aria-label={`${hidden.title} 숨김 되돌리기`} onClick={undo}>{state === 'error' ? '다시 시도' : '되돌리기'}</Button>
+      {/* 평소에는 5초 뒤 저절로 닫힌다. 실패하면 자동으로 닫히지 않으므로 그때만 닫기를 둔다. */}
+      {state === 'error' && <Button variant="ghost" className={styles.undoClose} aria-label="숨김 안내 닫기" onClick={onClose}><X size={18} aria-hidden="true" /></Button>}
+    </div>
+    {state === 'error' && <p className={styles.undoError} role="alert">{undoErrorMessage(error)}</p>}
+  </div>
 }
 
 function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUserId?: number; authStatus?: AuthStatus }) {
@@ -66,6 +121,37 @@ function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUser
   const result = useQuery(options)
   // 홈에 들어올 때마다 새로 만든다. 다른 화면에서 돌아오거나 새로고침하면 다시 노출로 인정한다.
   const recorded = useRef(new Set<string>())
+  const client = useQueryClient()
+  // 되돌리기 안내는 가장 최근에 숨긴 공고 하나만 가리킨다. 이전 숨김은 서버에 그대로 남는다.
+  const [hidden, setHidden] = useState<Hidden | null>(null)
+  const [undone, setUndone] = useState(false)
+  const sequence = useRef(0)
+  const heading = useRef<HTMLHeadingElement>(null)
+  // 숨김 응답 시점에도 같은 확인된 사용자일 때만 안내를 띄운다. 전환 중이거나 사용자가 바뀌었으면 띄우지 않는다.
+  const onHidden = useCallback((item: RecommendationItem) => {
+    const current = client.getQueryData<AuthUser | null>(authQueryKey)
+    if (!current || current.id !== confirmedUserId || client.isMutating({ mutationKey: authTransitionKey })) return
+    setUndone(false)
+    setHidden({ userId: current.id, opportunityId: item.opportunityId, title: item.title || '제목 미확인', sequence: ++sequence.current })
+  }, [client, confirmedUserId])
+  const closeUndo = useCallback(() => {
+    // 안내 안에 포커스가 있었다면 사라지기 전에 추천 제목으로 옮겨 포커스를 잃지 않게 한다.
+    if (document.activeElement?.closest(`.${styles.undo}`)) heading.current?.focus()
+    setHidden(null)
+  }, [])
+  // 숨긴 카드의 버튼이 사라져 포커스를 잃었으면 추천 제목으로 옮긴다. 다음 Tab이 바로 되돌리기 버튼이다.
+  // 버튼에 직접 포커스를 주면 자동 닫힘이 멈출 수 있어(키보드 포커스로 판단) 제목을 쓴다.
+  const hiddenSequence = hidden?.sequence
+  useEffect(() => {
+    if (hiddenSequence !== undefined && (!document.activeElement || document.activeElement === document.body)) heading.current?.focus()
+  }, [hiddenSequence])
+  useEffect(() => {
+    if (!undone) return
+    const timer = setTimeout(() => setUndone(false), 3000)
+    return () => clearTimeout(timer)
+  }, [undone])
+  // 로그아웃·계정 전환·인증 확인 중에는 이전 사용자의 안내를 보이지 않는다.
+  const visibleHidden = hidden && authStatus === 'authenticated' && hidden.userId === confirmedUserId ? hidden : null
   let content
   if (authStatus === 'checking') {
     content = <AsyncState status="loading" title="로그인 상태를 확인하고 있어요" />
@@ -93,13 +179,21 @@ function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUser
       {result.isFetching && <p role="status" className={styles.help}>추천 정보를 새로 확인하고 있어요.</p>}
       <ul className={`${styles.grid} ${styles.recommendationGrid}`}>{Array.from({ length: 3 }, (_, index) => {
         const item = result.data[index]
-        return item && confirmedUserId !== undefined ? <ObservedRecommendation key={item.opportunityId} item={item} disabled={result.isFetching} userId={confirmedUserId} recorded={recorded} />
+        return item && confirmedUserId !== undefined ? <ObservedRecommendation key={item.opportunityId} item={item} disabled={result.isFetching} userId={confirmedUserId} recorded={recorded} onHidden={onHidden} />
           : <li key={`empty-${index}`} className={styles.vacantSlot} aria-hidden="true" />
       })}</ul>
     </>
   }
   return <section id="recommendations" className={styles.section} aria-labelledby="recommendations-heading">
-    <div className={styles.sectionHeader}><h2 id="recommendations-heading">개인화 추천</h2></div>
+    {/* 되돌리기 안내는 추천 제목 줄 오른쪽 끝에 둔다. 숨긴 카드는 사라지므로 카드 대신 이 영역이 소유한다.
+        안내 영역은 항상 두어 스크린 리더가 새 안내를 읽게 한다. */}
+    <div className={styles.sectionHeader}><h2 id="recommendations-heading" ref={heading} tabIndex={-1}>개인화 추천</h2>
+      <div className={styles.undoRegion} role="status" aria-live="polite">
+        {visibleHidden ? <HideUndo key={visibleHidden.sequence} hidden={visibleHidden} onClose={closeUndo}
+          onUndone={() => { closeUndo(); setUndone(true) }} />
+          : undone && <p className={styles.undoDone}>숨김을 되돌렸어요.</p>}
+      </div>
+    </div>
     {content}
   </section>
 }

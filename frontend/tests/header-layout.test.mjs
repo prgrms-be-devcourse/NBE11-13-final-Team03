@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { chromeServiceFlags } from './chrome-flags.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const browser = [process.env.CHROME_PATH, 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find((candidate) => candidate && fs.existsSync(candidate))
@@ -56,7 +57,7 @@ test('Chrome renders desktop brand/search/auth above centered navigation and mob
     const fixtureFile = path.join(temporary, 'fixture.html')
     fs.writeFileSync(fixtureFile, html)
     // 격리된 임시 프로필·로컬 SSR fixture만 사용한다. 기존 브라우저/로그인/백엔드에 접근하지 않는다.
-    const output = execFileSync(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=2000', '--dump-dom', pathToFileURL(fixtureFile).href], { windowsHide: true, encoding: 'utf8', timeout: 60_000, maxBuffer: 5_000_000, stdio: ['ignore', 'pipe', 'pipe'] })
+    const output = execFileSync(browser, ['--headless', ...chromeServiceFlags, '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=2000', '--dump-dom', pathToFileURL(fixtureFile).href], { windowsHide: true, encoding: 'utf8', timeout: 60_000, maxBuffer: 5_000_000, stdio: ['ignore', 'pipe', 'pipe'] })
     const match = output.match(/<pre id="result">([^<]+)<\/pre>/)
     assert.ok(match, '브라우저의 실제 좌표 결과가 필요하다.')
     const results = JSON.parse(match[1])

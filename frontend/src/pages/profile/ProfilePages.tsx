@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { loginPath } from '../../auth/returnPath'
 import { CircleCheck, CircleDashed, LogOut, SlidersHorizontal, Tags, UserRound } from 'lucide-react'
 import { useAuth } from '../../auth/AuthContext'
 import type { AuthUser } from '../../api/auth'
@@ -57,8 +59,9 @@ function MyPageContent({ user }: { user: AuthUser }) {
     </div>
     <section className={styles.accountPanel} aria-labelledby="account-title">
       <div><h2 id="account-title">계정 관리</h2><p className={styles.help}>계정 정보는 카카오에서 제공된 정보를 조회해요.</p></div>
-      <Button className={styles.logout} variant="secondary" loading={auth.logoutPending} onClick={() => { void auth.logout().catch(() => {}) }}><LogOut size={16} aria-hidden="true" />로그아웃</Button>
+      <Button className={`${styles.logout} ${styles.accountButton}`} variant="secondary" loading={auth.logoutPending} disabled={auth.logoutAllPending || auth.withdrawPending} onClick={() => { void auth.logout().catch(() => {}) }}><LogOut size={16} aria-hidden="true" />로그아웃</Button>
       {auth.logoutError && <div className={styles.accountError}><ProfileError error={auth.logoutError} onRetry={auth.retry} /></div>}
+      <LogoutAllArea />
       <div className={styles.withdrawArea}>
         <button type="button" className={styles.withdrawLink} aria-expanded={confirming} aria-controls="withdraw-confirm" onClick={() => setConfirming(!confirming)}>회원 탈퇴</button>
         {confirming && <div id="withdraw-confirm" className={styles.withdrawConfirm} role="group" aria-labelledby="withdraw-title">
@@ -69,7 +72,7 @@ function MyPageContent({ user }: { user: AuthUser }) {
             <p className={styles.help}>알림 데이터는 순차적으로 삭제돼요.</p>
           </div>
           <div className={styles.actions}>
-            <Button className={styles.withdrawButton} variant="secondary" loading={auth.withdrawPending} disabled={!auth.withdraw} onClick={() => { void auth.withdraw?.().catch(() => {}) }}>탈퇴하기</Button>
+            <Button className={styles.withdrawButton} variant="secondary" loading={auth.withdrawPending} disabled={!auth.withdraw || auth.logoutPending || auth.logoutAllPending} onClick={() => { void auth.withdraw?.().catch(() => {}) }}>탈퇴하기</Button>
             <Button variant="ghost" onClick={() => setConfirming(false)}>취소</Button>
           </div>
         </div>}
@@ -77,6 +80,50 @@ function MyPageContent({ user }: { user: AuthUser }) {
       </div>
     </section>
   </>
+}
+function logoutAllErrorMessage(error: Error): string {
+  if (error instanceof ApiError) {
+    if (error.kind === 'configuration') return '다른 로그인 처리가 진행 중이에요. 완료된 뒤 다시 시도해 주세요.'
+    if (error.status === 401) return '로그인 상태를 확인하지 못했어요. 다시 로그인한 뒤 시도해 주세요.'
+    if (error.status === 403 || error.kind === 'csrf') return '요청이 거부됐어요. 인증·보안 토큰 상태를 확인해 주세요.'
+    // 응답을 받지 못하면 서버에서 이미 모든 세션이 끝났을 수 있다. 실패로 단정하지 않고, Provider가 로그인 상태를 다시 확인한다.
+    if (['network', 'timeout', 'unknown'].includes(error.kind)) return '모든 기기 로그아웃 완료 여부를 확인하지 못했어요. 서버에서 이미 처리됐을 수 있어 로그인 상태를 다시 확인했어요. 아직 로그인되어 있다면 다시 시도해 주세요.'
+  }
+  return '모든 기기 로그아웃을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.'
+}
+/**
+ * 계정 관리의 모든 기기 로그아웃. 회원 탈퇴와 같은 인라인 확인 방식이며 붉은색은 쓰지 않는다.
+ * 확인을 열면 열기 버튼을 감추고 확인 영역으로 포커스를 옮기며, 취소하면 열기 버튼으로 돌려준다.
+ */
+function LogoutAllArea() {
+  const auth = useAuth()
+  const [confirming, setConfirming] = useState(false)
+  const opener = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+  const returnFocus = useRef(false)
+  useEffect(() => {
+    if (confirming) panel.current?.focus()
+    else if (returnFocus.current) { returnFocus.current = false; opener.current?.focus() }
+  }, [confirming])
+  const busy = !!(auth.logoutPending || auth.withdrawPending || auth.logoutAllPending)
+  const cancel = () => { returnFocus.current = true; setConfirming(false) }
+  return <div className={styles.logoutAllArea}>
+    <div className={styles.logoutAllText}><h3 id="logout-all-title">모든 기기 로그아웃</h3><p className={styles.help}>다른 기기의 로그인도 종료할 수 있어요.</p></div>
+    {!confirming && <Button ref={opener} variant="secondary" className={styles.accountButton} disabled={busy || !auth.logoutAll} aria-controls="logout-all-confirm" aria-expanded={false} onClick={() => setConfirming(true)}>모든 기기 로그아웃</Button>}
+    {confirming && <div id="logout-all-confirm" ref={panel} tabIndex={-1} className={styles.logoutAllConfirm} role="group" aria-labelledby="logout-all-confirm-title"
+      onKeyDown={(event) => { if (event.key === 'Escape' && !auth.logoutAllPending) cancel() }}>
+      <p id="logout-all-confirm-title" className={styles.confirmTitle}>모든 기기에서 로그아웃할까요?</p>
+      <div className={styles.lines}>
+        <p>현재 기기를 포함해 다른 기기의 로그인 세션도 종료돼요.</p>
+        <p className={styles.help}>다른 기기는 이미 받은 로그인이 만료될 때까지 잠시 유지될 수 있고, 그 뒤에는 다시 로그인해야 해요.</p>
+      </div>
+      <div className={styles.actions}>
+        <Button variant="secondary" loading={auth.logoutAllPending} disabled={busy} onClick={() => { void auth.logoutAll?.().catch(() => {}) }}>모든 기기 로그아웃</Button>
+        <Button variant="ghost" disabled={auth.logoutAllPending} onClick={cancel}>취소</Button>
+      </div>
+    </div>}
+    {auth.logoutAllError && <p className={styles.error} role="alert">{logoutAllErrorMessage(auth.logoutAllError)}</p>}
+  </div>
 }
 function withdrawErrorMessage(error: Error): string {
   if (error instanceof ApiError) {
@@ -93,7 +140,13 @@ export function MyPage() {
   // 저장 목록·알림처럼 로그인 여부와 관계없이 같은 제목과 폭을 쓴다.
   return <section className={styles.page} aria-labelledby="mypage-title"><h1 id="mypage-title">마이페이지</h1>
     {auth.withdrawn ? <><AsyncState status="empty" title="회원 탈퇴가 완료됐어요" description="그동안 Y:ON을 이용해 주셔서 감사합니다." /><ArrowLink to="/">홈으로 이동</ArrowLink></>
-      : <ProfileGate>{(user) => <MyPageContent key={user.id} user={user} />}</ProfileGate>}
+      : auth.loggedOutAll ? <><AsyncState status="empty" title="모든 기기에서 로그아웃했어요" description="다른 기기는 이미 받은 로그인이 만료될 때까지 잠시 유지될 수 있고, 그 뒤에는 다시 로그인해야 해요." />
+        <div className={styles.actions}><Link className={styles.loginAgain} to={loginPath('/mypage')}>다시 로그인하기</Link><ArrowLink to="/">홈으로 이동</ArrowLink></div></>
+        : <>
+          {/* 결과가 불확실한 채로 로그아웃 상태가 확인되면 계정 관리 카드가 사라지므로 안내를 여기서 이어 보여 준다. */}
+          {auth.logoutAllError && auth.status !== 'authenticated' && <p className={styles.error} role="alert">{logoutAllErrorMessage(auth.logoutAllError)}</p>}
+          <ProfileGate>{(user) => <MyPageContent key={user.id} user={user} />}</ProfileGate>
+        </>}
   </section>
 }
 

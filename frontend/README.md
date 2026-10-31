@@ -1,6 +1,6 @@
 # Y:ON Frontend
 
-청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. `/`는 홈, `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세, `/login`은 카카오 로그인 진입 화면이다. 서버 사용자 조회에 기반한 인증 상태·로그아웃과 인증 후 홈 추천을 연결했다. `/mypage`에서 내 정보, `/mypage/profile`에서 맞춤 조건, `/mypage/interests`에서 관심 분야를 관리하며 `/onboarding`은 초기 설정 흐름이다.
+청년정책·직업훈련을 통합 탐색하고 개인화 추천과 변경 추적을 제공하는 Y:ON의 프런트엔드다. `/`는 홈, `/opportunities`는 통합 검색, `/opportunities/:id`는 기회 상세, `/login`은 카카오 로그인 진입 화면이다. 서버 사용자 조회에 기반한 인증 상태·로그아웃과 인증 후 홈 추천을 연결했다. `/mypage`에서 내 정보, `/mypage/profile`에서 맞춤 조건, `/mypage/interests`에서 관심 분야를 관리하며 `/onboarding`은 초기 설정 흐름이다. `/admin`은 `role=ADMIN` 사용자 전용 운영 화면이다([관리자 문서](docs/admin.md)).
 
 ## 기술 스택
 
@@ -32,7 +32,7 @@ npm run preview  # 빌드 결과 로컬 미리보기
 frontend/
 ├── docs/api-auth.md    # API 인증 계약·구현·검증 문서
 ├── public/
-│   ├── favicon.png
+│   ├── favicon.ico
 │   └── logo/yon-symbol.png
 ├── src/
 │   ├── api/                      # 공통 클라이언트·오류·Query 설정 및 화면별 API
@@ -100,9 +100,11 @@ await apiClient.get('/users/me', { requiresAuth: true })
 
 공개 지역 API를 연결해 시·도부터 말단 지역까지 선택하고 프로필을 등록·수정할 수 있다. 지역 조회 실패·빈 목록에서는 신규 등록을 막고, 기존 지역을 유지한 다른 항목 수정과 관심 분야 설정은 허용한다.
 
+추천에서 숨긴 직후 5초 동안 되돌리기를 제공한다. 서버 숨김을 실제로 해제한다([저장·숨김 문서](docs/preferences.md)).
+
 **미구현**
 
-숨김 해제는 조회 API 부재로 UI를 제공하지 않는다.
+숨긴 공고 목록·관리 화면은 조회 API 부재로 제공하지 않는다.
 
 **실서버 미검증**
 

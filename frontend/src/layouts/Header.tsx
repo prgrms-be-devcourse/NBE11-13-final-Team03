@@ -1,6 +1,7 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useContext, useRef, useState, type FormEvent } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { Menu, X, Search, House, Bookmark, Bell, UserRound } from 'lucide-react'
+import { Menu, X, Search, House, Bookmark, Bell, UserRound, ShieldCheck } from 'lucide-react'
+import { AuthContext } from '../auth/AuthContext'
 import { changeSearchConditions, defaultSearchParams, serializeSearchParams } from '../pages/opportunities/searchParams'
 import AuthControls from './AuthControls'
 import NotificationBadge from './NotificationBadge'
@@ -13,9 +14,13 @@ const navigation = [
   { to: '/notifications', label: '알림', icon: Bell },
   { to: '/mypage', label: '마이페이지', icon: UserRound },
 ]
+const adminNavigation = { to: '/admin', label: '관리자', icon: ShieldCheck }
 
 function Header() {
   const location = useLocation()
+  const auth = useContext(AuthContext)
+  // 서버에서 확인된 role=ADMIN일 때만 관리자 메뉴를 보여 준다. 확인 중·오류·비로그인에는 숨긴다.
+  const items = auth?.status === 'authenticated' && auth.user?.role === 'ADMIN' ? [...navigation, adminNavigation] : navigation
   const navigate = useNavigate()
   function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -71,7 +76,7 @@ function Header() {
           className={`${styles.navigation} ${styles.primaryNavigation} ${isMenuOpen ? styles.open : ''}`}
         >
             <ul className={styles.menuList}>
-              {navigation.map(({ to, label, icon: Icon }) => (
+              {items.map(({ to, label, icon: Icon }) => (
                 <li key={to}>
                   <NavLink
                     to={to}

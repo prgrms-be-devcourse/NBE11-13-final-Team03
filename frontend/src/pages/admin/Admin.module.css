@@ -1,0 +1,158 @@
+/* 관리자 화면 전용 톤. .admin 안에서만 정의해 사용자 화면의 전역 토큰은 바꾸지 않는다.
+   웜 그레이·오프화이트·차콜 바탕에 낮은 채도의 세이지를 상태와 중요한 작업에만 쓴다. */
+.admin {
+  --admin-surface: #fdfcfa;
+  --admin-subtle: #f3f2ee;
+  --admin-border: #dedbd3;
+  --admin-text: #2c2e2c;
+  --admin-muted: #6a6964;
+  --admin-sage: #4f6b5d;
+  --admin-sage-soft: #e7ece8;
+  --admin-warn: #7a5a22;
+  --admin-danger: #8a3d33;
+  --admin-danger-soft: #f6ebe8;
+  --admin-hover: #e4e5df;
+  display: grid;
+  gap: var(--space-4);
+  min-inline-size: 0;
+  max-inline-size: 72rem;
+  margin-inline: auto;
+  color: var(--admin-text);
+}
+/* 관리자 화면이 렌더링된 동안에만 페이지 배경을 연한 웜 그레이로 바꾼다(헤더는 자체 흰 배경 유지).
+   .admin은 role=ADMIN 확인 뒤에만 그려지므로 일반 사용자 페이지의 전역 배경은 그대로다. */
+body:has(.admin) { background-color: #eeefea; }
+.admin h1, .admin h2, .admin h3, .admin h4, .admin p { margin: 0; }
+/* AppLayout의 .content p(보조 글자색)보다 우선해 문단이 부모 색을 따르게 한다. 색이 있는 문단은 아래 .admin .x 규칙을 쓴다. */
+.admin p { color: inherit; }
+.pageHeader { display: grid; gap: var(--space-1); }
+.eyebrow { color: var(--admin-muted); font-size: var(--font-size-small); letter-spacing: 0.02em; }
+.admin h1 { font-size: clamp(1.5rem, 2.4vw, 1.875rem); font-weight: 700; }
+
+/* 왼쪽 메뉴 + 본문. 모바일에서는 메뉴가 위쪽 가로 줄로 바뀐다. */
+.shell { display: grid; grid-template-columns: 12rem minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.sideNav { position: sticky; top: var(--space-3); }
+.sideNav ul { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+/* 웜 그레이 배경 위: 선택 항목은 카드와 같은 밝은 면·얇은 테두리, 세이지는 왼쪽 선에만 쓴다. */
+.sideNav a { display: flex; align-items: center; min-block-size: 2.75rem; padding: var(--space-2) var(--space-3); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--admin-muted); font-weight: 500; text-decoration: none; }
+.sideNav a:hover { background: var(--admin-hover); color: var(--admin-text); }
+.sideNav a.active { border-color: var(--admin-border); background: var(--admin-surface); color: var(--admin-text); font-weight: 600; box-shadow: inset 3px 0 0 var(--admin-sage); }
+.sideNav a:focus-visible { outline: 2px solid var(--admin-sage); outline-offset: 2px; }
+.content { display: grid; gap: var(--space-4); min-inline-size: 0; }
+
+.section { display: grid; gap: var(--space-4); min-inline-size: 0; }
+/* 세 관리자 화면 공통: 제목↔설명 space-3, 설명↔첫 콘텐츠는 .section의 space-4. 데스크톱·모바일 같은 값.
+   .admin을 붙여 다른 레이아웃 규칙보다 확실히 우선하게 한다. */
+.admin .sectionHead { display: grid; gap: var(--space-3); }
+/* 제목 줄 오른쪽의 섹션 단위 작업(수집 시작). 좁으면 설명 아래로 내려간다. */
+.sectionHeadRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-4); }
+.sectionHeadRow > .sectionHead { flex: 1 1 20rem; min-inline-size: 0; }
+.admin h2 { font-size: 1.25rem; font-weight: 700; }
+.admin h3 { font-size: 1rem; font-weight: 700; }
+.subTitle { font-size: var(--font-size-small); font-weight: 600; color: var(--admin-muted); }
+.help { color: var(--admin-muted); font-size: var(--font-size-small); line-height: var(--line-height-small); }
+
+/* 조회 영역: 그림자 없는 얇은 테두리 카드 */
+.panel { display: grid; gap: var(--space-3); min-inline-size: 0; padding: var(--space-4); border: 1px solid var(--admin-border); border-radius: var(--radius-md); background: var(--admin-surface); }
+.panelHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.inline { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--admin-muted); font-size: var(--font-size-small); }
+.admin input[type='date'], .admin input[type='number'] { min-block-size: 2.75rem; padding: var(--space-1) var(--space-2); border: 1px solid var(--color-input-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--admin-text); font: inherit; }
+.empty { color: var(--admin-muted); font-size: var(--font-size-small); }
+.notice { color: var(--admin-sage); font-size: var(--font-size-small); font-weight: 600; }
+
+/* 표: 가로로 넘치면 표 영역 안에서만 스크롤한다. */
+.tableWrap { overflow-x: auto; min-inline-size: 0; }
+/* 좁은 화면에서 글자 단위로 줄바꿈되지 않도록 최소 폭을 두고, 넘치면 .tableWrap 안에서만 가로로 스크롤한다. */
+.admin table { inline-size: 100%; min-inline-size: 40rem; border-collapse: collapse; font-size: var(--font-size-small); }
+.admin td time { white-space: nowrap; }
+.admin caption { padding-block-end: var(--space-2); color: var(--admin-muted); font-weight: 600; text-align: start; }
+/* 헤더와 본문 칸은 같은 패딩·줄 높이·세로 가운데 정렬을 쓴다. 숫자 열만 .number로 오른쪽 정렬한다. */
+.admin th, .admin td { padding: var(--space-2) var(--space-3); border-block-end: 1px solid var(--admin-border); line-height: var(--line-height-small); text-align: start; vertical-align: middle; white-space: nowrap; }
+/* 짧은 값은 한 줄로 두고, 오류 내용처럼 긴 글만 .wrap 칸에서 줄바꿈한다. */
+.admin td.wrap { min-inline-size: 12rem; white-space: normal; overflow-wrap: anywhere; }
+.admin th { color: var(--admin-muted); font-weight: 600; background: var(--admin-subtle); }
+.admin .number { text-align: end; font-variant-numeric: tabular-nums; }
+.selectedRow td { background: var(--admin-sage-soft); }
+/* 표 안의 실행 번호 버튼은 다른 칸과 같은 줄 높이를 쓴다(별도 최소 높이를 두지 않는다). */
+.linkButton { padding: 0; border: 0; background: none; color: var(--admin-sage); font: inherit; font-weight: 600; line-height: inherit; text-decoration: underline; vertical-align: middle; cursor: pointer; }
+.linkButton:focus-visible { outline: 2px solid var(--admin-sage); outline-offset: 2px; }
+.admin code { font-size: 0.8125rem; overflow-wrap: anywhere; }
+
+/* 문단에 쓰는 색 클래스는 .admin p 초기화와 AppLayout .content p보다 우선해야 한다. */
+.admin .help, .admin .eyebrow, .admin .empty, .admin .code { color: var(--admin-muted); }
+.admin .notice { color: var(--admin-sage); }
+.admin .fieldError, .admin .failure, .admin .warning { color: var(--admin-danger); }
+
+/* 상태는 배경 배지 없이 글자색으로만 구분한다. */
+.statusText { font-weight: 600; }
+.statusText[data-tone='ok'] { color: var(--admin-sage); }
+.statusText[data-tone='warn'] { color: var(--admin-warn); }
+.statusText[data-tone='danger'] { color: var(--admin-danger); }
+.statusText[data-tone='muted'] { color: var(--admin-muted); }
+
+.meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: var(--space-2) var(--space-4); margin: 0; }
+.meta div { display: grid; gap: 0.125rem; min-inline-size: 0; }
+/* 보관 미리보기: 상태는 왼쪽 선으로 따로 구분하고, 나머지 정보는 같은 폭의 격자로 정렬한다.
+   한글은 어절 단위로만 줄바꿈해(keep-all) 단어 중간이 잘리지 않게 한다. */
+.statusBlock { display: grid; gap: var(--space-1); padding: var(--space-1) 0 var(--space-1) var(--space-3); border-inline-start: 3px solid var(--admin-muted); word-break: keep-all; }
+.statusBlock[data-tone='ok'] { border-inline-start-color: var(--admin-sage); }
+.statusBlock[data-tone='warn'] { border-inline-start-color: var(--admin-warn); }
+.statusLabel { font-size: 1.0625rem; font-weight: 700; }
+.statusBlock[data-tone='ok'] .statusLabel { color: var(--admin-sage); }
+.statusBlock[data-tone='warn'] .statusLabel { color: var(--admin-warn); }
+.code { color: var(--admin-muted); font-size: 0.8125rem; }
+.infoGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--space-3) var(--space-4); margin: 0; padding-block: var(--space-3); border-block: 1px solid var(--admin-border); }
+.infoGrid div { display: grid; align-content: start; gap: 0.125rem; min-inline-size: 0; }
+.infoGrid dt { color: var(--admin-muted); font-size: 0.8125rem; }
+.infoGrid dd { margin: 0; word-break: keep-all; overflow-wrap: break-word; }
+/* 정리 일정은 서버가 주는 읽는 문장('매월 1일 03:00 (Asia/Seoul)')이라 다른 값과 같은 글꼴·크기·굵기를 쓴다.
+   어절 단위로만 줄바꿈해 좁은 화면에서 '(Asia/Seoul)'이 중간에 잘리지 않게 한다. 상태 코드(.code)는 작은 보조 텍스트 그대로다. */
+.infoGrid dd code { font: inherit; overflow-wrap: break-word; }
+.meta dt, .counts dt { color: var(--admin-muted); font-size: 0.8125rem; }
+.meta dd, .counts dd { margin: 0; overflow-wrap: anywhere; }
+.counts { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: var(--space-2); margin: 0; padding: var(--space-3); border-radius: var(--radius-sm); background: var(--admin-subtle); }
+.counts dd { font-weight: 600; font-variant-numeric: tabular-nums; }
+.failure { color: var(--admin-danger); font-size: var(--font-size-small); }
+.payload { max-block-size: 32rem; margin: 0; padding: var(--space-3); overflow: auto; border: 1px solid var(--admin-border); border-radius: var(--radius-sm); background: var(--admin-subtle); font-size: 0.8125rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.payload:focus-visible { outline: 2px solid var(--admin-sage); outline-offset: 2px; }
+
+/* 실행 영역: 조회 카드와 구분되는 위쪽 선과 확인 단계 */
+.actionPanel { display: grid; gap: var(--space-3); padding-block-start: var(--space-3); border-block-start: 1px solid var(--admin-border); }
+.actionPanel > button { justify-self: start; }
+.section > .actionPanel { padding: var(--space-4); border: 1px solid var(--admin-border); border-block-start: 3px solid var(--admin-sage); border-radius: var(--radius-md); background: var(--admin-surface); }
+.form { display: grid; gap: var(--space-3); }
+.radioGroup { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: 0; padding: 0; border: 0; }
+.radioGroup legend { margin-block-end: var(--space-2); padding: 0; color: var(--admin-muted); font-size: var(--font-size-small); font-weight: 600; }
+.radioGroup label, .check { display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: 2.75rem; }
+.radioGroup input, .check input { flex-shrink: 0; inline-size: 1.125rem; block-size: 1.125rem; accent-color: var(--admin-sage); }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--space-3); }
+.fields label { display: grid; gap: var(--space-1); color: var(--admin-muted); font-size: var(--font-size-small); }
+.fieldError { color: var(--admin-danger); font-size: var(--font-size-small); }
+.confirm { display: grid; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--admin-border); border-radius: var(--radius-sm); background: var(--admin-subtle); }
+.buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.errorTitle { font-weight: 700; }
+.errorBox { display: grid; justify-items: start; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--admin-danger); border-radius: var(--radius-sm); background: var(--admin-danger-soft); color: var(--admin-danger); font-size: var(--font-size-small); }
+
+/* 실행 결과 불확실: 실패(빨강)와 구분해 경고색 위쪽 선을 쓰고, 확인 순서를 번호 목록으로 둔다. */
+.uncertain { border-block-start: 3px solid var(--admin-warn); }
+.uncertain h3 { color: var(--admin-warn); }
+.steps { display: grid; gap: var(--space-1); margin: 0; padding-inline-start: var(--space-4); font-size: var(--font-size-small); line-height: var(--line-height-small); }
+
+/* 삭제가 따르는 실행만 붉은 계열을 쓴다. */
+.dangerZone { border-block-start: 3px solid var(--admin-danger); }
+.warning { color: var(--admin-danger); font-size: var(--font-size-small); font-weight: 600; }
+.admin .help[data-state='disabled'] { color: var(--admin-text); }
+.admin .dangerButton { background: var(--admin-danger); color: var(--color-surface); }
+.admin .dangerButton:hover:enabled { background: #6f2f27; }
+.admin .dangerButton:disabled { background: var(--admin-subtle); color: var(--admin-muted); border-color: var(--admin-border); }
+.srOnly { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 767px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .sideNav { position: static; }
+  .sideNav ul { display: flex; flex-wrap: wrap; }
+  .sideNav a.active { box-shadow: inset 0 -2px 0 var(--admin-sage); }
+  .panel, .section > .actionPanel { padding: var(--space-3); }
+  .infoGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+}
