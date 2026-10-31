@@ -32,7 +32,7 @@ npm run preview  # 빌드 결과 로컬 미리보기
 frontend/
 ├── docs/api-auth.md    # API 인증 계약·구현·검증 문서
 ├── public/
-│   ├── favicon.png
+│   ├── favicon.ico
 │   └── logo/yon-symbol.png
 ├── src/
 │   ├── api/                      # 공통 클라이언트·오류·Query 설정 및 화면별 API
