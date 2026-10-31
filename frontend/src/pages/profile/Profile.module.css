@@ -49,7 +49,20 @@
 .accountPanel { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-4); }
 .page .accountPanel h2 { font-size: 1.125rem; margin-block-end: var(--space-1); }
 .logout { gap: var(--space-2); }
+/* 계정 관리의 로그아웃·모든 기기 로그아웃 버튼: 작은 글씨와 좁은 좌우 여백. 터치 높이(공통 Button 2.75rem)는 유지한다.
+   공통 Button 규칙보다 우선하도록 .page를 붙인다. */
+.page .accountButton { padding-inline: var(--space-3); font-size: var(--font-size-small); }
 .accountError { flex: 1 1 100%; }
+/* 모든 기기 로그아웃: 탈퇴 영역과 같은 구분선·간격, 제목·설명은 상단 계정 관리와 같은 크기. 버튼은 일반 로그아웃과 같은 보조 버튼이다.
+   확인 영역은 붉은색 대신 중립 테두리를 써 회원 탈퇴와 구분한다. 좁으면 설명 아래로 버튼이 줄바꿈된다. */
+.logoutAllArea { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding-block-start: var(--space-3); border-block-start: 1px solid var(--color-border); }
+.logoutAllText { display: grid; gap: var(--space-1); flex: 1 1 16rem; min-width: 0; }
+.page .logoutAllText h3 { margin: 0; font-size: 1rem; }
+.logoutAllConfirm { display: grid; gap: var(--space-3); inline-size: 100%; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-muted); font-size: var(--font-size-small); }
+.logoutAllConfirm:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.page .confirmTitle { font-weight: 700; }
+.logoutAllArea > .error { flex-basis: 100%; }
+.loginAgain { display: inline-flex; align-items: center; min-block-size: 2.75rem; color: var(--color-primary); font-weight: 600; }
 .lines { display: grid; gap: var(--space-1); }
 /* 맞춤 조건 폼: 상자를 겹치지 않고 범례를 소제목·라벨로 사용한다. 관심 분야 폼의 fieldset·summary는 그대로 둔다. */
 .page .formSection, .page .region { display: grid; gap: var(--space-3); min-width: 0; margin: 0; padding: 0; border: 0; }

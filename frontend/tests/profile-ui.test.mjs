@@ -317,3 +317,34 @@ test('profile routes consume the shared region query and restore three-level res
   assert.match(failure, /지역 목록 다시 시도/)
   assert.doesNotMatch(failure, /disabled=""[^>]*>맞춤 조건 저장/)
 })
+
+test('logout-all lives only in the account card between the regular logout and withdrawal, closed by default, while the header keeps its single logout', () => {
+  const html = render()
+  const card = html.slice(html.indexOf('aria-labelledby="account-title"'))
+  // 계정 관리: 상단 로그아웃 → 모든 기기 로그아웃 항목 → 회원 탈퇴 순서
+  assert.match(card, /<h2 id="account-title">계정 관리<\/h2>[\s\S]*?>로그아웃<\/button>[\s\S]*?<div class="logoutAllArea"><div class="logoutAllText"><h3 id="logout-all-title">모든 기기 로그아웃<\/h3><p class="help">다른 기기의 로그인도 종료할 수 있어요\.<\/p><\/div><button aria-controls="logout-all-confirm" aria-expanded="false" type="button" class="button secondary accountButton">모든 기기 로그아웃<\/button><\/div><div class="withdrawArea">/)
+  assert.doesNotMatch(html, /id="logout-all-confirm"|모든 기기에서 로그아웃할까요/)
+  // 헤더는 그대로다: 모든 기기 로그아웃이 없다.
+  const header = html.slice(0, html.indexOf('</header>'))
+  assert.match(header, />로그아웃<\/button>/)
+  assert.doesNotMatch(header, /모든 기기/)
+  const css = fs.readFileSync(new URL('../src/pages/profile/Profile.module.css', import.meta.url), 'utf8')
+  assert.match(css, /\.logoutAllArea \{[^}]*flex-wrap: wrap;[^}]*border-block-start: 1px solid var\(--color-border\);/)
+  assert.doesNotMatch(css.match(/\.logoutAllConfirm \{[^}]*\}/)[0], /color-error/)
+})
+
+test('my page shows a completion state after logout-all and keeps an uncertain result visible even when the account card is gone', () => {
+  const { AuthContext } = require('../src/auth/AuthContext.ts')
+  const { MyPage } = require('../src/pages/profile/ProfilePages.tsx')
+  const view = value => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+    try { return renderToStaticMarkup(e(QueryClientProvider, { client }, e(MemoryRouter, null, e(AuthContext.Provider, { value: { logoutPending: false, logoutError: null, completeOAuth: async () => {}, logout: async () => {}, ...value } }, e(MyPage))))) } finally { client.clear() }
+  }
+  const done = view({ status: 'anonymous', loggedOutAll: true })
+  assert.match(done, /모든 기기에서 로그아웃했어요/)
+  assert.match(done, /href="\/login\?returnTo=%2Fmypage"[^>]*>다시 로그인하기/)
+  const uncertain = view({ status: 'anonymous', logoutAllError: new ApiError('timeout', 'x') })
+  assert.match(uncertain, /role="alert">모든 기기 로그아웃 완료 여부를 확인하지 못했어요\. 서버에서 이미 처리됐을 수 있어/)
+  assert.match(uncertain, /로그인이 필요해요/)
+  assert.doesNotMatch(view({ status: 'anonymous', logoutAllError: null }), /모든 기기 로그아웃 완료 여부/)
+})

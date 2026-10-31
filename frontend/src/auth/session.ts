@@ -1,5 +1,5 @@
 import type { QueryClient, Query } from '@tanstack/react-query'
-import { deleteCurrentUser, getCurrentUser, postLogout, verifyOAuthUser } from '../api/auth.ts'
+import { deleteCurrentUser, getCurrentUser, postLogout, postLogoutAll, verifyOAuthUser } from '../api/auth.ts'
 import type { AuthUser } from '../api/auth.ts'
 import { endAuthSession, onAuthLost, resetAuthRecovery } from '../api/client.ts'
 import { ApiError } from '../api/ApiError.ts'
@@ -56,7 +56,7 @@ export function observeAuthLoss(client: QueryClient): () => void {
   })
 }
 
-export type AuthTransitionKind = 'oauth' | 'logout' | 'withdraw'
+export type AuthTransitionKind = 'oauth' | 'logout' | 'logout-all' | 'withdraw'
 type AuthTransition = { isPending: boolean; isError: boolean; variables?: AuthTransitionKind; error: Error | null }
 type AuthQueryState = { isPending: boolean; isFetching: boolean; isError: boolean; data: AuthUser | null | undefined }
 export function isUncertainLogout(error: unknown): boolean {
@@ -99,10 +99,11 @@ export function createAuthActions(client: QueryClient) {
       let pushReleased = true
       try {
         const user = client.getQueryData<AuthUser | null>(authQueryKey)
-        // 탈퇴도 세션 종료다. 인증이 남아 있는 동안 푸시 엔드포인트를 먼저 해제한다.
+        // 탈퇴·모든 기기 로그아웃도 세션 종료다. 인증이 남아 있는 동안 이 브라우저의 푸시 엔드포인트를 먼저 해제한다.
+        // 다른 기기의 엔드포인트는 서버(USER_SESSION_ENDED)가 비활성화한다.
         // 푸시 정리 실패가 서버 로그아웃·탈퇴를 막지 않는다. 실패한 정리 상태는 저장소에 그대로 남긴다.
         if (user) await releasePushSession(user.id).catch(() => { pushReleased = false })
-        await (kind === 'withdraw' ? deleteCurrentUser() : postLogout())
+        await (kind === 'withdraw' ? deleteCurrentUser() : kind === 'logout-all' ? postLogoutAll() : postLogout())
       } catch (error) {
         if (isUncertainLogout(error)) {
           // 응답 유실은 서버 성공/실패를 확정하지 않는다. mutation이 pending인 동안
@@ -122,5 +123,5 @@ export function createAuthActions(client: QueryClient) {
     inFlight = { kind, promise }
     return promise
   }
-  return { completeOAuth: () => run('oauth'), logout: () => run('logout'), withdraw: () => run('withdraw') }
+  return { completeOAuth: () => run('oauth'), logout: () => run('logout'), logoutAll: () => run('logout-all'), withdraw: () => run('withdraw') }
 }
