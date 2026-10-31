@@ -66,7 +66,8 @@ test('home hero keeps its title and actual CTA destinations without duplicate co
   assert.doesNotMatch(hero, /맞춤 추천 보기|맞춤 조건 설정하기/)
   assert.match(html, /id="recommendations"/)
   assert.match(html, /<h2 id="latest-heading">최근 등록된 기회/)
-  assert.match(html, /<h2 id="recommendations-heading">개인화 추천/)
+  // 되돌리기 안내가 닫힐 때 포커스를 받을 수 있게 tabIndex=-1을 둔다.
+  assert.match(html, /<h2 id="recommendations-heading" tabindex="-1">개인화 추천/)
   assert.match(html, /href="\/login\?returnTo=/)
   assert.doesNotMatch(html, /href="\/signup/)
 })

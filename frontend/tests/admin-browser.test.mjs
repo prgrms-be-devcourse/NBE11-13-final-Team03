@@ -16,6 +16,8 @@ const entry = String.raw`
   import React from 'react';import {createRoot} from 'react-dom/client';import {BrowserRouter} from 'react-router-dom';import {QueryClientProvider} from '@tanstack/react-query';
   import {AxiosError} from 'axios';import {queryClient} from '/src/api/queryClient.ts';import {apiClient} from '/src/api/client.ts';import App from '/src/App.tsx';import '/src/index.css';
   document.cookie='XSRF-TOKEN=test-admin; path=/';
+  // 헤드리스 가상 시간에서는 서비스 워커 조회가 끝나지 않을 수 있어(인증 확인의 푸시 정리가 멈춤) 기존 브라우저 테스트처럼 빈 목록으로 대체한다.
+  navigator.serviceWorker.getRegistrations=async()=>[];
   const scenario=new URLSearchParams(location.search).get('scenario');
   const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const until=async(check,label)=>{for(let i=0;i<600;i++){if(check())return;await wait(20)}throw Error('timeout: '+label+' | '+document.body.textContent.slice(0,600))};

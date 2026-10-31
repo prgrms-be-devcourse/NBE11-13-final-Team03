@@ -102,3 +102,18 @@
 @media (min-width: 1024px) {
   .vacantSlot { display: block; min-block-size: 22rem; }
 }
+/* 숨김 되돌리기: 개인화 추천 제목 줄 오른쪽 끝의 작은 안내. 흰 면·얇은 테두리만 둔다(왼쪽 강조선 없음).
+   비어 있으면 자리를 차지하지 않아 제목 줄 높이가 바뀌지 않는다. 좁은 화면에서는 제목 아래로 줄바꿈된다.
+   AppLayout의 .content p 색보다 우선하도록 .undoRegion을 붙인다. */
+.undoRegion { margin-inline-start: auto; }
+.undoRegion:empty { display: none; }
+.undo { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); padding: 0 var(--space-1) 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+.undoRegion .undoText { margin: 0; color: var(--color-text-primary); font-size: var(--font-size-small); font-weight: 600; white-space: nowrap; }
+.undoActions { display: flex; align-items: center; }
+/* 안내 문구와 같은 작은 글씨·좁은 좌우 여백으로 줄인다. 터치 영역 높이(공통 Button 2.75rem)는 유지한다.
+   공통 Button 규칙보다 우선하도록 .undo를 붙인다. */
+.undo .undoButton { padding-inline: var(--space-2); font-size: var(--font-size-small); font-weight: 600; }
+.undoClose { min-inline-size: 2.75rem; padding-inline: var(--space-2); color: var(--color-text-secondary); }
+.undoRegion .undoError { flex-basis: 100%; margin: 0; padding: 0 var(--space-2) var(--space-2) 0; color: var(--color-error); font-size: var(--font-size-small); }
+.undoRegion .undoDone { margin: 0; color: var(--color-primary-dark); font-size: var(--font-size-small); font-weight: 600; }
+.sectionHeader h2:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }

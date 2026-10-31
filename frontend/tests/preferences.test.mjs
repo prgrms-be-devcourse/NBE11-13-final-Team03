@@ -206,3 +206,30 @@ test('saved-list observer uses account-specific keys and cancellation signals wi
   assert.equal(queryClient.getQueryData(savedOpportunitiesQuery(22).queryKey), undefined)
   off(); queryClient.clear()
 })
+
+test('a same-user background auth re-check during a hide is awaited, not treated as an account change; a different user still stops it', async () => {
+  csrf()
+  for (const [label, nextUser, expectHide] of [['same user', { ...user }, true], ['different user', { id: 99, nickname: '다른 회원', email: null, role: 'USER' }, false]]) {
+    const queryClient = client()
+    queryClient.setQueryData(authQueryKey, user)
+    const owner = queryClient.getQueryData(authQueryKey)
+    const recheck = deferred()
+    // 창 포커스 복귀 같은 백그라운드 재확인. 구조적 공유로 같은 사용자면 같은 객체가 유지된다.
+    const checking = queryClient.fetchQuery({ queryKey: authQueryKey, queryFn: () => recheck.promise, staleTime: 0 })
+    const calls = []
+    apiClient.defaults.adapter = async config => { calls.push(`${config.method} ${config.url}`); return response(config) }
+    const change = runPreferenceChange(queryClient, owner, 42, 'hide', 'RECOMMENDATION')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    // 재확인이 끝나기 전에는 요청을 보내지 않는다.
+    assert.deepEqual(calls, [], label)
+    recheck.resolve(nextUser); await checking
+    if (expectHide) {
+      await change
+      assert.deepEqual(calls, ['post /opportunities/42/hide'], label)
+    } else {
+      await assert.rejects(change, error => error instanceof ApiError && error.kind === 'cancelled', label)
+      assert.deepEqual(calls, [], label)
+    }
+    queryClient.clear()
+  }
+})
