@@ -73,7 +73,7 @@ test('Chrome verifies saved paging/removal, detail and search save changes, reco
       await wait(()=>action(policy.title+' 저장됨, 저장 해제')&&!action(policy.title+' 저장됨, 저장 해제').disabled);
       action(policy.title+' 저장됨, 저장 해제').click();await wait(()=>action(policy.title+' 저장하기')&&!action(policy.title+' 저장하기').disabled);
       action(policy.title+' 저장하기').click();await wait(()=>action(policy.title+' 저장됨, 저장 해제')&&!action(policy.title+' 저장됨, 저장 해제').disabled);
-      ensure(calls.some(call=>call.url==='/opportunities/42/save'&&call.method==='post'&&call.params.source==='OTHER'),'detail save source');
+      ensure(calls.some(call=>call.url==='/opportunities/42/save'&&call.method==='post'&&call.params.source==='SAVED'),'detail save keeps the saved-list entry source');
       menu('홈').click();await wait(()=>action(recommendation.title+' 추천에서 숨기기')&&!action(recommendation.title+' 추천에서 숨기기').disabled);
       await wait(()=>action(latest.title+' 저장 해제')&&!action(latest.title+' 저장 해제').disabled);
       const bookmark=action(latest.title+' 저장 해제');

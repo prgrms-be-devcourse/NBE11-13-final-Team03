@@ -44,6 +44,7 @@
     "com.team3.backend.search.OpportunitySearchCandidateEquivalenceTest": "Explicit opt-in disabled: YON_SEARCH_EQUIVALENCE_DB_URL",
     "com.team3.backend.search.benchmark.OpportunityDetailBenchmarkTest": "Explicit opt-in disabled: YON_DETAIL_BENCH",
     "com.team3.backend.search.service.SearchRelevanceEquivalenceTest": "Explicit opt-in disabled: YON_SEARCH_RELEVANCE_OUTPUT",
+    "com.team3.backend.behavior.benchmark.UserBehaviorEventBenchmarkTest": "Explicit opt-in disabled: YON_BEHAVIOR_BENCH_DB_URL",
     "com.team3.dataservice.opportunity.ingest.RawIngestBenchmarkTest": "Explicit opt-in disabled: YON_BENCH_DB_URL"
   },
   "browser": [

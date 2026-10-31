@@ -21,8 +21,8 @@
 - users FK의 ON DELETE CASCADE와 opportunities FK의 삭제 제한을 모두 복사한다.
   `_old`도 같은 FK를 유지하므로 탈퇴 시 두 복사본에서 모두 삭제돼 롤백해도 탈퇴 로그가 복원되지 않는다.
 - ID 단독으로 행동 로그를 참조하는 예상 밖 FK가 있으면 전환을 중단한다.
-- 별도 보관 기간·파티션 삭제 스케줄은 추가하지 않는다. 보관 정책은 팀에서 결정한다.
-  `_old` 보관 중에는 탈퇴 외의 로그 삭제·수정이나 파티션 삭제를 수행하지 않는다.
+- 보관 기간은 현재 월을 포함한 4개월(설정값)이다. 오래된 월 파티션은 6절의 자동 정리로만 삭제하며 기본은 꺼져 있다.
+  `_old` 보관 중에는 탈퇴 외의 로그 삭제·수정이나 파티션 삭제를 수행하지 않는다(자동 정리도 `_old`가 있으면 건너뛴다).
 
 ## 1. 전환 준비
 
@@ -145,7 +145,176 @@ set -euo pipefail
 
 점검 SQL로 전체 데이터 보존·DEFAULT=0을 확인하고 backend를 다시 올린다.
 
+## 6. 보관 정리 (자동, 기본 비활성)
+
+backend의 `UserBehaviorEventRetentionScheduler`가 매월 1일 03:00 KST에 실행한다.
+**현재 월 + 직전 3개월(4개월)** 을 남기고, 범위 끝이 보관 시작일 이하인 월 파티션을 `DROP TABLE`로 삭제한다.
+예: 2026-11-01 실행 → 2026-08~11 보관, 2026-07 이전 파티션 삭제. 이번 달+12개월까지 없는 월 파티션도 만든다(5절 SQL과 같은 범위).
+
+| 설정 (환경 변수) | 기본 | 의미 |
+|---|---|---|
+| `yon.behavior.retention.enabled` (`YON_BEHAVIOR_RETENTION_ENABLED`) | false | true일 때만 등록. `app.scheduling.enabled=false`면 꺼짐 |
+| `yon.behavior.retention.retained-months` (`YON_BEHAVIOR_RETENTION_RETAINED_MONTHS`) | 4 | 현재 월 포함 보관 월 수, 1 이상 |
+| `yon.behavior.retention.dry-run` (`YON_BEHAVIOR_RETENTION_DRY_RUN`) | true | 삭제·생성 대상만 로그로 남김 |
+| `yon.behavior.retention.lock-timeout` | 3s | 계획 조회(관리자 미리보기 포함)와 파티션 DDL 하나의 잠금 대기 한도 |
+
+보호 장치:
+
+- 부모가 `RANGE (received_at)` 파티션 테이블이 아니면(일반 테이블·롤백 상태) 아무것도 바꾸지 않는다.
+- `user_behavior_events_old`가 있으면(롤백 기간) 아무것도 바꾸지 않는다. 롤백 SQL의 건수 검증이 깨지기 때문이다.
+- 이름이 아니라 카탈로그의 실제 범위(`FROM ... TO ...`)로 판정한다. DEFAULT, 해석할 수 없는 범위(MINVALUE 등), 하위 파티션 테이블, 부모에 붙지 않은 테이블은 건드리지 않는다.
+  DEFAULT에 행이 있으면 경고만 남긴다(5절 복구 절차).
+- advisory lock으로 여러 서버·중복 실행 중 하나만 진행한다. 파티션마다 별도 트랜잭션·`lock_timeout`을 쓰며 실패한 파티션은 남기고 다음 실행에서 다시 판정한다.
+- 앱과 DB의 KST 날짜가 하루 넘게 다르면 실행하지 않는다.
+- 서버가 03:00에 꺼져 있어 실행을 놓치면 데이터가 한 달 더 남고 다음 달 실행에서 함께 정리된다. 기다리지 않으려면 7절 수동 실행을 쓴다.
+
+경계 예시 (보관 시작일 = 실행 월 1일 - 3개월, 그 이전 시각의 행이 든 파티션만 삭제):
+
+| 실행일 | 보관 | 삭제되는 마지막 시각 | 보관되는 첫 시각 |
+|---|---|---|---|
+| 2026-11-01 | 2026-08 ~ 11 | 2026-07-31 23:59:59.999999 | 2026-08-01 00:00 (2026-10-31 23:59:59.999999도 보관) |
+| 2027-01-01 | 2026-10 ~ 2027-01 | 2026-09-30 23:59:59.999999 | 2026-10-01 00:00 |
+| 2027-02-10 | 2026-11 ~ 2027-02 | 2026-10-31 23:59:59.999999 | 2026-11-01 00:00 |
+| 2028-05-31 | 2028-02 ~ 05 (윤년) | 2028-01-31 23:59:59.999999 | 2028-02-01 00:00 (2028-02-29 23:59:59.999999도 보관) |
+
+실행 순서와 실패 시 동작 (자동·수동 공통):
+
+1. advisory lock 획득 → 부모·`_old` 확인 → 파티션 목록 한 번 조회. 잠금은 생성·삭제·DEFAULT 점검이 모두 끝날 때까지 유지한다.
+   계획 조회(파티션 크기·DEFAULT 행 확인)는 `lock-timeout`과 문장 10초 제한이 걸린 읽기 트랜잭션에서 하며 끝나면 항상 롤백한다.
+   다른 연결이 파티션을 `ACCESS EXCLUSIVE`로 잡고 있으면 제한 시간 뒤 오류로 끝나고 생성·삭제를 하나도 하지 않는다
+   (advisory lock은 해제, 수동 종료 코드 3). 잠금이 풀린 뒤 다시 실행한다.
+2. 미래 월 생성: 월마다 별도 트랜잭션. 실패한 달(DEFAULT에 그 달 행이 있거나 같은 이름의 테이블이 있음)은 롤백되고 나머지 달과 삭제는 계속한다.
+   미생성 달의 이벤트는 DEFAULT로 들어가므로 INSERT는 실패하지 않는다. DEFAULT 행은 5절 절차로 옮긴 뒤 다시 실행한다.
+3. 오래된 월 삭제: 파티션마다 별도 트랜잭션. 잠금 시간 초과·의존 객체 등으로 실패한 파티션은 데이터와 함께 그대로 남고 다른 파티션 삭제는 계속한다.
+4. 이미 커밋된 생성·삭제는 이후 실패로 되돌려지지 않는다. 한 건이라도 실패하면 `COMPLETED_WITH_FAILURES`(WARN 로그, 수동 종료 코드 1)로 기록한다.
+5. 다시 실행하면 그 시점의 카탈로그로 다시 판정하므로 실패했던 파티션만 처리된다.
+
+활성화 순서 (운영 DB에 직접 DDL을 실행하지 않는다):
+
+1. 운영 DB에서 1~3절 전환·D+1 점검과 `_old` 삭제가 끝났는지 점검 SQL로 확인한다(`relkind=p`, DEFAULT 0행, `_old` 없음).
+2. 삭제될 월의 데이터가 백업에 포함되어 있는지 [백업 문서](db-backup.md)로 확인한다. 삭제된 파티션은 백업 복원으로만 되살릴 수 있다.
+3. `.env`에 `YON_BEHAVIOR_RETENTION_ENABLED=true`(dry-run 기본 true)로 배포하고, 다음 1일 03:00 로그
+   `Behavior event retention COMPLETED: dryRun=true, keepFrom=..., dropped=[...]`의 대상이 맞는지 확인한다.
+4. 팀 합의 후 `YON_BEHAVIOR_RETENTION_DRY_RUN=false`로 바꾸고 재시작한다. 다음 실행 후 점검 SQL로 남은 파티션을 확인한다.
+
+## 7. 수동 정리 (운영자 재실행)
+
+서버 정지로 1일 실행을 놓쳤거나 일부 파티션이 실패했을 때 쓴다. 새 API·서버 없이 **같은 backend 이미지를 웹 서버 없는 일회성 컨테이너**로 띄워
+`UserBehaviorEventRetentionManualRun`이 한 번 실행하고 종료한다. 자동 정리 활성화(`YON_BEHAVIOR_RETENTION_ENABLED`)와 무관하지만
+보관 개월 수·잠금 시간 설정과 판정·보호 장치(advisory lock, 일반 테이블·`_old`·DEFAULT 보호, 시계 확인)는 자동 실행과 같은 코드를 쓴다.
+
+- 권한: 메인 서버의 배포 폴더와 `.env`(application_user 접속 정보). DDL은 파티션 소유자인 application_user로 실행된다. 운영 DB에 직접 접속하지 않는다.
+- 기본은 dry-run이다. 실제 생성·삭제는 `YON_BEHAVIOR_RETENTION_MANUAL_EXECUTE=true`를 줄 때만 한다.
+- 웹 서버로 떠 있는 일반 backend에서는 수동 설정이 있어도 실행하지 않는다. 수동 변수는 `.env`에 넣지 않고 명령에만 준다.
+- 자동 실행이나 다른 수동 실행이 진행 중이면 잠금을 얻지 못해 아무것도 하지 않고 종료한다(종료 코드 2).
+
+메인 서버(`~/yon`)에서 트래픽이 적은 시간에 실행한다. 다른 backend와 같은 서버에서 JVM이 하나 더 뜨므로 힙을 작게 준다.
+
+```bash
+cd ~/yon
+# 1) dry-run: 생성·삭제 대상만 로그로 확인
+docker compose --env-file .env --env-file deploy.env run --rm --no-deps \
+  -e SPRING_JPA_HIBERNATE_DDL_AUTO=none -e APP_SCHEDULING_ENABLED=false -e SPRING_MAIN_WEB_APPLICATION_TYPE=none \
+  -e YON_NORMALIZATION_CONDITION_SET_BACKFILL_ENABLED=false -e JAVA_TOOL_OPTIONS=-Xmx384m \
+  -e YON_BEHAVIOR_RETENTION_MANUAL_RUN=true backend
+echo "exit=$?"
+# 2) 대상이 맞으면 실제 실행: 같은 명령에 -e YON_BEHAVIOR_RETENTION_MANUAL_EXECUTE=true 를 추가한다
+```
+
+- 로그: `Behavior event retention started: trigger=manual-dry-run|manual, appDate, dbDate, retainedMonths, dryRun`,
+  파티션별 `created`·`dropping ... estimatedRows, bytes`, 요약 `Behavior event retention <상태>: keepFrom, created, dropped, failed, ignored`,
+  `finished: elapsedMs`, `exiting with code N`.
+- 종료 코드: 0 완료, 1 일부 실패(실패 파티션은 남음, 원인 해결 후 재실행), 2 건너뜀(잠금·일반 테이블·`_old`·시계 불일치), 3 실행 오류.
+- 기동 시 DB를 바꾸는 경로는 Hibernate `ddl-auto`(application.yaml과 main()이 항상 붙이는 database-boundary 프로필 모두 `update`)뿐이다.
+  Flyway·Liquibase·SQL 초기화는 없고 DB 경계 검증은 읽기 전용이다. 위 명령의 `SPRING_JPA_HIBERNATE_DDL_AUTO=none`은 OS 환경 변수라
+  두 설정 파일보다 우선하므로 dry-run·실제 실행 모두 Hibernate가 스키마를 바꾸지 않는다(`RetentionManualDdlPostgresTest`).
+  보관 정리 자체의 파티션 구조 검증·생성·삭제는 이 설정과 무관하게 그대로 동작한다. 조건 묶음 백필은 compose가 이미 끄지만 명령에도 명시했다.
+- `run --no-deps`는 새 일회성 컨테이너만 만들며 실행 중인 backend·notification-service 컨테이너를 재시작하지 않는다(서비스 간 depends_on도 없다).
+  일반 backend의 `ddl-auto` 설정은 바꾸지 않았다.
+- 롤백 한계: 삭제된 파티션과 데이터는 되돌릴 수 없고 [백업](db-backup.md) 복원으로만 살릴 수 있다. 실제 실행 전 반드시 dry-run과 백업을 확인한다.
+  잘못 만든 빈 미래 파티션은 지워도 되지만, 그 달 데이터가 이미 들어왔다면 DEFAULT 이동 절차(5절)와 같은 검토가 필요하다.
+- 이 명령은 로컬 테스트로 동작 경로를 검증했으며, 운영 서버에서 실제로 실행해 확인하지는 않았다. 첫 사용은 dry-run으로 확인한다.
+
+## 8. 관리자 API (관리자 페이지 연동)
+
+실행 중인 backend의 ADMIN API로 미리보기·실행을 한다. 판정·보호 장치·advisory lock은 자동·수동 실행과 같은 코드를 쓴다.
+관리자 페이지 프런트엔드는 아직 없으므로 아래 계약을 연동 기준으로 삼는다.
+
+| 설정 (환경 변수) | 기본 | 의미 |
+|---|---|---|
+| `yon.behavior.retention.admin-execute-enabled` (`YON_BEHAVIOR_RETENTION_ADMIN_EXECUTE_ENABLED`) | false | 실행 API 허용. 미리보기는 설정과 무관하게 읽기 전용으로 동작 |
+
+자동 정리(`enabled`)·dry-run 설정과 별개다. 실행 API는 dry-run 설정과 무관하게 **실제** 생성·삭제를 한다(미리보기가 dry-run 역할).
+
+**인증·인가·CSRF**: 기존 쿠키 인증(access token)과 SPA CSRF(`XSRF-TOKEN` 쿠키 → `X-XSRF-TOKEN` 헤더)를 그대로 쓴다.
+`@PreAuthorize("hasAuthority('ADMIN')")`로 서버에서 검사하며, 실행은 추가로 DB의 현재 역할이 ADMIN이고 현재 `ADMIN_KAKAO_IDS` 목록에 있는지 다시 확인한다
+(역할은 로그인 시 승격만 되고 목록에서 빠져도 강등되지 않기 때문이다).
+
+### GET `/api/admin/behavior-events/retention/preview`
+
+DB를 바꾸지 않고 advisory lock도 잡지 않는다. 다른 연결이 파티션을 잠그고 있으면 `lock-timeout` 뒤 500으로 끝난다(잠시 후 다시 조회). 응답 예:
+
+```json
+{
+  "status": "READY",
+  "policy": {"retainedMonths": 4, "futureMonths": 12, "schedule": "매월 1일 03:00 (Asia/Seoul)",
+             "schedulerEnabled": false, "schedulerDryRun": true, "adminExecuteEnabled": false},
+  "baseDate": "2026-11-01", "keepFrom": "2026-08-01",
+  "toDrop": [{"name": "user_behavior_events_2026_07", "from": "2026-07-01T00:00:00", "to": "2026-08-01T00:00:00",
+              "estimatedRows": 152672, "totalBytes": 28311552}],
+  "toCreate": [{"name": "user_behavior_events_2027_11", "from": "2027-11-01T00:00:00", "to": "2027-12-01T00:00:00", "conflict": false}],
+  "ignored": [{"name": "...", "bound": "FOR VALUES FROM (MINVALUE) TO (...)"}],
+  "defaultPartitionHasRows": false,
+  "planToken": "9f2c..."
+}
+```
+
+- `status`: `READY` 또는 `SKIPPED_NOT_PARTITIONED`(일반 테이블)·`SKIPPED_ROLLBACK_WINDOW`(`_old` 있음)·`SKIPPED_CLOCK_MISMATCH`. READY가 아니면 `planToken`은 null이고 실행 버튼을 막는다.
+- `estimatedRows`는 PostgreSQL 통계 추정치(정확한 COUNT 아님, ANALYZE 전이면 -1 또는 0), `totalBytes`는 인덱스 포함 크기다.
+- `ignored`(해석할 수 없는 범위)와 `defaultPartitionHasRows=true`는 삭제되지 않으며 운영 확인이 필요하다는 경고로 표시한다.
+
+### POST `/api/admin/behavior-events/retention/execute`
+
+본문 `{"planToken": "<미리보기의 planToken>"}`. 서버는 advisory lock을 잡고 계획을 다시 만든 뒤 토큰이 같을 때만 실행한다.
+파티션 이름·SQL은 받지 않는다.
+
+| 응답 | 의미 | 화면 처리 |
+|---|---|---|
+| 200 `status=COMPLETED` | 생성·삭제 완료 (`created`, `dropped`) | 결과 표시 후 미리보기 새로고침 |
+| 200 `status=COMPLETED_WITH_FAILURES` | 일부 실패 (`failed`: "파티션: 원인"), 성공분은 유지 | 실패 목록 표시, 원인 해결 후 다시 미리보기 → 실행 |
+| 400 `COMMON_001` | planToken 없음 | 미리보기부터 다시 |
+| 401 | 로그인 필요 | 로그인 |
+| 403 `RETENTION_001` | 관리자 아님(또는 현재 관리자 목록에 없음) | 권한 안내 |
+| 403 `RETENTION_002` | 실행 API 비활성화 | 미리보기만 제공 |
+| 403 (CSRF) | CSRF 토큰 없음·불일치 | 기존 apiClient의 CSRF 처리 |
+| 409 `RETENTION_003` | 미리보기 이후 기준 월·대상이 바뀜 | 다시 미리보기 후 확인 |
+| 409 `RETENTION_004` | 자동·수동·다른 관리자 실행이 진행 중 | 잠시 후 다시 미리보기 |
+| 409 `RETENTION_005` | 일반 테이블·`_old`·시계 불일치로 실행 불가 | 미리보기 상태 표시 |
+| 500 | 계획 조회가 파티션 잠금 대기 한도를 넘음 등 실행 오류. 아무것도 바꾸지 않음 | 잠시 후 다시 미리보기 |
+
+권장 화면 흐름: 미리보기 표시 → 삭제 대상·보관 시작일을 보여 주는 확인 대화상자 → 실행 → 결과 표시와 미리보기 새로고침.
+감사 로그는 `action=BEHAVIOR_RETENTION_PREVIEW|EXECUTE adminUserId=… result=…`로 남는다(관리자 내부 ID만, 토큰·개인정보 없음).
+
+활성화 순서: 6절 1~2단계(운영 파티션·`_old`·백업 확인) → 관리자 계정으로 미리보기 확인 → 팀 합의 후
+`.env`에 `YON_BEHAVIOR_RETENTION_ADMIN_EXECUTE_ENABLED=true`로 재배포한다.
+
 ## 검증
+
+`RetentionAdminApiPostgresTest`는 실제 보안 필터·메서드 보안·CSRF로 비로그인 401, USER 403, 목록에서 빠진 ADMIN의 실행 403,
+CSRF 누락·불일치 403, 실행 비활성 403, 미리보기의 무변경·무잠금과 4개월 계획, 토큰 일치 실행, 위조·월 변경·대상 변경 시 409,
+진행 중 실행과 `_old` 차단, 비정상 파티션 보호, 부분 실패 후 재실행, 감사 로그,
+파티션·DEFAULT가 외부에서 `ACCESS EXCLUSIVE`로 잠겼을 때 미리보기·실행의 제한 시간 내 종료와 advisory lock·풀 연결 상태 정상, 해제 후 재실행을 검증한다.
+`RetentionManualDdlPostgresTest`는 7절 명령과 같은 OS 환경 변수로 기동한 dry-run·실제 실행이 Hibernate 스키마를 바꾸지 않고
+일반 기동은 기존처럼 update로 동작함을 검증한다.
+
+`UserBehaviorEventRetentionPostgresTest`는 PostgreSQL 16 폐기 DB에서 공식 전환 SQL을 적용한 뒤 4개월 보관,
+6절 경계 예시의 행 단위 삭제·보관(연도 변경·윤년 포함), 반복·dry-run, 잠금 시간 초과·의존 객체로 인한 삭제 실패와 재실행,
+계획 조회 잠금 시간 초과(실행·dry-run·계획) 후 같은 연결의 상태 정상과 재실행,
+미래 월 생성 실패 시 삭제 지속·실패 보고·DEFAULT INSERT·복구, advisory lock 충돌과 자동·수동 동시 실행,
+수동 dry-run·실제 실행과 자동 실행의 판정 일치, `_old`·DEFAULT·분리된 테이블·MINVALUE 범위·일반 테이블 보호,
+웹 서버 없는 일회성 기동, 새 월 INSERT 라우팅과 회원 탈퇴 삭제를 검증한다.
+`UserBehaviorEventRetentionSchedulerTest`는 자동·수동 실행의 등록 조건(서로 독립), 기본값(4개월·dry-run), 설정 검증,
+웹 backend 안에서의 수동 실행 거부, 종료 코드를 확인한다.
 
 `UserBehaviorPartitionPostgresTest`는 PostgreSQL 16 폐기 DB에서 application_user 소유권과
 실제 backend의 Hibernate update 재기동(DDL 오류 즉시 실패)을 사용한다.
