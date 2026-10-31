@@ -13,7 +13,7 @@ import AsyncState from '../../components/ui/AsyncState'
 import ArrowLink from '../../components/ui/ArrowLink'
 import LoginRequired from '../../components/auth/LoginRequired'
 import { formatDateTime } from '../../utils/date'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, CheckCheck, RefreshCw } from 'lucide-react'
 import styles from './NotificationPages.module.css'
 import PushControls from '../../push/PushControls'
 import { parsePushClick } from '../../push/protocol'
@@ -64,8 +64,7 @@ function NotificationList({ owner }: { owner: AuthUser }) {
   const pushedTarget = click && (pushedItem ? notificationTarget(pushedItem) : `/opportunities/${click.opportunityId}`)
   return <>
     {click && <Card className={styles.card}><p>푸시 알림으로 받은 내용을 확인해 보세요.</p><Button disabled={busy || !pushedTarget} onClick={() => { if (pushedTarget) open(click.notificationId, pushedTarget) }}>알림 확인하기</Button></Card>}
-    <div className={styles.toolbar}><ArrowLink to="/settings/notifications">알림 설정</ArrowLink>
-      <div className={styles.actions}><Button variant="ghost" disabled={busy} onClick={retry}>새로고침</Button><Button variant="secondary" disabled={busy || !items.length} loading={pending} onClick={() => { void run({ kind: 'read-all' }) }}>전체 읽음 처리</Button></div></div>
+    <div className={styles.toolbar}><Button variant="ghost" disabled={busy} onClick={retry}><RefreshCw size={16} aria-hidden="true" />새로고침</Button><Button variant="secondary" disabled={busy || !items.length} loading={pending} onClick={() => { void run({ kind: 'read-all' }) }}><CheckCheck size={16} aria-hidden="true" />전체 읽음 처리</Button></div>
     {mutation.isSuccess && <p role="status">알림 처리를 완료했어요.</p>}
     {mutation.isError && <RequestError error={mutation.error} retry={retry} path="/notifications" />}
     {result.isError && <RequestError error={result.error} retry={retry} path="/notifications" />}
@@ -100,22 +99,28 @@ function SettingsForm({ owner, settings, fetching }: { owner: AuthUser; settings
   const { mutation, pending, run } = useNotificationAction(owner)
   const client = useQueryClient()
   const enabled = draft ?? settings.inAppEnabled
+  const changed = draft !== null && draft !== settings.inAppEnabled
   // 마이페이지처럼 주제별 카드로 나눈다: 알림 받기(인앱) / 웹 푸시.
   return <>
-    <Card className={styles.card}><form className={styles.form} aria-labelledby="in-app-title" onSubmit={event => {
+    <Card className={styles.panel}><form className={styles.form} aria-labelledby="in-app-title" onSubmit={event => {
       event.preventDefault()
       if (fetching) return
       void run({ kind: 'settings', values: { inAppEnabled: enabled, pushEnabled: settings.pushEnabled } }).then(ok => { if (ok) setDraft(null) })
     }}>
-      <h2 id="in-app-title">알림 받기</h2>
-      {/* 푸시 설정은 아래 브라우저 푸시 카드에서 다룬다. 저장 시 기존 푸시 설정 값은 그대로 보낸다. */}
-      <label className={styles.toggle}><input type="checkbox" checked={enabled} disabled={pending || fetching} onChange={event => setDraft(event.target.checked)} />Y:ON 안에서 알림 받기</label>
-      {settings.updatedAt && <p className={styles.note}>마지막 변경: <time dateTime={settings.updatedAt}>{formatDateTime(settings.updatedAt)}</time></p>}
-      {mutation.isSuccess && draft === null && <p role="status">알림 설정을 저장했어요.</p>}
+      <div className={styles.sectionHead}><h2 id="in-app-title">알림 받기</h2>
+        <p className={styles.help}>신청 시작·마감 임박 같은 공고 소식을 알림 화면에서 확인해요.</p></div>
+      {/* 설정이 하나뿐이라 체크박스와 저장 버튼을 한 줄에 둔다. 저장 시 기존 푸시 설정 값은 그대로 보낸다. */}
+      <div className={styles.settingRow}>
+        <label className={styles.toggle}><input type="checkbox" checked={enabled} disabled={pending || fetching} onChange={event => setDraft(event.target.checked)} />Y:ON 안에서 알림 받기</label>
+        <div className={styles.formActions}><Button type="submit" loading={pending} disabled={fetching || !changed}>설정 저장</Button></div>
+      </div>
+      {/* 체크 상태가 저장값과 다를 때만 미저장을 알린다. 같으면 체크 상태가 곧 저장된 설정이다. */}
+      {changed ? <p className={styles.unsaved} role="status">{pending ? '설정을 저장하고 있어요.' : '저장하지 않은 변경이 있어요.'}</p>
+        : mutation.isSuccess && draft === null ? <p className={styles.saved} role="status">알림 설정을 저장했어요.</p>
+          : settings.updatedAt && <p className={styles.note}>마지막 변경 <time dateTime={settings.updatedAt}>{formatDateTime(settings.updatedAt)}</time></p>}
       {mutation.isError && <RequestError error={mutation.error} path="/settings/notifications" retry={() => { void client.invalidateQueries({ queryKey: notificationKeys.settings(owner.id) }, { throwOnError: true }).then(() => mutation.reset()).catch(() => {}) }} />}
-      <div className={styles.formActions}><Button type="submit" loading={pending} disabled={fetching || draft === null || enabled === settings.inAppEnabled}>설정 저장</Button></div>
     </form></Card>
-    <Card className={styles.card}><PushControls owner={owner} settings={settings} disabled={pending || fetching} /></Card>
+    <Card className={styles.panel}><PushControls owner={owner} settings={settings} disabled={pending || fetching} /></Card>
   </>
 }
 function Settings({ owner }: { owner: AuthUser }) {
@@ -126,8 +131,14 @@ function Settings({ owner }: { owner: AuthUser }) {
 }
 export function NotificationsPage() {
   const location = useLocation()
-  return <section className={styles.page} aria-labelledby="notifications-title"><h1 id="notifications-title">알림</h1><Access path={`/notifications${location.search}`}>{owner => <NotificationList key={owner.id} owner={owner} />}</Access></section>
+  // 제목과 설정 이동을 한 줄에 묶고, 목록 동작은 그 아래 도구 줄에 둔다.
+  return <section className={styles.page} aria-labelledby="notifications-title">
+    <header className={styles.pageHeader}><h1 id="notifications-title">알림</h1><ArrowLink to="/settings/notifications">알림 설정</ArrowLink></header>
+    <Access path={`/notifications${location.search}`}>{owner => <NotificationList key={owner.id} owner={owner} />}</Access></section>
 }
 export function NotificationSettingsPage() {
-  return <section className={styles.page} aria-labelledby="notification-settings-title"><ArrowLink direction="back" to="/notifications" aria-label="알림으로 돌아가기">알림</ArrowLink><h1 id="notification-settings-title">알림 설정</h1><Access path="/settings/notifications">{owner => <Settings key={owner.id} owner={owner} />}</Access></section>
+  return <section className={styles.page} aria-labelledby="notification-settings-title">
+    {/* 맞춤 조건 설정과 같이 뒤로가기 → 제목 → 패널 순서로 페이지 간격만 사용한다. */}
+    <ArrowLink direction="back" to="/notifications" aria-label="알림으로 돌아가기">알림</ArrowLink><h1 id="notification-settings-title">알림 설정</h1>
+    <Access path="/settings/notifications">{owner => <Settings key={owner.id} owner={owner} />}</Access></section>
 }

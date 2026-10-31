@@ -1,14 +1,25 @@
+/* 페이지 틀·제목·패널은 맞춤 조건 설정(Profile.module.css의 .page·h1·.panel)과 같은 값을 쓴다. */
 .page, .card, .form { display: grid; gap: var(--space-4); min-inline-size: 0; }
 .page { max-inline-size: 64rem; margin-inline: auto; }
 .page h1, .page h2, .page p { margin: 0; }
 .page h1 { font-size: clamp(1.75rem, 3vw, 2.25rem); margin-block-end: var(--space-2); }
+/* 목록: 제목과 설정 이동을 한 줄에 둔다. 제목 아래 간격은 h1 규칙을 그대로 따른다. */
+.pageHeader { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); margin-block-end: var(--space-2); }
+.pageHeader h1 { margin-block-end: 0; }
 .list { display: grid; gap: var(--space-3); list-style: none; padding: 0; margin: 0; }
 /* 저장 목록 카드와 같은 여백·그림자 없음 */
 .card { padding: var(--space-5); overflow-wrap: anywhere; box-shadow: none; }
 .card h2 { font-size: 1.125rem; line-height: 1.5; }
+/* 설정 패널: 맞춤 조건 설정 .panel과 같은 패딩·간격·카드 그림자, 섹션 제목은 .formSection > legend(1rem·700) */
+.panel { display: grid; gap: var(--space-4); padding: var(--space-5); min-inline-size: 0; }
+.page .panel h2 { font-size: 1rem; font-weight: 700; line-height: var(--line-height-body); }
+/* 제목·설명 아래 구분선: 맞춤 조건 설정 '추가 정보'(.extra > summary)의 선 색·여백(space-3)과 같다. */
+.sectionHead { display: grid; gap: var(--space-1); padding-block-end: var(--space-3); border-block-end: 1px solid var(--color-border); }
+.help { color: var(--color-text-secondary); font-size: var(--font-size-small); }
 .unread { border-inline-start: 3px solid var(--color-primary); background: var(--color-surface); }
 .toolbar, .meta, .footer, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
-.toolbar, .meta, .footer { justify-content: space-between; }
+.toolbar { justify-content: flex-end; gap: var(--space-2); }
+.meta, .footer { justify-content: space-between; }
 .actions { gap: var(--space-2); }
 /* 알림 종류는 공고 유형 배지와 같은 크기의 중립 배지, 읽음 상태는 오른쪽 상태 배지 */
 .kind, .readState { display: inline-flex; align-items: center; padding: var(--space-1) var(--space-2); border: 1px solid transparent; border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 600; line-height: 1.5; white-space: nowrap; }
@@ -21,8 +32,19 @@
 .footer .note { flex-basis: 100%; }
 .openButton { gap: var(--space-1); color: var(--color-primary); font-weight: 600; }
 .more { display: flex; justify-content: center; }
-.toggle { display: flex; align-items: center; gap: var(--space-3); min-block-size: 2.75rem; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+/* 설정 항목은 카드 안에 별도 테두리 상자를 두지 않는다. 체크박스와 저장 버튼을 한 줄에 두고 좁으면 줄바꿈한다. */
+.settingRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
+.toggle { display: flex; align-items: center; gap: var(--space-2); min-block-size: 2.75rem; font-weight: 600; }
 .toggle input { inline-size: 1.25rem; block-size: 1.25rem; flex-shrink: 0; accent-color: var(--color-primary); }
 .page .note { color: var(--color-text-secondary); font-size: 0.8125rem; line-height: var(--line-height-small); }
+.unsaved { color: var(--color-status-warning-text); font-size: var(--font-size-small); font-weight: 600; }
+.saved { color: var(--color-primary-dark); font-size: var(--font-size-small); }
 .formActions { display: flex; justify-content: flex-end; }
-@media (max-width: 767px) { .card { padding: var(--space-4); } .page, .card, .form { gap: var(--space-3); } }
+@media (max-width: 767px) {
+  /* 맞춤 조건 설정의 모바일 규칙: 제목 1.5rem, 패널 패딩 1.5rem·간격 1rem */
+  .page h1 { font-size: var(--font-size-heading); }
+  .panel { padding: var(--space-4); gap: var(--space-3); }
+  .card { padding: var(--space-4); }
+  .card, .form { gap: var(--space-3); }
+  .toolbar { justify-content: flex-start; }
+}

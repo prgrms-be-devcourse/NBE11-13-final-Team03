@@ -42,14 +42,15 @@ test('notification pages gate confirmed authentication and never display cached 
   }
 })
 
-test('notification settings use the shared back link and list toolbar uses a forward arrow link', () => {
+test('notification settings use the shared back link and the list header pairs the title with the settings link', () => {
   const settings = render({ view: 'settings' })
   // 제목은 헤더 메뉴 이름(알림)과 같고, 설정 화면의 뒤로가기도 같은 이름을 쓴다.
-  assert.match(settings, /<a aria-label="알림으로 돌아가기" class="arrowLink " href="\/notifications"[^>]*><svg[^>]*lucide-arrow-left[\s\S]*?<\/svg>알림<\/a><h1/)
+  // 맞춤 조건 설정과 같은 순서: 뒤로가기 → 제목 → 패널, 별도 묶음 없이 페이지 간격만 쓴다.
+  assert.match(settings, /<section class="page"[^>]*><a aria-label="알림으로 돌아가기" class="arrowLink " href="\/notifications"[^>]*><svg[^>]*lucide-arrow-left[\s\S]*?<\/svg>알림<\/a><h1/)
   assert.doesNotMatch(settings, /알림 목록으로<\/a>/)
   const list = render({})
-  assert.match(list, /<h1 id="notifications-title">알림<\/h1>/)
-  assert.match(list, /<div class="toolbar"><a class="arrowLink " href="\/settings\/notifications"[^>]*>알림 설정<svg[^>]*lucide-arrow-right[\s\S]*?<div class="actions"><button[^>]*>새로고침<\/button><button[^>]*>전체 읽음 처리/)
+  // 제목과 설정 이동은 한 줄, 목록 동작은 그 아래 도구 줄이다.
+  assert.match(list, /<header class="pageHeader"><h1 id="notifications-title">알림<\/h1><a class="arrowLink " href="\/settings\/notifications"[^>]*>알림 설정<svg[^>]*lucide-arrow-right[\s\S]*?<\/header><div class="toolbar"><button[^>]*class="button ghost "[^>]*>[\s\S]*?새로고침<\/button><button[^>]*class="button secondary "[^>]*>[\s\S]*?전체 읽음 처리<\/button><\/div>/)
 })
 
 test('notification cards follow the shared card pattern: badges on top, time and actions in a footer, centered more button', () => {
@@ -74,9 +75,16 @@ test('NEW_MATCH summary is labeled as a recommendation and offers a recommendati
 
 test('notification settings split in-app and web push into separate cards with the save action aligned right', () => {
   const html = render({ view: 'settings' })
-  assert.match(html, /<form class="form" aria-labelledby="in-app-title"><h2 id="in-app-title">알림 받기<\/h2>/)
-  assert.match(html, /<div class="formActions"><button type="submit"[^>]*>설정 저장<\/button><\/div><\/form><\/div><div class="[^"]*"><section class="section" aria-labelledby="web-push-title">/)
-  assert.match(html, /<div class="actions"><button[^>]*>이 브라우저 연결<\/button><button[^>]*>이 브라우저 해제<\/button>/)
+  assert.match(html, /<div class="[^"]*panel"><form class="form" aria-labelledby="in-app-title"><div class="sectionHead"><h2 id="in-app-title">알림 받기<\/h2>/)
+  // 설정이 하나라 체크박스와 저장(주요 버튼)을 한 줄에 둔다.
+  assert.match(html, /<div class="settingRow"><label class="toggle">[\s\S]*?<\/label><div class="formActions"><button type="submit" class="button primary "[^>]*>설정 저장<\/button><\/div><\/div>/)
+  assert.match(html, /<\/form><\/div><div class="[^"]*panel"><section class="section" aria-labelledby="web-push-title">/)
+  // 브라우저 상태 확인 전에는 연결·해제를 추측해 보여 주지 않고 확인 중만 알린다.
+  assert.match(html, /<dt>이 브라우저<\/dt><dd[^>]*>확인하고 있어요<\/dd>/)
+  assert.doesNotMatch(html, />이 브라우저 연결<\/button>|>이 브라우저 해제<\/button>/)
+  // 설정 항목은 카드 안에 별도 테두리 상자를 두지 않는다.
+  const css = fs.readFileSync(new URL('../src/pages/notifications/NotificationPages.module.css', import.meta.url), 'utf8')
+  assert.doesNotMatch(css, /\.toggle \{[^}]*border:/)
 })
 
 test('notification cards display actual type, timestamp, unread/read states and escaped text with named controls and cursor more', () => {
@@ -119,9 +127,11 @@ test('settings use plain language, show push state once in the push card and nev
   const html = render({ view: 'settings' })
   assert.match(html, /<input type="checkbox" checked=""[^>]*\/>Y:ON 안에서 알림 받기<\/label>/)
   // 푸시 설정은 브라우저 푸시 카드에서 한 번만 보여 준다.
-  assert.equal((html.match(/푸시 알림: 켜짐/g) ?? []).length, 1)
-  assert.match(html, /이 브라우저: 연결 확인 안 됨/)
-  assert.match(html, /푸시 알림 동의: <time/)
+  assert.equal((html.match(/<dt>계정 푸시 알림<\/dt>/g) ?? []).length, 1)
+  assert.doesNotMatch(html, /연결됨/)
+  assert.doesNotMatch(html, /저장하지 않은 변경/)
+  // 상태값 옆의 동의 일시는 작은 보조 텍스트로 분리한다.
+  assert.match(html, /<dt>계정 푸시 알림<\/dt><dd[^>]*>켜짐<span class="consent">동의 <time/)
   assert.doesNotMatch(html, /서버의 푸시 알림 설정|FCM|서비스 워커|엔드포인트|Firebase|VAPID|인앱|readOnly/)
   assert.match(html, /disabled=""[^>]*>설정 저장/)
 })
