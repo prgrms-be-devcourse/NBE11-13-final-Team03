@@ -71,7 +71,6 @@
   min-inline-size: 0;
 }
 
-.resetFilters { align-self: flex-end; }
 .checkbox { display: flex; align-items: center; gap: var(--space-2); min-block-size: 2.75rem; cursor: pointer; }
 .checkbox input { inline-size: 1.1rem; block-size: 1.1rem; accent-color: var(--color-primary); }
 .srOnly { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -132,6 +131,17 @@
 
 .optionError {
   font-size: var(--font-size-small);
+}
+
+.filterToolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.filterToolbar > button {
+  flex: 1;
+  padding-inline: var(--space-3);
 }
 
 .filterActions {

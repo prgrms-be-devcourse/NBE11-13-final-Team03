@@ -430,6 +430,65 @@ test('actual auth logout pipeline detaches the browser before server cookie logo
   } finally { client.clear() }
 })
 
+test('logout-all reuses the logout pipeline: push release first, one POST /auth/logout-all with CSRF, then auth, personal and admin caches are cleared', async () => {
+  const f = sessionFixture(), calls = [], client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(authQueryKey, { id: 11, role: 'ADMIN' })
+  client.setQueryData(['admin', 11, 'retention'], { status: 'READY' })
+  client.setQueryData(['saved-opportunities', 11, 0, 20], { content: [] })
+  client.setQueryData(['notifications', 11, 'unread'], { available: true, unreadCount: 2 })
+  apiClient.defaults.adapter = async config => {
+    calls.push(`${config.method} ${config.url}`)
+    if (config.url === '/auth/logout-all') { assert.equal(f.unsubscribed(), 1); assert.equal(config.headers['X-XSRF-TOKEN'], 'test-push'); assert.equal(config.requiresAuth, true) }
+    return response(config, '', 204)
+  }
+  try {
+    await createAuthActions(client).logoutAll()
+    // 일반 로그아웃(/auth/logout)은 호출하지 않는다.
+    assert.deepEqual(calls, ['delete /users/me/notification-endpoints/7', 'post /auth/logout-all'])
+    assert.equal(client.getQueryData(authQueryKey), null)
+    assert.deepEqual(f.store(), emptyPushStore())
+    for (const key of [['admin'], ['saved-opportunities'], ['notifications']]) assert.equal(client.getQueryCache().findAll({ queryKey: key }).length, 0, key[0])
+  } finally { client.clear() }
+})
+
+test('logout-all without a 204 or with a lost response is not reported as done, re-checks the server once and never re-sends', async () => {
+  for (const [label, failure] of [['network', config => { throw new AxiosError('down', 'ERR_NETWORK', config, {}) }], ['200 instead of 204', config => response(config, '', 200)]]) {
+    sessionFixture()
+    const calls = [], client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(authQueryKey, { id: 11, role: 'USER' })
+    client.setQueryData(['profile', 11], { birthDate: '1998-05-15' })
+    apiClient.defaults.adapter = async config => {
+      calls.push(config.url)
+      if (config.url === '/auth/logout-all') return failure(config)
+      if (config.url === '/users/me') return response(config, { id: 11, role: 'USER' })
+      return response(config, '', 204)
+    }
+    try {
+      await assert.rejects(createAuthActions(client).logoutAll(), error => error instanceof ApiError && ['network', 'unknown'].includes(error.kind), label)
+      assert.equal(calls.filter(url => url === '/auth/logout-all').length, 1, label)
+      // 서버 처리 여부를 모르므로 개인 캐시를 비우고 서버에서 로그인 상태를 다시 확인한다(여기서는 아직 로그인 상태).
+      assert.ok(calls.includes('/users/me'), label)
+      assert.equal(client.getQueryCache().findAll({ queryKey: ['profile'] }).length, 0, label)
+      assert.deepEqual(client.getQueryData(authQueryKey), { id: 11, role: 'USER' }, label)
+    } finally { client.clear() }
+  }
+})
+
+test('a second session-ending transition while logout-all is in flight is rejected without another request', async () => {
+  sessionFixture()
+  const gate = deferred(), calls = [], client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(authQueryKey, { id: 11, role: 'USER' })
+  apiClient.defaults.adapter = async config => { calls.push(config.url); if (config.url === '/auth/logout-all') await gate.promise; return response(config, '', 204) }
+  const actions = createAuthActions(client)
+  try {
+    const running = actions.logoutAll()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    for (const other of [actions.logout(), actions.withdraw()]) await assert.rejects(other, error => error instanceof ApiError && error.kind === 'configuration')
+    gate.resolve(); await running
+    assert.deepEqual(calls.filter(url => url.startsWith('/auth/') || url === '/users/me'), ['/auth/logout-all'])
+  } finally { client.clear() }
+})
+
 test('FCM worker leaves background display to SDK, intercepts safe clicks and never performs authenticated read/click calls', () => {
   const sw = fs.readFileSync(new URL('../src/push/firebase-messaging-sw.ts', import.meta.url), 'utf8')
   assert.ok(sw.indexOf("addEventListener('notificationclick'") < sw.indexOf('getMessaging(initializeApp'))

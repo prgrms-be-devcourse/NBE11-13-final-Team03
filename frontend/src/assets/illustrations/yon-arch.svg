@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="22 20 376 272" role="img" aria-label="새로운 기회로 이어지는 초록색 아치와 길, 새싹 일러스트">
+  <defs>
+    <clipPath id="hill-area"><path d="M22 292C61 269 78 220 139 218c39-1 63 18 101 17 59-2 104-23 158-39v96Z"/></clipPath>
+  </defs>
+  <!-- Pale circular backdrop -->
+  <circle cx="218" cy="144" r="124" fill="#F1F7F1"/>
+  <!-- Small floating symbols -->
+  <path d="M87 64v14M80 71h14" stroke="#39765A" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="56" cy="111" r="6.4" fill="#BEDCB3"/>
+  <!-- Ground and layered hills -->
+  <path d="M22 292C61 269 78 220 139 218c39-1 63 18 101 17 59-2 104-23 158-39v96Z" fill="#BAD8AE"/>
+  <path d="M22 292c56-21 67-54 123-55 51-1 66 17 106 9 54-11 98-32 147-50v96Z" fill="#B4D3A8" opacity=".65"/>
+  <!-- Portal: single real vector path with an open passage -->
+  <path fill="#347756" fill-rule="evenodd" d="M181 237V101c0-45 29-74 70-74s70 29 70 74v136h-31V101c0-27-16-45-39-45s-39 18-39 45v136Z"/>
+  <!-- Continuous winding walkway, narrow at the arch and widening toward the viewer -->
+  <path d="M233 215
+    C253 211 277 216 283 226
+    C293 240 278 251 253 260
+    C221 271 215 280 238 292
+    H169
+    C151 278 156 258 179 248
+    C200 239 244 235 251 228
+    C256 222 248 217 233 215Z" fill="#FFFFFF"/>
+  <!-- Sprout placed separately to the right of the portal -->
+  <path d="M361 237v-64" fill="none" stroke="#285E45" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M361 205c-19 0-31-10-33-28 20 0 31 8 33 28Z" fill="#285E45"/>
+  <path d="M361 190c0-21 10-32 26-34 1 18-9 30-26 34Z" fill="#285E45"/>
+</svg>

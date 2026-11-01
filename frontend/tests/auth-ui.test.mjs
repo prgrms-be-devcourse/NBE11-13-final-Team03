@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import ts from 'typescript'
 
 const require = createRequire(import.meta.url)
-require.extensions['.svg'] = (module, filename) => { module.exports = filename }
+require.extensions['.svg'] = require.extensions['.png'] = (module, filename) => { module.exports = filename }
 require.extensions['.css'] = (module) => { module.exports = { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) } }
 for (const extension of ['.ts', '.tsx']) require.extensions[extension] = (module, filename) => {
   module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename)

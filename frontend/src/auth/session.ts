@@ -1,5 +1,5 @@
 import type { QueryClient, Query } from '@tanstack/react-query'
-import { deleteCurrentUser, getCurrentUser, postLogout, verifyOAuthUser } from '../api/auth.ts'
+import { deleteCurrentUser, getCurrentUser, postLogout, postLogoutAll, verifyOAuthUser } from '../api/auth.ts'
 import type { AuthUser } from '../api/auth.ts'
 import { endAuthSession, onAuthLost, resetAuthRecovery } from '../api/client.ts'
 import { ApiError } from '../api/ApiError.ts'
@@ -10,7 +10,7 @@ export const authQueryKey = ['auth', 'user'] as const
 export const authTransitionKey = ['auth', 'transition'] as const
 export function isPersonalizedQuery(query: Query): boolean {
   const [root, part] = query.queryKey
-  return root === 'notifications' || root === 'saved-opportunities' || root === 'profile' || root === 'user-interests' || root === 'recommendations' || root === 'opportunities' || root === 'opportunity-detail' || (root === 'home' && part === 'opportunities')
+  return root === 'notifications' || root === 'saved-opportunities' || root === 'profile' || root === 'user-interests' || root === 'recommendations' || root === 'admin' || root === 'opportunities' || root === 'opportunity-detail' || (root === 'home' && part === 'opportunities')
 }
 export async function resetPersonalizedQueries(client: QueryClient): Promise<void> {
   await client.cancelQueries({ predicate: isPersonalizedQuery })
@@ -19,8 +19,9 @@ export async function resetPersonalizedQueries(client: QueryClient): Promise<voi
   client.removeQueries({ queryKey: ['user-interests'] })
   client.removeQueries({ queryKey: ['saved-opportunities'] })
   client.removeQueries({ queryKey: ['notifications'] })
+  client.removeQueries({ queryKey: ['admin'] })
   // reset은 활성 observer의 과거 데이터도 즉시 비운다. 새 쿠키의 공개 조회는 다시 실행한다.
-  void client.resetQueries({ predicate: (query) => isPersonalizedQuery(query) && !['recommendations', 'profile', 'user-interests', 'saved-opportunities', 'notifications'].includes(String(query.queryKey[0])) }).catch(() => {})
+  void client.resetQueries({ predicate: (query) => isPersonalizedQuery(query) && !['recommendations', 'profile', 'user-interests', 'saved-opportunities', 'notifications', 'admin'].includes(String(query.queryKey[0])) }).catch(() => {})
 }
 // 푸시 정리 실패는 인증 판정과 분리한다. 성공으로 기록하지 않으므로 남은 이전 소유 정보로 다음 인증 확인에서 다시 정리한다.
 // 이전 소유자에게 묶인 동안에는 PushBridge가 새 사용자의 앱 내 푸시 안내·재연결을 하지 않는다.
@@ -55,7 +56,7 @@ export function observeAuthLoss(client: QueryClient): () => void {
   })
 }
 
-export type AuthTransitionKind = 'oauth' | 'logout' | 'withdraw'
+export type AuthTransitionKind = 'oauth' | 'logout' | 'logout-all' | 'withdraw'
 type AuthTransition = { isPending: boolean; isError: boolean; variables?: AuthTransitionKind; error: Error | null }
 type AuthQueryState = { isPending: boolean; isFetching: boolean; isError: boolean; data: AuthUser | null | undefined }
 export function isUncertainLogout(error: unknown): boolean {
@@ -98,10 +99,11 @@ export function createAuthActions(client: QueryClient) {
       let pushReleased = true
       try {
         const user = client.getQueryData<AuthUser | null>(authQueryKey)
-        // 탈퇴도 세션 종료다. 인증이 남아 있는 동안 푸시 엔드포인트를 먼저 해제한다.
+        // 탈퇴·모든 기기 로그아웃도 세션 종료다. 인증이 남아 있는 동안 이 브라우저의 푸시 엔드포인트를 먼저 해제한다.
+        // 다른 기기의 엔드포인트는 서버(USER_SESSION_ENDED)가 비활성화한다.
         // 푸시 정리 실패가 서버 로그아웃·탈퇴를 막지 않는다. 실패한 정리 상태는 저장소에 그대로 남긴다.
         if (user) await releasePushSession(user.id).catch(() => { pushReleased = false })
-        await (kind === 'withdraw' ? deleteCurrentUser() : postLogout())
+        await (kind === 'withdraw' ? deleteCurrentUser() : kind === 'logout-all' ? postLogoutAll() : postLogout())
       } catch (error) {
         if (isUncertainLogout(error)) {
           // 응답 유실은 서버 성공/실패를 확정하지 않는다. mutation이 pending인 동안
@@ -121,5 +123,5 @@ export function createAuthActions(client: QueryClient) {
     inFlight = { kind, promise }
     return promise
   }
-  return { completeOAuth: () => run('oauth'), logout: () => run('logout'), withdraw: () => run('withdraw') }
+  return { completeOAuth: () => run('oauth'), logout: () => run('logout'), logoutAll: () => run('logout-all'), withdraw: () => run('withdraw') }
 }

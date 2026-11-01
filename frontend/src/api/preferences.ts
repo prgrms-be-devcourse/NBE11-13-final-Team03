@@ -56,9 +56,27 @@ export const hideOpportunity = (id: number, source: PreferenceSource = 'OTHER', 
 export const unhideOpportunity = (id: number, signal?: AbortSignal) => changePreference(id, 'unhide', 'OTHER', signal)
 
 export const preferenceMutationKey = (userId: number | undefined, id: number) => ['preference-change', userId ?? null, id] as const
-function assertPreferenceOwner(client: QueryClient, owner: AuthUser, signal?: AbortSignal): void {
+// allowChecking: 인증 Query의 백그라운드 재확인(창 포커스 등) 중이어도 통과시킨다. 이때는 confirmPreferenceOwner로 끝난 뒤 다시 확인한다.
+function assertPreferenceOwner(client: QueryClient, owner: AuthUser, signal?: AbortSignal, allowChecking = false): void {
   const state = client.getQueryState(authQueryKey)
-  if (signal?.aborted || client.getQueryData(authQueryKey) !== owner || state?.status !== 'success' || state.fetchStatus === 'fetching' || client.isMutating({ mutationKey: authTransitionKey })) throw new ApiError('cancelled', '인증 상태가 변경되어 요청 결과 처리를 중단했어요.')
+  if (signal?.aborted || client.getQueryData(authQueryKey) !== owner || state?.status !== 'success' || (!allowChecking && state.fetchStatus === 'fetching') || client.isMutating({ mutationKey: authTransitionKey })) throw new ApiError('cancelled', '인증 상태가 변경되어 요청 결과 처리를 중단했어요.')
+}
+function authCheckSettled(client: QueryClient): Promise<void> {
+  if (client.getQueryState(authQueryKey)?.fetchStatus !== 'fetching') return Promise.resolve()
+  return new Promise(resolve => {
+    const unsubscribe = client.getQueryCache().subscribe(() => {
+      if (client.getQueryState(authQueryKey)?.fetchStatus === 'fetching') return
+      unsubscribe(); resolve()
+    })
+  })
+}
+/**
+ * 같은 사용자의 인증 재확인(창 포커스 복귀 등)이 진행 중이면 끝날 때까지 기다린 뒤 소유자를 확인한다.
+ * 재확인을 계정 변경으로 취급하면 서버에 이미 반영된 저장·숨김 결과를 버리게 된다. 재확인 결과 사용자가 바뀌었으면 기존처럼 중단한다.
+ */
+async function confirmPreferenceOwner(client: QueryClient, owner: AuthUser, signal?: AbortSignal): Promise<void> {
+  await authCheckSettled(client)
+  assertPreferenceOwner(client, owner, signal)
 }
 function affectedPreferenceQueries(userId: number, id: number, change: PreferenceChange) {
   const saving = change === 'save' || change === 'unsave'
@@ -69,11 +87,11 @@ function affectedPreferenceQueries(userId: number, id: number, change: Preferenc
   }
 }
 export async function refreshPreferenceQueries(client: QueryClient, owner: AuthUser, id: number, change: PreferenceChange): Promise<void> {
-  assertPreferenceOwner(client, owner)
+  await confirmPreferenceOwner(client, owner)
   const predicate = affectedPreferenceQueries(owner.id, id, change)
   // 변경 전에 시작된 GET이 늦게 도착해 saved를 되돌리지 않도록 취소 후 재조회한다.
   await client.cancelQueries({ predicate })
-  assertPreferenceOwner(client, owner)
+  await confirmPreferenceOwner(client, owner)
   const results = await Promise.allSettled(client.getQueryCache().findAll({ predicate }).map(async query => {
     try {
       await client.invalidateQueries({ queryKey: query.queryKey, exact: true }, { throwOnError: true })
@@ -83,14 +101,15 @@ export async function refreshPreferenceQueries(client: QueryClient, owner: AuthU
       throw error
     }
   }))
-  assertPreferenceOwner(client, owner)
+  await confirmPreferenceOwner(client, owner)
   const failure = results.find(result => result.status === 'rejected')
   if (failure) throw failure.reason
 }
 type Attempt = { owner: AuthUser; change: PreferenceChange; promise: Promise<void> }
 const attempts = new WeakMap<QueryClient, Map<string, Attempt>>()
 export function runPreferenceChange(client: QueryClient, owner: AuthUser, id: number, change: PreferenceChange, source: PreferenceSource, signal?: AbortSignal): Promise<void> {
-  try { assertPreferenceOwner(client, owner, signal) } catch (error) { return Promise.reject(error) }
+  // 클릭 시점에는 같은 사용자인지만 본다. 재확인 중이면 요청을 보내기 전에 끝날 때까지 기다려 다시 확인한다.
+  try { assertPreferenceOwner(client, owner, signal, true) } catch (error) { return Promise.reject(error) }
   let pending = attempts.get(client)
   if (!pending) { pending = new Map(); attempts.set(client, pending) }
   const key = `${owner.id}:${id}`
@@ -99,13 +118,13 @@ export function runPreferenceChange(client: QueryClient, owner: AuthUser, id: nu
   const predicate = affectedPreferenceQueries(owner.id, id, change)
   const promise = (async () => {
     await client.cancelQueries({ predicate })
-    assertPreferenceOwner(client, owner, signal)
+    await confirmPreferenceOwner(client, owner, signal)
     await changePreference(id, change, source, signal)
-    assertPreferenceOwner(client, owner, signal)
+    await confirmPreferenceOwner(client, owner, signal)
     try {
       await refreshPreferenceQueries(client, owner, id, change)
     } catch {
-      assertPreferenceOwner(client, owner, signal)
+      await confirmPreferenceOwner(client, owner, signal)
       throw new PreferenceRefreshError()
     }
   })().finally(() => { if (pending.get(key)?.promise === promise) pending.delete(key) })

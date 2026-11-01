@@ -30,6 +30,11 @@ export async function postLogout(): Promise<void> {
   const response = await apiClient.post('/auth/logout', undefined, { requiresAuth: true })
   if (response.status !== 204) throw new ApiError('unknown', '로그아웃 완료 응답을 확인할 수 없습니다.')
 }
+/** 서버가 이 사용자의 Refresh Token을 모두 지우고 현재 브라우저 쿠키를 만료한다. 204만 완료로 본다. 다른 기기는 Access Token 만료 뒤 재발급이 거부된다. */
+export async function postLogoutAll(): Promise<void> {
+  const response = await apiClient.post('/auth/logout-all', undefined, { requiresAuth: true })
+  if (response.status !== 204) throw new ApiError('unknown', '모든 기기 로그아웃 완료 응답을 확인할 수 없습니다.')
+}
 /** 서버가 회원 정보를 삭제하고 인증 쿠키를 만료한다. 204만 탈퇴 완료로 본다. */
 export async function deleteCurrentUser(): Promise<void> {
   const response = await apiClient.delete('/users/me', { requiresAuth: true })

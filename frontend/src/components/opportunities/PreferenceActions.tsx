@@ -27,8 +27,9 @@ function errorMessage(error: Error): string {
   }
   return '변경 또는 최신 상태 조회에 실패했어요. 상태를 다시 조회해 주세요.'
 }
-type PreferenceActionsProps = { opportunityId: number; title: string; saved: boolean; source: PreferenceSource; allowHide?: boolean; disabled?: boolean; iconOnly?: boolean; showSaveLabel?: boolean }
-function PreferenceActions({ opportunityId, title, saved, source, allowHide = false, disabled = false, iconOnly = false, showSaveLabel = false }: PreferenceActionsProps) {
+/** onHidden: 서버가 숨김 204를 확인한 뒤에만 호출한다(후속 목록 갱신만 실패한 경우 포함). 카드가 사라진 뒤에도 호출될 수 있다. */
+type PreferenceActionsProps = { opportunityId: number; title: string; saved: boolean; source: PreferenceSource; allowHide?: boolean; disabled?: boolean; iconOnly?: boolean; showSaveLabel?: boolean; onHidden?: () => void }
+function PreferenceActions({ opportunityId, title, saved, source, allowHide = false, disabled = false, iconOnly = false, showSaveLabel = false, onHidden }: PreferenceActionsProps) {
   const auth = useContext(AuthContext)
   const owner = auth?.status === 'authenticated' ? auth.user : undefined
   const client = useQueryClient()
@@ -45,7 +46,9 @@ function PreferenceActions({ opportunityId, title, saved, source, allowHide = fa
   const run = (change: PreferenceChange) => {
     if (running.current || pending || disabled) return
     running.current = true
-    void mutation.mutateAsync(change).catch(() => {}).finally(() => { running.current = false })
+    // 숨김은 서버 반영(204)이 확인된 경우에만 알린다. PreferenceRefreshError는 반영 뒤 목록 갱신만 실패한 경우다.
+    void mutation.mutateAsync(change).then(() => { if (change === 'hide') onHidden?.() }, (error: unknown) => { if (change === 'hide' && error instanceof PreferenceRefreshError) onHidden?.() })
+      .finally(() => { running.current = false })
   }
   const returnTo = loginPath(location.pathname + location.search)
   const retry = () => {

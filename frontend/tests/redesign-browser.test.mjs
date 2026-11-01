@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
 import { createServer } from 'vite'
+import { chromeServiceFlags } from './chrome-flags.mjs'
 import react from '@vitejs/plugin-react'
 import ts from 'typescript'
 import { user, profile, options, regionRows } from './profile-fixtures.mjs'
@@ -166,7 +167,7 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
     await server.listen()
     const base = `http://127.0.0.1:${server.httpServer.address().port}`
     await fetch(`${base}/__test__/redesign-entry.tsx`)
-    const { stdout } = await promisify(execFile)(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=25000', '--dump-dom', `${base}/__test__/redesign`], { windowsHide: true, timeout: 60_000, maxBuffer: 5_000_000 })
+    const { stdout } = await promisify(execFile)(browser, ['--headless', ...chromeServiceFlags, '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-sync', `--user-data-dir=${path.join(temporary, 'browser')}`, '--virtual-time-budget=25000', '--dump-dom', `${base}/__test__/redesign`], { windowsHide: true, timeout: 60_000, maxBuffer: 5_000_000 })
     const match = stdout.match(/<pre id="result">([^<]+)<\/pre>/)
     const progress = stdout.match(/<pre id="progress">([^<]*)<\/pre>/)?.[1].replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&') || '(진행 기록 없음)'
     t.diagnostic(`redesign progress: ${progress}`)
@@ -178,7 +179,7 @@ test('Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu 
       const report = path.join(cache, 'redesign-review')
       fs.mkdirSync(report, { recursive: true })
       for (const [name, route, width, anonymous] of [['home', '/', 1440], ['search', '/opportunities', 1440], ['detail', '/opportunities/42', 1440], ['login', '/login', 390], ['home-mobile', '/', 390], ['home-anonymous', '/', 1440, true], ['home-anonymous-mobile', '/', 390, true], ['profile', '/mypage', 1440], ['notifications', '/notifications', 1440], ['privacy', '/privacy', 390]]) {
-        await promisify(execFile)(browser, ['--headless', '--disable-gpu', '--no-first-run', '--disable-background-networking', '--hide-scrollbars', `--user-data-dir=${path.join(temporary, 'shots')}`, `--window-size=${width},1100`, '--virtual-time-budget=5000', `--screenshot=${path.join(report, name + '.png')}`, `${base}/__test__/redesign-capture?route=${encodeURIComponent(route)}&width=${width}&anonymous=${anonymous ? '1' : '0'}`], { windowsHide: true, timeout: 30_000, maxBuffer: 500_000 })
+        await promisify(execFile)(browser, ['--headless', ...chromeServiceFlags, '--disable-gpu', '--no-first-run', '--disable-background-networking', '--hide-scrollbars', `--user-data-dir=${path.join(temporary, 'shots')}`, `--window-size=${width},1100`, '--virtual-time-budget=5000', `--screenshot=${path.join(report, name + '.png')}`, `${base}/__test__/redesign-capture?route=${encodeURIComponent(route)}&width=${width}&anonymous=${anonymous ? '1' : '0'}`], { windowsHide: true, timeout: 30_000, maxBuffer: 500_000 })
       }
     }
   } finally {

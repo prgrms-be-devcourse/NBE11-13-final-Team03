@@ -1,9 +1,11 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useContext, useRef, useState, type FormEvent } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { Menu, X, Search, House, Bookmark, Bell, UserRound } from 'lucide-react'
+import { Menu, X, Search, House, Bookmark, Bell, UserRound, ShieldCheck } from 'lucide-react'
+import { AuthContext } from '../auth/AuthContext'
 import { changeSearchConditions, defaultSearchParams, serializeSearchParams } from '../pages/opportunities/searchParams'
 import AuthControls from './AuthControls'
 import NotificationBadge from './NotificationBadge'
+import logo from '../assets/logo/yon-symbol.png'
 import styles from './Header.module.css'
 
 const navigation = [
@@ -13,9 +15,13 @@ const navigation = [
   { to: '/notifications', label: '알림', icon: Bell },
   { to: '/mypage', label: '마이페이지', icon: UserRound },
 ]
+const adminNavigation = { to: '/admin', label: '관리자', icon: ShieldCheck }
 
 function Header() {
   const location = useLocation()
+  const auth = useContext(AuthContext)
+  // 서버에서 확인된 role=ADMIN일 때만 관리자 메뉴를 보여 준다. 확인 중·오류·비로그인에는 숨긴다.
+  const items = auth?.status === 'authenticated' && auth.user?.role === 'ADMIN' ? [...navigation, adminNavigation] : navigation
   const navigate = useNavigate()
   function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -46,7 +52,7 @@ function Header() {
     >
       <div className={styles.inner}>
         <Link className={styles.brand} to="/" onClick={() => setIsMenuOpen(false)} aria-label="Y:ON 홈">
-          <img className={styles.logo} src="/logo/yon-symbol.png" alt="" width={80} height={80} />
+          <img className={styles.logo} src={logo} alt="" width={80} height={80} />
           <span>Y:ON</span>
         </Link>
         <form className={styles.headerSearch} role="search" aria-label="헤더 공고 제목 검색" onSubmit={search}>
@@ -71,7 +77,7 @@ function Header() {
           className={`${styles.navigation} ${styles.primaryNavigation} ${isMenuOpen ? styles.open : ''}`}
         >
             <ul className={styles.menuList}>
-              {navigation.map(({ to, label, icon: Icon }) => (
+              {items.map(({ to, label, icon: Icon }) => (
                 <li key={to}>
                   <NavLink
                     to={to}

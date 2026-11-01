@@ -52,7 +52,13 @@
     "Chrome verifies saved paging/removal, detail and search save changes, recommendation hide and anonymous return with mocked HTTP",
     "Chrome exercises real region selects, onboarding PUT/back/complete and profile PATCH against a mocked transport",
     "Chrome with missing Firebase configuration disables enable and makes no permission, worker or endpoint request",
-    "Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu Escape/return focus and header search with test-only responses"
+    "Chrome checks redesigned real pages at mobile/tablet/desktop widths, menu Escape/return focus and header search with test-only responses",
+    "Chrome keeps uncertain retention executions blocked until a fresh preview, resets confirmation and never re-sends automatically",
+    "Chrome keeps the admin screen closed after a 403 denial in the same session and reopens it only after a new login",
+    "Chrome polls the collection history only while a job is pending or running",
+    "Chrome offers undo only after a confirmed hide and restores the server hidden state with one DELETE",
+    "Chrome confirms logout-all before one POST, keeps the regular logout, guards concurrent transitions and treats lost responses as uncertain",
+    "Chrome records real recommendation impressions, detail views and external link clicks once per action with sources under StrictMode and mocked HTTP"
   ],
   "replicaCheckpoints": [
     "fallback-and-cooldown",

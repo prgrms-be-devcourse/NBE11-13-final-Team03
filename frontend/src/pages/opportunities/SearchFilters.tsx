@@ -50,7 +50,10 @@ function SearchFilters({ applied, options, optionsLoading, optionsError, onRetry
 
   return (
     <form className={styles.filters} onSubmit={submit}>
-      <Button className={styles.resetFilters} variant="ghost" onClick={() => setDraft({ ...defaultSearchParams(), keyword: applied.keyword, sort: defaultSort(applied.keyword), size: applied.size })}>필터 초기화</Button>
+      <div className={styles.filterToolbar}>
+        <Button variant="ghost" onClick={() => setDraft({ ...defaultSearchParams(), keyword: applied.keyword, sort: defaultSort(applied.keyword), size: applied.size })}>필터 초기화</Button>
+        <Button type="submit" disabled={!!error || invalidSelection || invalidRegion}>필터 적용</Button>
+      </div>
       <label className={styles.field}>공고 유형
         <select value={draft.type} onChange={(event) => setDraft(changeSearchType(draft, event.target.value as SearchParams['type']))}>
           <option value="">전체 유형</option>
