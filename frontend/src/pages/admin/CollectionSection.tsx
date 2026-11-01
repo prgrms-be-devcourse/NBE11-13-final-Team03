@@ -8,7 +8,7 @@ import type { AuthUser } from '../../api/auth'
 import Button from '../../components/ui/Button'
 import AsyncState from '../../components/ui/AsyncState'
 import { formatDateTime } from '../../utils/date'
-import { useAdminAccess, useAdminAction, useDenyOnForbidden } from './adminAccess'
+import { busyMessage, useAdminAccess, useAdminAction, useDenyOnForbidden } from './adminAccess'
 import { formatCount, sourceLabels, statusLabels, statusTone, syncListRefetchInterval } from './adminView'
 import AdminError from './AdminError'
 import styles from './Admin.module.css'
@@ -24,7 +24,7 @@ function StartSync({ owner, onStarted, onClose }: { owner: AuthUser; onStarted: 
   const [pageSize, setPageSize] = useState('')
   const [maxPages, setMaxPages] = useState('')
   const [confirming, setConfirming] = useState<{ source: SyncSource; limits: SyncLimits } | null>(null)
-  const { mutation, pending, start } = useAdminAction(owner, ({ source: target, limits }: { source: SyncSource; limits: SyncLimits }) => startSync(target, limits))
+  const { mutation, pending, blocked, start } = useAdminAction(owner, ({ source: target, limits }: { source: SyncSource; limits: SyncLimits }) => startSync(target, limits))
   useDenyOnForbidden(mutation.error)
   const limits: SyncLimits = { ...(pageSize ? { pageSize: Number(pageSize) } : {}), ...(maxPages ? { maxPages: Number(maxPages) } : {}) }
   const invalid = syncLimitError(limits)
@@ -36,9 +36,10 @@ function StartSync({ owner, onStarted, onClose }: { owner: AuthUser; onStarted: 
       <p className={styles.help}>외부 API를 실제로 호출하고 수집 결과를 저장해요. 같은 출처가 이미 대기·실행 중이면 서버가 거부해요.
         {' '}페이지 크기 {confirming.limits.pageSize ?? '서버 기본값'} · 최대 페이지 {confirming.limits.maxPages ?? '서버 기본값'}</p>
       <div className={styles.buttons}>
-        <Button loading={pending} disabled={pending} onClick={() => start(confirming, (result) => { setConfirming(null); onStarted(result) })}>수집 시작 확인</Button>
+        <Button loading={pending && !blocked} disabled={pending} onClick={() => start(confirming, (result) => { setConfirming(null); onStarted(result) })}>수집 시작 확인</Button>
         <Button variant="ghost" disabled={pending} onClick={() => setConfirming(null)}>취소</Button>
       </div>
+      {blocked && <p className={styles.help} role="status">{busyMessage}</p>}
     </div> : <form className={styles.form} onSubmit={review}>
       <fieldset className={styles.radioGroup}><legend>출처</legend>
         {syncSources.map((value) => <label key={value}><input type="radio" name="sync-source" value={value} checked={source === value} onChange={() => setSource(value)} />{sourceLabels[value]}</label>)}
@@ -68,7 +69,7 @@ function SyncDetail({ owner, jobId, onRetried }: { owner: AuthUser; jobId: numbe
     if ((was === 'PENDING' || was === 'RUNNING') && status && status !== 'PENDING' && status !== 'RUNNING') void client.invalidateQueries({ queryKey: ['admin', owner.id, 'syncs'] })
   }, [client, owner.id, status])
   const [confirming, setConfirming] = useState(false)
-  const { mutation, pending, start } = useAdminAction(owner, (id: number) => retrySync(id))
+  const { mutation, pending, blocked, start } = useAdminAction(owner, (id: number) => retrySync(id))
   useDenyOnForbidden(detail.error)
   useDenyOnForbidden(mutation.error)
   if (detail.isPending) return <AsyncState status="loading" title={`수집 #${jobId} 상세를 불러오고 있어요`} />
@@ -100,10 +101,11 @@ function SyncDetail({ owner, jobId, onRetried }: { owner: AuthUser; jobId: numbe
       {confirming ? <div className={styles.confirm} role="group" aria-labelledby="retry-confirm">
         <p id="retry-confirm">수집 #{job.jobId}을(를) 다시 실행할까요? 같은 출처의 수집이 새로 시작돼요.</p>
         <div className={styles.buttons}>
-          <Button loading={pending} disabled={pending} onClick={() => start(job.jobId, (result) => { setConfirming(false); onRetried(result) })}>재시도 확인</Button>
+          <Button loading={pending && !blocked} disabled={pending} onClick={() => start(job.jobId, (result) => { setConfirming(false); onRetried(result) })}>재시도 확인</Button>
           <Button variant="ghost" disabled={pending} onClick={() => setConfirming(false)}>취소</Button>
         </div>
       </div> : <Button variant="secondary" disabled={pending} onClick={() => { mutation.reset(); setConfirming(true) }}>실패 작업 재시도…</Button>}
+      {blocked && <p className={styles.help} role="status">{busyMessage}</p>}
       {mutation.isError && <AdminError error={mutation.error} />}
     </div>}
   </section>

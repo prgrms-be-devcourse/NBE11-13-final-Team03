@@ -8,6 +8,8 @@
   - `USER`는 "접근 권한이 없어요"만 보여 준다.
   - 헤더의 `관리자` 메뉴도 확인된 `ADMIN`에게만 보인다.
 - 최종 기준은 서버 응답이다. 관리자 API가 `403 COLLECTION_007`·`RETENTION_001`을 주면 관리자 화면 전체를 닫고 인증 정보를 다시 확인한다.
+  - 거부 기록은 Query 캐시 `['admin', userId, 'denied']`에 둔다. 다른 화면을 거쳐 돌아와도 관리자 화면을 다시 열거나 관리자 API를 다시 부르지 않는다.
+  - 같은 사용자의 인증 재확인으로는 지우지 않는다. 로그인 완료·로그아웃 전환의 `resetPersonalizedQueries`가 지운 뒤에만 다시 확인한다(같은 사용자의 재로그인 포함).
   - `/users/me`의 role은 DB 값이고 API 권한은 토큰 값이라, 권한이 바뀐 직후 두 값이 다를 수 있다.
 - `403 RETENTION_002`는 권한 오류가 아니다. 서버 설정(`admin-execute-enabled`)으로 실행이 꺼진 상태로 보여 준다.
 - 401은 기존 재발급 규칙(`requiresAuth`)을 따른다. 확정 실패하면 재로그인을 안내한다.
@@ -17,7 +19,7 @@
 
 | 화면 | API | 구분 |
 |---|---|---|
-| 수집 이력 | GET `/api/admin/collection/syncs?date=` · GET `/syncs/{jobId}` | 조회. 목록은 대기·실행 중인 작업이 있을 때만 10초마다 재조회, 상세는 5초. 상세가 종료를 먼저 보면 목록을 한 번 갱신한다 |
+| 수집 이력 | GET `/api/admin/collection/syncs?date=` · GET `/syncs/{jobId}` | 조회. 목록은 대기·실행 중인 작업이 있을 때만 10초마다 재조회, 상세는 5초. 탭이 숨겨진 동안(`visibilitychange`)은 TanStack Query 기본값으로 멈춘다. 상세가 종료를 먼저 보면 목록을 한 번 갱신한다 |
 | 수집 시작 | POST `/api/admin/collection/syncs/{YOUTH_POLICY\|EMPLOYMENT24}?pageSize&maxPages` | 실행: 입력 → 확인 단계 → 202 확인 |
 | 실패 작업 재시도 | POST `/api/admin/collection/syncs/{jobId}/retry` | 실행: `FAILED`·`PARTIAL_SUCCESS`·`INTERRUPTED`에만 버튼 표시, 확인 단계 |
 | 원본 레코드 | GET `/api/admin/collection/raw-records/{id}` | 조회. 저장(POST)은 제공하지 않는다 |
@@ -55,6 +57,7 @@
 - 4xx는 서버가 확정한 거부 응답이다. 계획 변경(`RETENTION_003`)·진행 중(`004`)·실행 불가(`005`)·비활성(`002`)은 각 안내를 보여 주고, 미리보기를 자동으로 다시 불러온다.
 
 실행 작업은 같은 관리자 계정에서 한 번에 하나만 진행한다(공통 mutation key와 ref 가드). 자동 재시도는 하지 않고, 요청 전후로 같은 관리자 세션인지 확인한다.
+다른 실행 작업이 진행 중이면 실행 버튼을 끄고 "다른 관리자 작업이 진행 중이에요"를 버튼 옆에 보여 준다. 진행 표시는 실제로 요청한 버튼에만 둔다.
 
 ## 디자인
 
@@ -76,5 +79,8 @@
   - 미리보기 재조회 실패 동안 실행 차단, 새 미리보기 뒤에만 확인 가능
   - 409 → 미리보기 자동 갱신, 미리보기 변경 시 체크 초기화, 자동 재전송 없음
   - 수집 이력 폴링은 실행 중일 때만 동작하고, 완료 응답 뒤 멈춤
-  - 이 테스트는 `scripts/test-policy.json`의 필수 브라우저 목록에는 없다(frontend 밖이라 등록하지 않았다).
+  - 403 거부 뒤 홈을 거쳐 돌아와도 거부 화면 유지(관리자 API 재호출 없음), 같은 사용자의 OAuth 완료 뒤에만 다시 확인
+  - 이 테스트는 `scripts/test-policy.json`의 필수 브라우저 목록(`browser`)에는 없다. frontend 밖 파일이라 등록하지 않았다.
+    - CI에서 건너뛰면 `test_report.py`의 `Unexpected skip`으로 실패하므로 실행 여부는 이미 검사된다.
+    - 빠지는 것은 요약의 `browser` 그룹 집계와, 테스트 이름이 바뀌거나 삭제됐을 때의 `Required browser scenario missing` 검출이다. 등록은 정책 파일 담당자에게 요청한다.
 - 실제 관리자 계정·백엔드·data-service와의 통합, 실제 수집 실행과 보관 정리 실행은 하지 않았다. 운영 데이터에 영향을 주므로 테스트 목적으로 호출하지 않는다.

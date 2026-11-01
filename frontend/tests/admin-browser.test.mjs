@@ -88,9 +88,25 @@ const entry = String.raw`
     await wait(45000);
     record('syncs',calls.syncs);record('sync',calls.sync);
   }
+  // 403 거부 뒤 같은 세션에서 다른 화면을 거쳐 돌아와도 관리자 화면을 다시 열지 않고, 실제 로그인 전환(OAuth 완료) 뒤에만 다시 연다.
+  async function denied(){
+    const go=path=>{history.pushState({},'',path);dispatchEvent(new PopStateEvent('popstate'))};
+    const deniedShown=()=>text().includes('관리자 권한이 확인되지 않았어요');
+    queue.preview=[config=>fail(config,403,'RETENTION_001'),plan('plan-1')];
+    await until(deniedShown,'denied');
+    record('denied',{preview:calls.preview});
+    go('/');await until(()=>!deniedShown(),'home');
+    go('/admin/retention');await wait(300);
+    record('revisit',{denied:deniedShown(),preview:calls.preview});
+    // 같은 사용자(id 1)가 다시 로그인한다. OAuth 완료 화면이 인증 전환을 수행하고 저장된 복귀 경로로 돌아온다.
+    sessionStorage.setItem('yon.oauth.return','/admin/retention');
+    go('/login-success.html');
+    await until(()=>location.pathname==='/admin/retention'&&box(),'after login');
+    record('relogin',{denied:deniedShown(),preview:calls.preview});
+  }
   (async()=>{
     try{
-      if(scenario==='retention')await retention();else await polling(scenario);
+      if(scenario==='retention')await retention();else if(scenario==='denied')await denied();else await polling(scenario);
       document.querySelector('#result').textContent=JSON.stringify(Object.fromEntries(steps));
     }catch(error){document.querySelector('#result').textContent=JSON.stringify({error:String(error).slice(0,200),calls,state:state(),panel:uncertainPanel(),steps:Object.fromEntries(steps)})}
   })();
@@ -148,6 +164,16 @@ test('Chrome keeps uncertain retention executions blocked until a fresh preview,
   // 미리보기가 새 계획으로 바뀌면 확인 체크가 풀린다.
   assert.deepEqual([result.previewChanged.before, result.previewChanged.after], [true, false])
   assert.equal(result.totalExecute, 3)
+})
+
+test('Chrome keeps the admin screen closed after a 403 denial in the same session and reopens it only after a new login', { skip: !browser && 'Chrome/Edge가 없어 관리자 권한 거부 유지의 브라우저 검증은 실행하지 않았다.' }, async () => {
+  const [result] = await run(['/admin/retention?scenario=denied'])
+  assert.equal(result.error, undefined, JSON.stringify(result))
+  assert.equal(result.denied.preview, 1)
+  // 홈을 거쳐 다시 들어와도 거부 화면을 유지하고, 관리자 API를 다시 부르지 않는다.
+  assert.deepEqual(result.revisit, { denied: true, preview: 1 })
+  // 같은 사용자라도 로그인 전환이 끝나면 거부 상태를 지우고 서버에서 다시 확인한다.
+  assert.deepEqual(result.relogin, { denied: false, preview: 2 })
 })
 
 test('Chrome polls the collection history only while a job is pending or running', { skip: !browser && 'Chrome/Edge가 없어 수집 이력 자동 갱신의 브라우저 검증은 실행하지 않았다.' }, async () => {

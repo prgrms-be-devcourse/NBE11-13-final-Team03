@@ -19,9 +19,12 @@ export function useDenyOnForbidden(error: unknown): void {
   useEffect(() => { if (adminErrorKind(error) === 'denied') deny() }, [error, deny])
 }
 
+export const busyMessage = '다른 관리자 작업이 진행 중이에요. 끝난 뒤에 실행할 수 있어요.'
+
 /**
  * 운영 작업 공통 실행기. 같은 관리자 계정의 실행 작업(수집 시작·재시도·보관 정리)은 화면 전체에서 한 번에 하나만 진행한다.
  * 자동 재시도는 하지 않으며(queryClient 기본값), 요청 전후로 같은 관리자 세션인지 확인한다.
+ * blocked는 이 실행기가 아닌 다른 실행 작업이 진행 중인 상태다. 화면은 실행을 막은 이유로 busyMessage를 보여 준다.
  */
 export function useAdminAction<T, V>(owner: AuthUser, run: (variables: V) => Promise<T>) {
   const client = useQueryClient()
@@ -38,5 +41,5 @@ export function useAdminAction<T, V>(owner: AuthUser, run: (variables: V) => Pro
     running.current = true
     mutation.mutate(variables, { onSuccess, onError, onSettled: () => { running.current = false } })
   }
-  return { mutation, pending: busy || mutation.isPending, start, client }
+  return { mutation, pending: busy || mutation.isPending, blocked: busy && !mutation.isPending, start, client }
 }

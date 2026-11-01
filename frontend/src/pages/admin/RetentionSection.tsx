@@ -7,7 +7,7 @@ import type { AuthUser } from '../../api/auth'
 import Button from '../../components/ui/Button'
 import AsyncState from '../../components/ui/AsyncState'
 import { formatDateTime } from '../../utils/date'
-import { useAdminAccess, useAdminAction, useDenyOnForbidden } from './adminAccess'
+import { busyMessage, useAdminAccess, useAdminAction, useDenyOnForbidden } from './adminAccess'
 import { formatBytes, formatCount, retentionExecutionLocked, retentionResultLabels, retentionStatusView } from './adminView'
 import AdminError from './AdminError'
 import styles from './Admin.module.css'
@@ -22,7 +22,7 @@ const resultText = (status: string) => retentionResultLabels[status] ? `${retent
  */
 function ExecuteRetention({ owner, preview, locked, onExecuted, onFailed }: { owner: AuthUser; preview: RetentionPreview; locked: boolean; onExecuted: (result: RetentionResult) => void; onFailed: (error: unknown) => void }) {
   const [acknowledged, setAcknowledged] = useState(false)
-  const { pending, start } = useAdminAction(owner, (token: string) => executeRetention(token))
+  const { pending, blocked: busy, start } = useAdminAction(owner, (token: string) => executeRetention(token))
   const rows = preview.toDrop.reduce((sum, item) => sum + item.estimatedRows, 0)
   const bytes = preview.toDrop.reduce((sum, item) => sum + item.totalBytes, 0)
   const nothing = preview.toDrop.length === 0 && preview.toCreate.length === 0
@@ -37,10 +37,11 @@ function ExecuteRetention({ owner, preview, locked, onExecuted, onFailed }: { ow
             {preview.toDrop.length > 0 && <> 삭제 대상은 예상 {formatCount(rows)}행, {formatBytes(bytes)}이에요.</>}</p>
           {preview.toDrop.length > 0 && <p className={styles.warning}>삭제한 행동 로그는 복구할 수 없어요.</p>}
           {locked && <p className={styles.help} role="status">최신 미리보기를 확인한 뒤에 실행할 수 있어요.</p>}
+          {busy && <p className={styles.help} role="status">{busyMessage}</p>}
           <label className={styles.check}><input type="checkbox" checked={acknowledged} disabled={pending || locked} onChange={(event) => setAcknowledged(event.target.checked)} />
             위 미리보기의 삭제·생성 대상을 확인했고, 삭제된 데이터는 복구할 수 없다는 것을 이해했어요.</label>
           <div className={styles.buttons}>
-            <Button className={styles.dangerButton} loading={pending} disabled={!acknowledged || pending || locked} onClick={() => start(preview.planToken!, onExecuted, onFailed)}>보관 정리 실행</Button>
+            <Button className={styles.dangerButton} loading={pending && !busy} disabled={!acknowledged || pending || locked} onClick={() => start(preview.planToken!, onExecuted, onFailed)}>보관 정리 실행</Button>
           </div>
         </div>}
   </section>

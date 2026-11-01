@@ -4,7 +4,7 @@ import { AxiosError } from 'axios'
 import { QueryClient } from '@tanstack/react-query'
 import { apiClient } from '../src/api/client.ts'
 import { ApiError } from '../src/api/ApiError.ts'
-import { authQueryKey, resetPersonalizedQueries } from '../src/auth/session.ts'
+import { authQueryKey, authQueryOptions, resetPersonalizedQueries } from '../src/auth/session.ts'
 import { safeReturnPath } from '../src/auth/returnPath.ts'
 import { job, preview } from './admin-fixtures.mjs'
 import { retentionExecutionLocked, syncListPollMs, syncListRefetchInterval } from '../src/pages/admin/adminView.ts'
@@ -141,6 +141,20 @@ test('admin queries are cleared on account change and actions require the same c
   assert.throws(() => assertAdminOwner(client, user), error => error.kind === 'cancelled')
   await resetPersonalizedQueries(client)
   assert.equal(client.getQueryCache().findAll({ queryKey: ['admin'] }).length, 0)
+})
+
+test('a server admin denial lasts through same-user auth rechecks and is cleared only by an auth transition', async () => {
+  const client = new QueryClient()
+  const admin = { id: 1, role: 'ADMIN' }
+  client.setQueryData(authQueryKey, admin)
+  client.setQueryData(adminKeys.denied(1), true)
+  // 거부 뒤 역할 재확인(같은 사용자)은 인증 전환이 아니므로 거부 기록을 지우지 않는다.
+  apiClient.defaults.adapter = async config => response(config, admin)
+  await client.fetchQuery({ ...authQueryOptions(client), staleTime: 0 })
+  assert.equal(client.getQueryData(adminKeys.denied(1)), true)
+  // 로그인 완료·로그아웃은 같은 사용자여도 resetPersonalizedQueries로 거부 기록을 지운다.
+  await resetPersonalizedQueries(client)
+  assert.equal(client.getQueryData(adminKeys.denied(1)), undefined)
 })
 
 test('admin helpers: Seoul date, positive IDs and login return paths', () => {

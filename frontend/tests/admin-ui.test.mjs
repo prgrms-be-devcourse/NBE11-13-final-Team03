@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import ts from 'typescript'
 import { job, preview, rawRecord } from './admin-fixtures.mjs'
 const require = createRequire(import.meta.url)
+require.extensions['.png'] = (module, filename) => { module.exports = filename }
 require.extensions['.css'] = module => { module.exports = { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) } }
 for (const extension of ['.ts', '.tsx']) require.extensions[extension] = (module, filename) => {
   module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename)
@@ -23,10 +24,12 @@ const { seoulToday } = require('../src/api/admin.ts')
 
 const admin = { id: 1, nickname: '관리자', role: 'ADMIN' }, member = { id: 2, nickname: '회원', role: 'USER' }
 const base = { logoutPending: false, logoutError: null, retry: () => {}, completeOAuth: async () => {}, logout: async () => {} }
-function render({ path = '/admin/collection', status = 'authenticated', user = admin, data = {} } = {}) {
+function render({ path = '/admin/collection', status = 'authenticated', user = admin, data = {}, busy = false } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Infinity, gcTime: Infinity } } })
   client.setQueryData(['auth', 'user'], user)
   for (const [key, value] of Object.entries(data)) client.setQueryData(JSON.parse(key), value)
+  // 다른 화면에서 시작한 같은 관리자 계정의 실행 작업이 아직 끝나지 않은 상태
+  if (busy) void client.getMutationCache().build(client, { mutationKey: ['admin-change', user.id], mutationFn: () => new Promise(() => {}) }).execute()
   const routes = e(Routes, null, e(Route, { path: '/admin', element: e(AdminLayout) },
     e(Route, { path: 'collection', element: e(CollectionSection) }), e(Route, { path: 'raw-records', element: e(RawRecordSection) }), e(Route, { path: 'retention', element: e(RetentionSection) })))
   try {
@@ -97,6 +100,22 @@ test('retention execution requires READY preview, server permission and an expli
   const skipped = render({ path: '/admin/retention', data: { [key]: { ...preview, status: 'SKIPPED_LOCKED', planToken: null } } })
   assert.match(skipped, /<p class="statusLabel">다른 정리 진행 중<\/p>/)
   assert.doesNotMatch(skipped, />보관 정리 실행<\/button>/)
+})
+
+test('another running admin action blocks execution with a visible reason instead of silently ignoring it', () => {
+  const key = JSON.stringify(['admin', 1, 'retention'])
+  const busy = render({ path: '/admin/retention', data: { [key]: preview }, busy: true })
+  assert.match(busy, /<p class="help" role="status">다른 관리자 작업이 진행 중이에요\. 끝난 뒤에 실행할 수 있어요\.<\/p>/)
+  assert.match(busy, /<button[^>]*disabled=""[^>]*>보관 정리 실행<\/button>/)
+  const detail = render({ path: '/admin/collection?date=2026-10-31&job=7', data: { [syncs('2026-10-31')]: [job], [JSON.stringify(['admin', 1, 'sync', 7])]: job }, busy: true })
+  assert.match(detail, /<button[^>]*disabled=""[^>]*>실패 작업 재시도…<\/button><p class="help" role="status">다른 관리자 작업이 진행 중이에요/)
+  assert.doesNotMatch(render({ path: '/admin/retention', data: { [key]: preview } }), /다른 관리자 작업이 진행 중이에요/)
+})
+
+test('a recorded server denial keeps the admin screen closed for the session', () => {
+  const html = render({ path: '/admin/retention', data: { [JSON.stringify(['admin', 1, 'retention'])]: preview, [JSON.stringify(['admin', 1, 'denied'])]: true } })
+  assert.match(html, /관리자 권한이 확인되지 않았어요/)
+  assert.doesNotMatch(html, /관리자 메뉴|보관 정리 미리보기|파티션 1개를 삭제/)
 })
 
 test('retention status is shown in Korean while the API code is preserved, and empty targets are explained instead of empty tables', () => {

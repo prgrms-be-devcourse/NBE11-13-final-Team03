@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../auth/AuthContext'
 import { authQueryKey } from '../../auth/session'
 import type { AuthUser } from '../../api/auth'
+import { adminKeys } from '../../api/admin'
 import AsyncState from '../../components/ui/AsyncState'
 import LoginRequired from '../../components/auth/LoginRequired'
 import { AdminAccessContext } from './adminAccess'
@@ -17,12 +18,14 @@ const sections = [
 
 function AdminShell({ owner }: { owner: AuthUser }) {
   const client = useQueryClient()
-  const [denied, setDenied] = useState(false)
-  // 서버의 관리자 권한 거부가 최종 기준이다. 화면을 닫고 최신 역할을 다시 확인한다.
+  // 서버의 관리자 권한 거부가 최종 기준이다. 거부는 컴포넌트 상태가 아니라 인증 세션 단위로 기억한다.
+  // 다른 화면을 거쳐 돌아와도 다시 열지 않고, 로그인 전환(resetPersonalizedQueries가 'admin' 캐시를 지움) 뒤에만 다시 확인한다.
+  const deniedKey = adminKeys.denied(owner.id)
+  const denied = useQuery({ queryKey: deniedKey, queryFn: () => client.getQueryData<boolean>(deniedKey) ?? false, enabled: false, staleTime: Infinity, gcTime: Infinity }).data === true
   const deny = useCallback(() => {
-    setDenied(true)
+    client.setQueryData(adminKeys.denied(owner.id), true)
     void client.invalidateQueries({ queryKey: authQueryKey }).catch(() => {})
-  }, [client])
+  }, [client, owner.id])
   const access = useMemo(() => ({ owner, deny }), [owner, deny])
   if (denied) return <AsyncState status="error" title="관리자 권한이 확인되지 않았어요" description="서버에서 관리자 요청을 거부했어요. 권한이 바뀌었다면 다시 로그인한 뒤 이용해 주세요." action={<Link to="/">홈으로 이동</Link>} />
   return <div className={styles.shell}>

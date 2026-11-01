@@ -171,6 +171,8 @@ export const adminKeys = {
   sync: (userId: number, jobId: number) => ['admin', userId, 'sync', jobId] as const,
   raw: (userId: number, rawRecordId: number) => ['admin', userId, 'raw', rawRecordId] as const,
   retention: (userId: number) => ['admin', userId, 'retention'] as const,
+  // 서버의 관리자 권한 거부 기록. 화면을 다시 열어도 남고, 로그인·로그아웃 전환에서만 지워진다.
+  denied: (userId: number) => ['admin', userId, 'denied'] as const,
 }
 export const adminMutationKey = (userId: number) => ['admin-change', userId] as const
 
