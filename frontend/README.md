@@ -32,9 +32,9 @@ npm run preview  # 빌드 결과 로컬 미리보기
 frontend/
 ├── docs/api-auth.md    # API 인증 계약·구현·검증 문서
 ├── public/
-│   ├── favicon.ico
-│   └── logo/yon-symbol.png
+│   └── favicon.ico             # 16·32·48px
 ├── src/
+│   ├── assets/                   # 로고(160px)·일러스트·카카오 버튼. 빌드 시 해시 파일명
 │   ├── api/                      # 공통 클라이언트·오류·Query 설정 및 화면별 API
 │   ├── auth/                     # 사용자 Query·인증 전환·복귀 경로
 │   ├── components/

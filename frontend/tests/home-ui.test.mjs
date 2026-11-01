@@ -9,7 +9,7 @@ import { policy } from './detail-fixtures.mjs'
 
 // 기존 UI 테스트와 같은 실제 TSX 서버 렌더링이다. 클릭·포커스·시각 검증을 대신하지 않는다.
 const require = createRequire(import.meta.url)
-require.extensions['.svg'] = (module, filename) => { module.exports = filename }
+require.extensions['.svg'] = require.extensions['.png'] = (module, filename) => { module.exports = filename }
 require.extensions['.css'] = (module) => {
   module.exports = { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) }
 }

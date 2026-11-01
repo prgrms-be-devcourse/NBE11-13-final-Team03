@@ -5,6 +5,7 @@ import { AuthContext } from '../auth/AuthContext'
 import { changeSearchConditions, defaultSearchParams, serializeSearchParams } from '../pages/opportunities/searchParams'
 import AuthControls from './AuthControls'
 import NotificationBadge from './NotificationBadge'
+import logo from '../assets/logo/yon-symbol.png'
 import styles from './Header.module.css'
 
 const navigation = [
@@ -51,7 +52,7 @@ function Header() {
     >
       <div className={styles.inner}>
         <Link className={styles.brand} to="/" onClick={() => setIsMenuOpen(false)} aria-label="Y:ON 홈">
-          <img className={styles.logo} src="/logo/yon-symbol.png" alt="" width={80} height={80} />
+          <img className={styles.logo} src={logo} alt="" width={80} height={80} />
           <span>Y:ON</span>
         </Link>
         <form className={styles.headerSearch} role="search" aria-label="헤더 공고 제목 검색" onSubmit={search}>

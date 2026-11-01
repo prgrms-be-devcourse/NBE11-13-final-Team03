@@ -11,6 +11,8 @@ import { chromeServiceFlags } from './chrome-flags.mjs'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const browser = [process.env.CHROME_PATH, 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find((candidate) => candidate && fs.existsSync(candidate))
 const require = createRequire(import.meta.url)
+// 로고는 Vite 해시 에셋이다. SSR fixture에서는 실제 파일을 file URL로 그대로 불러온다.
+require.extensions['.png'] = (module, filename) => { module.exports = pathToFileURL(filename).href }
 require.extensions['.css'] = (module) => { module.exports = { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) } }
 for (const extension of ['.ts', '.tsx']) require.extensions[extension] = (module, filename) => {
   module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename)
@@ -39,7 +41,6 @@ test('Chrome renders desktop brand/search/auth above centered navigation and mob
       let header
       try { header = renderToStaticMarkup(e(QueryClientProvider, { client }, e(MemoryRouter, null, e(AuthContext.Provider, { value: fixture.auth }, e(Header))))) }
       finally { client.clear() }
-      header = header.replace('/logo/yon-symbol.png', pathToFileURL(path.join(root, 'public/logo/yon-symbol.png')).href)
       const document = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>${css}</style></head><body>${header}</body></html>`
       return `<iframe width="${fixture.width}" height="400" data-open="${!!fixture.open}" style="border:0;display:block" srcdoc="${escape(document)}"></iframe>`
     }).join('')
