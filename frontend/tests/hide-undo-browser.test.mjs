@@ -51,6 +51,7 @@ const entry = String.raw`
   const byLabel=label=>document.querySelector('[aria-label="'+label+'"]');
   const hideButton=id=>byLabel('추천 훈련 '+id+' 추천에서 숨기기');
   const undoButton=id=>byLabel('추천 훈련 '+id+' 숨김 되돌리기');
+  const closeButton=id=>byLabel('추천 훈련 '+id+' 숨김 안내 닫기');
   const region=()=>document.querySelector('[role="status"][aria-live="polite"]')?.textContent??'';
   const listed=()=>Array.from(document.querySelectorAll('#recommendations li h3')).map(h=>h.textContent);
   const steps=[];const record=(label,value)=>steps.push([label,value]);
@@ -92,12 +93,19 @@ const entry = String.raw`
     record('latestOnly',{previous:!!undoButton(101),latest:!!undoButton(102)});
     undoButton(102).click();await until(()=>!undoButton(102)&&listed().includes('추천 훈련 102'),'undo 102 done');
     record('consecutive',{serverHidden:[...hidden],lastUnhide:calls.unhide[calls.unhide.length-1]});
-    // 5초가 지나면 안내만 닫히고 서버 숨김은 유지된다.
+    // 시간이 지나도 저절로 닫히지 않는다. X를 누르면 안내만 닫히고 서버 숨김은 유지된다.
     await until(()=>hideButton(103)&&!hideButton(103).disabled,'103 ready');
     const unhideBefore=calls.unhide.length;
     hideButton(103).click();await until(()=>undoButton(103),'undo 103');
-    await wait(6000);
-    record('expired',{shown:!!undoButton(103),unhide:calls.unhide.length-unhideBefore,serverHidden:hidden.has(103),listed:listed().includes('추천 훈련 103')});
+    await wait(8000);
+    record('waited',{shown:!!undoButton(103),close:!!closeButton(103)});
+    closeButton(103).focus();closeButton(103).click();await wait(50);
+    record('closed',{shown:!!undoButton(103),focus:document.activeElement?.id,unhide:calls.unhide.length-unhideBefore,serverHidden:hidden.has(103),listed:listed().includes('추천 훈련 103')});
+    // 키보드: 안내 안에서 Escape로 닫고 포커스는 추천 제목으로 돌아간다.
+    await until(()=>hideButton(102)&&!hideButton(102).disabled,'102 ready again');
+    hideButton(102).click();await until(()=>undoButton(102),'undo 102 again');
+    undoButton(102).focus();undoButton(102).dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(50);
+    record('escaped',{shown:!!undoButton(102),focus:document.activeElement?.id,unhide:calls.unhide.length-unhideBefore,serverHidden:hidden.has(102)});
   }
   async function overlap(){
     await until(()=>hideButton(101)&&!hideButton(101).disabled,'cards');
@@ -118,6 +126,9 @@ const entry = String.raw`
     record('switched',{shown:!!undoButton(102),region:region()});
     queryClient.setQueryData(['auth','user'],null);await wait(300);
     record('logout',{shown:!!undoButton(102),region:region(),unhide:calls.unhide.length,serverHidden:hidden.has(102)});
+    // 같은 사용자로 다시 확인돼도 정리된 이전 안내는 다시 나타나지 않는다.
+    queryClient.setQueryData(['auth','user'],{id:1,nickname:'테스트',email:null,role:'USER'});await wait(300);
+    record('returned',{shown:!!undoButton(102),region:region()});
   }
   (async()=>{
     try{
@@ -185,8 +196,12 @@ test('Chrome offers undo only after a confirmed hide and restores the server hid
   // 연속 숨김: 안내는 가장 최근 것만, 되돌리기는 그 공고만 복구한다.
   assert.deepEqual([timing.latestOnly.previous, timing.latestOnly.latest], [false, true])
   assert.deepEqual([timing.consecutive.serverHidden, timing.consecutive.lastUnhide], [[101], 102])
-  // 5초 경과: 안내만 닫히고 서버 숨김은 유지, DELETE 없음
-  assert.deepEqual([timing.expired.shown, timing.expired.unhide, timing.expired.serverHidden, timing.expired.listed], [false, 0, true, false])
+  // 자동 닫힘 없음: 8초 뒤에도 안내와 닫기 버튼이 남는다.
+  assert.deepEqual(timing.waited, { shown: true, close: true })
+  // X 닫기: 안내만 닫히고 포커스는 추천 제목, 서버 숨김 유지, DELETE 없음
+  assert.deepEqual([timing.closed.shown, timing.closed.focus, timing.closed.unhide, timing.closed.serverHidden, timing.closed.listed], [false, 'recommendations-heading', 0, true, false])
+  // Escape 닫기도 같다.
+  assert.deepEqual([timing.escaped.shown, timing.escaped.focus, timing.escaped.unhide, timing.escaped.serverHidden], [false, 'recommendations-heading', 0, true])
   // 재조회와 겹쳐도 DELETE 1회 뒤 카드가 돌아온다.
   assert.deepEqual([overlap.overlap.unhide, overlap.overlap.serverHidden], [[101], false])
   assert.ok(overlap.overlap.listed.includes('추천 훈련 101'))
@@ -195,4 +210,6 @@ test('Chrome offers undo only after a confirmed hide and restores the server hid
   assert.doesNotMatch(overlap.switched.region, /공고를 숨겼어요/)
   assert.deepEqual([overlap.logout.shown, overlap.logout.unhide, overlap.logout.serverHidden], [false, 1, true])
   assert.doesNotMatch(overlap.logout.region, /공고를 숨겼어요/)
+  assert.equal(overlap.returned.shown, false)
+  assert.doesNotMatch(overlap.returned.region, /공고를 숨겼어요/)
 })

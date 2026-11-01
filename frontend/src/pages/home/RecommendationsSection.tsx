@@ -67,7 +67,6 @@ function ObservedRecommendation({ item, disabled, userId, recorded, onHidden }: 
   return <li ref={element}><RecommendationCard item={item} disabled={disabled} onHidden={() => onHidden(item)} /></li>
 }
 
-const undoVisibleMs = 5000
 type Hidden = { userId: number; opportunityId: number; title: string; sequence: number }
 
 function undoErrorMessage(error: unknown): string {
@@ -79,20 +78,14 @@ function undoErrorMessage(error: unknown): string {
 
 /**
  * 숨김 직후 되돌리기. 기존 숨김 해제 API(DELETE /opportunities/{id}/hide)로 서버 상태를 실제로 되돌리고 추천을 다시 받는다.
- * 5초 뒤 안내만 닫으며 서버 숨김은 그대로 둔다. 키보드 포커스·포인터가 안내에 있으면 닫지 않고, 실패하면 닫지 않고 재시도를 둔다.
+ * 시간 제한 없이 사용자가 닫기(X·Escape)를 누를 때까지 남는다. 닫으면 안내만 사라지고 서버 숨김은 그대로 둔다. 실패하면 재시도를 둔다.
  */
 function HideUndo({ hidden, onUndone, onClose }: { hidden: Hidden; onUndone: () => void; onClose: () => void }) {
   const client = useQueryClient()
   const auth = useContext(AuthContext)
   const [state, setState] = useState<'idle' | 'pending' | 'error'>('idle')
   const [error, setError] = useState<unknown>(null)
-  const [paused, setPaused] = useState(false)
   const running = useRef(false)
-  useEffect(() => {
-    if (state !== 'idle' || paused) return
-    const timer = setTimeout(onClose, undoVisibleMs)
-    return () => clearTimeout(timer)
-  }, [state, paused, onClose])
   const undo = () => {
     const owner = auth?.status === 'authenticated' ? auth.user : undefined
     if (!owner || owner.id !== hidden.userId || running.current) return
@@ -102,15 +95,13 @@ function HideUndo({ hidden, onUndone, onClose }: { hidden: Hidden; onUndone: () 
       .then(onUndone, (reason: unknown) => { setError(reason); setState('error') })
       .finally(() => { running.current = false })
   }
-  // 키보드로 머무는 동안(:focus-visible)과 포인터가 올라가 있는 동안에는 자동으로 닫지 않는다.
-  return <div className={styles.undo} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
-    onFocus={(event) => { if (event.target.matches(':focus-visible')) setPaused(true) }} onBlur={() => setPaused(false)}>
+  // 안내 안의 버튼에 포커스가 있으면 Escape로도 닫는다. 해제 요청 중에는 결과를 보여 주기 위해 닫지 않는다.
+  return <div className={styles.undo} onKeyDown={(event) => { if (event.key === 'Escape' && state !== 'pending') { event.stopPropagation(); onClose() } }}>
     {/* 긴 제목으로 크기가 흔들리지 않도록 화면에는 짧은 문구만 둔다. 어떤 공고인지는 버튼의 접근 가능한 이름으로 알린다. */}
     <p className={styles.undoText}>공고를 숨겼어요.</p>
     <div className={styles.undoActions}>
       <Button variant="ghost" className={styles.undoButton} loading={state === 'pending'} disabled={state === 'pending'} aria-label={`${hidden.title} 숨김 되돌리기`} onClick={undo}>{state === 'error' ? '다시 시도' : '되돌리기'}</Button>
-      {/* 평소에는 5초 뒤 저절로 닫힌다. 실패하면 자동으로 닫히지 않으므로 그때만 닫기를 둔다. */}
-      {state === 'error' && <Button variant="ghost" className={styles.undoClose} aria-label="숨김 안내 닫기" onClick={onClose}><X size={18} aria-hidden="true" /></Button>}
+      <Button variant="ghost" className={styles.undoClose} disabled={state === 'pending'} aria-label={`${hidden.title} 숨김 안내 닫기`} onClick={onClose}><X size={18} aria-hidden="true" /></Button>
     </div>
     {state === 'error' && <p className={styles.undoError} role="alert">{undoErrorMessage(error)}</p>}
   </div>
@@ -139,8 +130,7 @@ function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUser
     if (document.activeElement?.closest(`.${styles.undo}`)) heading.current?.focus()
     setHidden(null)
   }, [])
-  // 숨긴 카드의 버튼이 사라져 포커스를 잃었으면 추천 제목으로 옮긴다. 다음 Tab이 바로 되돌리기 버튼이다.
-  // 버튼에 직접 포커스를 주면 자동 닫힘이 멈출 수 있어(키보드 포커스로 판단) 제목을 쓴다.
+  // 숨긴 카드의 버튼이 사라져 포커스를 잃었으면 추천 제목으로 옮긴다. 다음 Tab이 바로 되돌리기, 그다음이 닫기 버튼이다.
   const hiddenSequence = hidden?.sequence
   useEffect(() => {
     if (hiddenSequence !== undefined && (!document.activeElement || document.activeElement === document.body)) heading.current?.focus()
@@ -150,8 +140,9 @@ function RecommendationsSection({ confirmedUserId, authStatus }: { confirmedUser
     const timer = setTimeout(() => setUndone(false), 3000)
     return () => clearTimeout(timer)
   }, [undone])
-  // 로그아웃·계정 전환·인증 확인 중에는 이전 사용자의 안내를 보이지 않는다.
+  // 로그아웃·계정 전환·인증 확인 중에는 이전 사용자의 안내를 보이지 않고 지운다. 같은 사용자로 돌아와도 다시 띄우지 않는다.
   const visibleHidden = hidden && authStatus === 'authenticated' && hidden.userId === confirmedUserId ? hidden : null
+  if (hidden && !visibleHidden) setHidden(null)
   let content
   if (authStatus === 'checking') {
     content = <AsyncState status="loading" title="로그인 상태를 확인하고 있어요" />
