@@ -2,6 +2,9 @@ package com.team3.backend.recommendation.service;
 
 import com.team3.backend.eligibility.api.EligibilityProvider;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
+import com.team3.backend.opportunity.domain.entity.OpportunityType;
+import com.team3.backend.recommendation.domain.repository.RecommendationCandidateRepository;
+import com.team3.backend.recommendation.domain.repository.RecommendationCandidateRepository.CategoryPair;
 import com.team3.backend.recommendation.dto.InterestMatchLevel;
 import com.team3.backend.recommendation.dto.RecommendationCandidate;
 import com.team3.backend.recommendation.dto.RecommendationEligibleCandidate;
@@ -20,6 +23,7 @@ import java.util.Map;
 public class RecommendationEligibilityService {
 
     private final EligibilityProvider eligibilityProvider;
+    private final RecommendationCandidateRepository candidateRepository;
 
     /**
      * 운영 미사용: 기존 전체 후보 순회 방식의 동등성 검증 및 성능 측정에만 사용한다 (운영 추천은 RecommendationCandidateRepository.findTopPerGroup이 DB에서 적용).
@@ -32,9 +36,15 @@ public class RecommendationEligibilityService {
             RecommendationInterestMatcher.MatchContext matchContext,
             LocalDate today
     ) {
+        // 청년정책 분류 행은 배치마다 한 번 읽는다 (관심 미설정이면 판정에 쓰지 않으므로 읽지 않는다)
+        Map<Long, List<CategoryPair>> policyCategories = matchContext.unrestricted() ? Map.of()
+                : candidateRepository.findPolicyCategories(candidates.stream()
+                        .filter(candidate -> candidate.type() == OpportunityType.YOUTH_POLICY)
+                        .map(RecommendationCandidate::opportunityId).toList());
         List<InterestMatchedCandidate> matched = new ArrayList<>();
         for (RecommendationCandidate candidate : candidates) {
-            matchContext.match(candidate).ifPresent(level -> matched.add(new InterestMatchedCandidate(candidate, level)));
+            matchContext.match(candidate, policyCategories.getOrDefault(candidate.opportunityId(), List.of()))
+                    .ifPresent(level -> matched.add(new InterestMatchedCandidate(candidate, level)));
         }
         if (matched.isEmpty()) {
             return List.of();

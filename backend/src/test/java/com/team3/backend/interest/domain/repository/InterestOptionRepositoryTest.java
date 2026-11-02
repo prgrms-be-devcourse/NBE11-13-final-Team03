@@ -1,5 +1,6 @@
 package com.team3.backend.interest.domain.repository;
 
+import com.team3.backend.fixture.PolicyCategoryRows;
 import org.junit.jupiter.api.Tag;
 
 import com.team3.backend.interest.dto.InterestOptionRow;
@@ -70,7 +71,7 @@ class InterestOptionRepositoryTest {
         List<InterestOptionRow> result = findCategories();
 
         assertEquals(
-                List.of(new InterestOptionRow("일자리", "취업지원", null)),
+                List.of(new InterestOptionRow(OpportunityType.YOUTH_POLICY, "일자리", "취업지원", null)),
                 result
         );
     }
@@ -83,7 +84,7 @@ class InterestOptionRepositoryTest {
         List<InterestOptionRow> result = findCategories();
 
         assertEquals(
-                List.of(new InterestOptionRow("일자리", "취업지원", null)),
+                List.of(new InterestOptionRow(OpportunityType.YOUTH_POLICY, "일자리", "취업지원", null)),
                 result
         );
     }
@@ -109,10 +110,10 @@ class InterestOptionRepositoryTest {
 
         assertEquals(2, result.size());
         assertTrue(result.contains(
-                new InterestOptionRow("교육･직업훈련", "정보통신", "정보기술")
+                new InterestOptionRow(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "정보통신", "정보기술")
         ));
         assertTrue(result.contains(
-                new InterestOptionRow("교육･직업훈련", "정보통신", "통신기술")
+                new InterestOptionRow(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "정보통신", "통신기술")
         ));
     }
 
@@ -125,14 +126,90 @@ class InterestOptionRepositoryTest {
         assertTrue(result.isEmpty());
     }
 
-    private List<InterestOptionRow> findCategories() {
+    @Test
+    void 청년정책은_분류행의_대중분류짝을_개별_선택지로_계층과_중복없이_만든다() {
+        // (일자리, 취업), (교육, 미래역량강화) / (일자리, 취업), (일자리, 창업) / 대분류만·중분류만 있는 행
+        Opportunity multi = createOpportunity("정책 A", "일자리,교육", "취업,미래역량강화", null, true);
+        categoryRows(multi, new String[]{"일자리", "취업"}, new String[]{"교육", "미래역량강화"});
+        Opportunity duplicate = createOpportunity("정책 B", "일자리,일자리", "취업,창업", null, true);
+        categoryRows(duplicate, new String[]{"일자리", "취업"}, new String[]{"일자리", "창업"});
+        Opportunity uneven = createOpportunity("정책 C", "주거,복지", "월세", null, true);
+        categoryRows(uneven, new String[]{"주거", null}, new String[]{"복지", null}, new String[]{null, "월세"});
+        // 분류 행이 없는 백필 전 공고는 원문 컬럼을 선택지로 쓰지 않는다
+        createOpportunity("정책 D", "금융,문화", "대출,공연", null, true);
+        createOpportunity("훈련 A", "교육･직업훈련", "정보통신", "정보기술", true);
+
+        var options = new com.team3.backend.interest.service.InterestOptionService(interestOptionRepository)
+                .getOptions();
+        entityManager.clear();
+
+        Map<String, Map<String, List<String>>> hierarchy = new java.util.TreeMap<>();
+        options.categories().forEach(category -> {
+            Map<String, List<String>> subs = new java.util.TreeMap<>();
+            category.subCategories().forEach(sub -> subs.put(sub.subCategory(), sub.detailCategories()));
+            hierarchy.put(category.category(), subs);
+        });
+        assertEquals(Map.of(
+                "교육", Map.of("미래역량강화", List.of()),
+                "교육･직업훈련", Map.of("정보통신", List.of("정보기술")),
+                "복지", Map.of(),
+                "일자리", Map.of("창업", List.of(), "취업", List.of()),
+                "주거", Map.of()
+        ), hierarchy);
+        // 대분류는 한 번만, 정렬된 순서로 나온다
+        assertEquals(List.of("교육", "교육･직업훈련", "복지", "일자리", "주거"),
+                options.categories().stream().map(category -> category.category()).toList());
+    }
+
+    @Test
+    void 청년정책과_직업훈련의_같은_대분류명은_공고유형으로_구분된다() {
+        // 실제 데이터: 청년정책 원본 대분류 '교육･직업훈련' (옛 분류명) / 직업훈련 대분류 '교육･직업훈련'
+        Opportunity policy = createOpportunity("정책", "교육･직업훈련,교육･직업훈련", "온·오프라인교육 ,미래역량강화", null, true);
+        categoryRows(policy, new String[]{"교육･직업훈련", "온·오프라인교육"}, new String[]{"교육･직업훈련", "미래역량강화"});
+        createOpportunity("훈련", "교육･직업훈련", "정보통신", "정보기술", true);
+
+        var options = new com.team3.backend.interest.service.InterestOptionService(interestOptionRepository)
+                .getOptions();
+
+        var shared = options.categories().getFirst();
+        assertEquals("교육･직업훈련", shared.category());
+        assertEquals(List.of(OpportunityType.YOUTH_POLICY, OpportunityType.VOCATIONAL_TRAINING), shared.opportunityTypes());
+        Map<String, List<OpportunityType>> subTypes = new java.util.TreeMap<>();
+        shared.subCategories().forEach(sub -> subTypes.put(sub.subCategory(), sub.opportunityTypes()));
+        assertEquals(Map.of(
+                "미래역량강화", List.of(OpportunityType.YOUTH_POLICY),
+                "온·오프라인교육", List.of(OpportunityType.YOUTH_POLICY),
+                "정보통신", List.of(OpportunityType.VOCATIONAL_TRAINING)), subTypes);
+    }
+
+    @Test
+    void 백필후에는_분류행으로_선택지가_생긴다() {
+        createOpportunity("백필 전 정책", "일자리", "취업지원", null, true);
         entityManager.flush();
+        assertTrue(interestOptionRepository.findDistinctNormalizedCategories().isEmpty());
+
+        PolicyCategoryRows.backfill(entityManager);
+
+        assertEquals(List.of(new InterestOptionRow(OpportunityType.YOUTH_POLICY, "일자리", "취업지원", null)), findCategories());
+    }
+
+    private void categoryRows(Opportunity opportunity, String[]... rows) {
+        short order = 0;
+        for (String[] row : rows) {
+            entityManager.persist(com.team3.backend.opportunity.domain.entity.OpportunityCategory.builder()
+                    .version(opportunity.getCurrentVersion()).sortOrder(order++)
+                    .largeCategory(row[0]).mediumCategory(row[1]).build());
+        }
+    }
+
+    private List<InterestOptionRow> findCategories() {
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
 
         return interestOptionRepository.findDistinctNormalizedCategories();
     }
 
-    private void createOpportunity(
+    private Opportunity createOpportunity(
             String title,
             String category,
             String subCategory,
@@ -154,7 +231,7 @@ class InterestOptionRepositoryTest {
         entityManager.persist(opportunity);
 
         if (!normalized) {
-            return;
+            return opportunity;
         }
 
         OpportunityVersion version = OpportunityVersion.builder()
@@ -167,5 +244,6 @@ class InterestOptionRepositoryTest {
 
         entityManager.persist(version);
         opportunity.changeCurrentVersion(version);
+        return opportunity;
     }
 }

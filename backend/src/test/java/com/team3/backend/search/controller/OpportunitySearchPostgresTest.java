@@ -1,5 +1,6 @@
 package com.team3.backend.search.controller;
 
+import com.team3.backend.fixture.PolicyCategoryRows;
 import org.junit.jupiter.api.Tag;
 
 import com.jayway.jsonpath.JsonPath;
@@ -159,7 +160,7 @@ class OpportunitySearchPostgresTest {
         preference.markSaved(near.getCurrentVersion().getId());
         preference.markHidden();
         entityManager.persist(preference);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 
@@ -208,7 +209,7 @@ class OpportunitySearchPostgresTest {
                     training == otherDetail ? "하드웨어" : "소프트웨어", null);
         }
         policy.updateSummary(policy.getTitle(), "복지", "생활", null);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
 
         List<Long> actualIds = new ArrayList<>();
@@ -250,7 +251,7 @@ class OpportunitySearchPostgresTest {
 
         assertEquals(2, trainingCourseNormalizationService.normalizePage(new TrainingNormalizationCommand(
                 sourceId, List.of(informationTechnology, communicationTechnology), LocalDateTime.now())).created());
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
 
         Opportunity informationOpportunity = opportunitySourceRepository
@@ -352,7 +353,7 @@ class OpportunitySearchPostgresTest {
                 EligibilityResultService.RULE_VERSION, null);
         eligibilityResult(userId, trainingPast, EligibilityStatus.ELIGIBLE, false, 1L,
                 EligibilityResultService.RULE_VERSION, null);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 
@@ -527,7 +528,7 @@ class OpportunitySearchPostgresTest {
                 .user(noProfileAccount).opportunity(notEligible).build();
         noProfileSaved.markSaved(notEligible.getCurrentVersion().getId());
         entityManager.persist(noProfileSaved);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
 
         CustomUserDetails principal = new CustomUserDetails(account.getId(), Role.USER, "display");
@@ -669,7 +670,7 @@ class OpportunitySearchPostgresTest {
         entityManager.persist(OpportunityRegion.builder()
                 .version(elsewherePolicy.getCurrentVersion()).region(otherProvince)
                 .regionRole(RegionRole.RESIDENCE).build());
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 
@@ -805,7 +806,7 @@ class OpportunitySearchPostgresTest {
         trainingDetail(unknown, null);
         trainingDetail(futureTraining, today.plusDays(1));
         trainingDetail(startedTraining, today.minusDays(1));
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 
@@ -918,7 +919,7 @@ class OpportunitySearchPostgresTest {
         trainingDetail(earlyTraining, today.plusDays(2));
         trainingDetail(lateTraining, today.plusDays(4));
         trainingDetail(unknownTraining, null);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 
@@ -1021,7 +1022,7 @@ class OpportunitySearchPostgresTest {
         window(closedMulti, PeriodType.FIXED, today.minusDays(3), today.minusDays(2), ValidationStatus.VALID);
         window(closedMissing, PeriodType.CLOSED, null, null, ValidationStatus.VALID);
         window(unknownNew, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.INVALID);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
 
         List<Long> expected = List.of(openTied.getId(), openNear.getId(), openFar.getId(),
@@ -1097,7 +1098,7 @@ class OpportunitySearchPostgresTest {
         window(open, PeriodType.FIXED, today.minusDays(1), today.plusDays(1), ValidationStatus.VALID);
         window(always, PeriodType.ALWAYS, null, null, ValidationStatus.VALID);
         window(closed, PeriodType.FIXED, today.minusDays(10), today.minusDays(1), ValidationStatus.VALID);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
 
         List<Long> sortedIds = new ArrayList<>();
@@ -1186,7 +1187,7 @@ class OpportunitySearchPostgresTest {
         trainingDetail(trainingNear, today.plusDays(1));
         trainingDetail(trainingLate, today.plusDays(3));
         trainingDetail(trainingUnknown, null);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 

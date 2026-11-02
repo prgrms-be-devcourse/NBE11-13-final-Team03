@@ -4,6 +4,7 @@ import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.interest.dto.InterestCategoryOptionResponse;
 import com.team3.backend.interest.dto.InterestOptionsResponse;
 import com.team3.backend.interest.dto.InterestSubCategoryOptionResponse;
+import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.interest.service.InterestOptionService;
 import com.team3.backend.user.domain.entity.Role;
 import org.junit.jupiter.api.Test;
@@ -47,9 +48,16 @@ class InterestOptionControllerTest {
                                 List.of(
                                         new InterestSubCategoryOptionResponse(
                                                 "정보통신",
-                                                List.of("정보기술")
+                                                List.of("정보기술"),
+                                                List.of(OpportunityType.VOCATIONAL_TRAINING)
+                                        ),
+                                        new InterestSubCategoryOptionResponse(
+                                                "미래역량강화",
+                                                List.of(),
+                                                List.of(OpportunityType.YOUTH_POLICY)
                                         )
-                                )
+                                ),
+                                List.of(OpportunityType.YOUTH_POLICY, OpportunityType.VOCATIONAL_TRAINING)
                         )
                 )));
 
@@ -63,7 +71,13 @@ class InterestOptionControllerTest {
                 ).value("정보통신"))
                 .andExpect(jsonPath(
                         "$.categories[0].subCategories[0].detailCategories[0]"
-                ).value("정보기술"));
+                ).value("정보기술"))
+                // 기존 필드는 그대로 두고 공고 유형만 더한다
+                .andExpect(jsonPath("$.categories[0].opportunityTypes[0]").value("YOUTH_POLICY"))
+                .andExpect(jsonPath("$.categories[0].opportunityTypes[1]").value("VOCATIONAL_TRAINING"))
+                .andExpect(jsonPath("$.categories[0].subCategories[0].opportunityTypes[0]").value("VOCATIONAL_TRAINING"))
+                .andExpect(jsonPath("$.categories[0].subCategories[1].opportunityTypes.length()").value(1))
+                .andExpect(jsonPath("$.categories[0].subCategories[1].opportunityTypes[0]").value("YOUTH_POLICY"));
 
         verify(interestOptionService).getOptions();
     }

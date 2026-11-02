@@ -1,5 +1,6 @@
 package com.team3.backend.search.controller;
 
+import com.team3.backend.fixture.PolicyCategoryRows;
 import org.junit.jupiter.api.Tag;
 
 import com.jayway.jsonpath.JsonPath;
@@ -377,7 +378,7 @@ class OpportunitySearchCandidatePostgresTest {
     }
 
     private void flush() {
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
     }
 

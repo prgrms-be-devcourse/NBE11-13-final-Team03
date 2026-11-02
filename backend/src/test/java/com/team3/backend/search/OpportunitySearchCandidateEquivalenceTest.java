@@ -67,17 +67,17 @@ class OpportunitySearchCandidateEquivalenceTest {
             if (System.getenv("YON_SEARCH_EQUIVALENCE_CAPTURE") != null) {
                 // SQL 로그 수집용: 측정과 같은 첫 페이지(20건)만 한 번 호출한다
                 searchService.search(parts[1], null, null, null, null, null, null, null, null, null, null, null,
-                        null, sort(), 0, 20);
+                        null, null, sort(), 0, 20);
                 continue;
             }
             if (System.getenv("YON_SEARCH_EQUIVALENCE_EDGE_PAGES") != null) {
                 // 대표 페이지만: 첫·중간·마지막 페이지 (page|qid|페이지 번호|id)
                 OpportunitySearchResponseDto first = searchService.search(parts[1], null, null, null, null, null,
-                        null, null, null, null, null, null, null, sort(), 0, PAGE_SIZE);
+                        null, null, null, null, null, null, null, null, sort(), 0, PAGE_SIZE);
                 int pages = first.totalPages();
                 for (int page : new java.util.TreeSet<>(List.of(0, pages / 2, Math.max(0, pages - 1)))) {
                     OpportunitySearchResponseDto response = page == 0 ? first : searchService.search(parts[1],
-                            null, null, null, null, null, null, null, null, null, null, null, null, sort(),
+                            null, null, null, null, null, null, null, null, null, null, null, null, null, sort(),
                             page, PAGE_SIZE);
                     for (OpportunitySearchItemDto item : response.content()) {
                         lines.add("page|" + parts[0] + "|" + page + "|" + item.opportunityId());
@@ -90,7 +90,7 @@ class OpportunitySearchCandidateEquivalenceTest {
             int collected = 0;
             for (int page = 0; ; page++) {
                 OpportunitySearchResponseDto response = searchService.search(parts[1], null, null, null, null,
-                        null, null, null, null, null, null, null, null, sort(), page, PAGE_SIZE);
+                        null, null, null, null, null, null, null, null, null, sort(), page, PAGE_SIZE);
                 total = response.totalElements();
                 for (OpportunitySearchItemDto item : response.content()) {
                     lines.add(parts[0] + "|" + item.opportunityId());
@@ -124,7 +124,7 @@ class OpportunitySearchCandidateEquivalenceTest {
         List<Long> samples = new ArrayList<>();
         for (int run = 0; run < 22; run++) {
             long start = System.nanoTime();
-            searchService.search(keyword, null, null, null, null, null, null, null, null, null, null, null, null,
+            searchService.search(keyword, null, null, null, null, null, null, null, null, null, null, null, null, null,
                     sort(), 0, 20);
             if (run >= 2) {
                 samples.add((System.nanoTime() - start) / 1_000_000);

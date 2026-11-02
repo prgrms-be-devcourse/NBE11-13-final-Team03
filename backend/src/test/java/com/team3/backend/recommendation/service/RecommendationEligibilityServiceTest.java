@@ -66,6 +66,7 @@ class RecommendationEligibilityServiceTest {
         var context = context(List.of(new UserInterestResponse(InterestType.SUB_CATEGORY, "취업지원")));
         RecommendationCandidate matched = new RecommendationCandidate(1L, OpportunityType.YOUTH_POLICY,
                 "공고", "일자리", "취업지원", null, null, null, null, null);
+        categoryRows.register(List.of(matched));
         when(eligibilityProvider.findFreshStatuses(USER_ID, List.of(1L), TODAY))
                 .thenReturn(Map.of(1L, EligibilityStatus.ELIGIBLE));
 
@@ -127,12 +128,16 @@ class RecommendationEligibilityServiceTest {
         return new RecommendationInterestMatcher(userInterestService).load(USER_ID);
     }
 
+    private final SingleCategoryRowsRepository categoryRows = new SingleCategoryRowsRepository();
+
     private RecommendationEligibilityService service() {
-        return new RecommendationEligibilityService(eligibilityProvider);
+        return new RecommendationEligibilityService(eligibilityProvider, categoryRows);
     }
 
-    private static RecommendationCandidate candidate(Long id, String category) {
-        return new RecommendationCandidate(id, OpportunityType.YOUTH_POLICY, "공고", category, null, null,
-                null, null, null, null);
+    private RecommendationCandidate candidate(Long id, String category) {
+        RecommendationCandidate candidate = new RecommendationCandidate(id, OpportunityType.YOUTH_POLICY, "공고",
+                category, null, null, null, null, null, null);
+        categoryRows.register(List.of(candidate));
+        return candidate;
     }
 }

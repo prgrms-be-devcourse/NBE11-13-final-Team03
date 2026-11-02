@@ -47,7 +47,7 @@ public class OpportunitySearchController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "검색 성공, 결과가 없으면 빈 content를 반환한다"),
-            @ApiResponse(responseCode = "400", description = "잘못된 enum·지역 코드·날짜 범위·정렬/유형 조합 또는 페이지 요청 (COMMON_001, COMMON_002)"),
+            @ApiResponse(responseCode = "400", description = "잘못된 enum·지역 코드·날짜 범위·정렬/유형 조합·분류 유형(categoryType) 조합 또는 페이지 요청 (COMMON_001, COMMON_002)"),
             @ApiResponse(responseCode = "401", description = "신청 가능성 필터 요청 시 Access Token이 없거나 유효하지 않은 경우")
     })
     @GetMapping("/api/opportunities")
@@ -63,6 +63,11 @@ public class OpportunitySearchController {
             @RequestParam(required = false) String subCategory,
             @Parameter(description = "세 번째 분류 (직업훈련: NCS 중분류)")
             @RequestParam(required = false) String detailCategory,
+            @Parameter(description = "분류(category·subCategory·detailCategory)가 속한 공고 유형: YOUTH_POLICY 또는 VOCATIONAL_TRAINING. "
+                    + "청년정책과 직업훈련은 같은 대분류명(예: 교육･직업훈련)을 쓸 수 있어, type 없이 검색할 때 분류를 이 유형에서만 찾는다 "
+                    + "(분류 필터에 맞는 공고는 이 유형뿐이다). 생략하면 두 유형에서 모두 찾는다. "
+                    + "분류 값 없이 쓰거나 type과 다르면 400이다. type이 있으면 생략한다")
+            @RequestParam(required = false) OpportunityType categoryType,
             @Parameter(description = "지역 코드. 정책은 거주 자격 지역과 전국 대상, 훈련은 실제 교육 지역을 조회한다. 시·도 선택은 하위 지역을 포함한다")
             @RequestParam(required = false) String region,
             @Parameter(description = "모집 상태: UPCOMING, OPEN, ALWAYS_OPEN, CLOSED, UNKNOWN. 훈련 OPEN은 개강 예정 검색 규칙을 적용한다")
@@ -88,7 +93,7 @@ public class OpportunitySearchController {
             throw new BusinessException(AuthErrorCode.ACCESS_TOKEN_NOT_FOUND);
         }
         return ResponseEntity.ok(searchService.search(
-                keyword, type, category, subCategory, detailCategory, region, applicationStatus,
+                keyword, type, category, subCategory, detailCategory, categoryType, region, applicationStatus,
                 userDetails == null ? null : userDetails.getUserId(), eligibilityStatuses,
                 deadlineFrom, deadlineTo, startDateFrom, startDateTo, sort, page, size));
     }

@@ -8,6 +8,7 @@ import com.team3.backend.global.exception.GlobalErrorCode;
 import com.team3.backend.opportunity.domain.entity.ConditionType;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
+import com.team3.backend.opportunity.domain.entity.OpportunityCategory;
 import com.team3.backend.opportunity.domain.entity.OpportunityCondition;
 import com.team3.backend.opportunity.domain.entity.OpportunityRegion;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
@@ -83,7 +84,7 @@ public class OpportunitySearchService {
     @Transactional(readOnly = true)
     public OpportunitySearchResponseDto search(
             String keyword, OpportunityType type, String category, String subCategory, String detailCategory,
-            String region, ApplicationStatus applicationStatus,
+            OpportunityType categoryType, String region, ApplicationStatus applicationStatus,
             Long userId, List<EligibilityStatus> eligibilityStatuses,
             LocalDate deadlineFrom, LocalDate deadlineTo,
             LocalDate startDateFrom, LocalDate startDateTo,
@@ -100,9 +101,14 @@ public class OpportunitySearchService {
                 || (hasDeadlineRange && type != OpportunityType.YOUTH_POLICY)
                 || (hasStartRange && type != OpportunityType.VOCATIONAL_TRAINING)
                 || (sort == OpportunitySearchSort.DEADLINE_PRIORITY && type != OpportunityType.YOUTH_POLICY)
-                || (sort == OpportunitySearchSort.START_DATE_ASC && type != OpportunityType.VOCATIONAL_TRAINING)) {
+                || (sort == OpportunitySearchSort.START_DATE_ASC && type != OpportunityType.VOCATIONAL_TRAINING)
+                || (categoryType != null && ((type != null && type != categoryType)
+                        || (!StringUtils.hasText(category) && !StringUtils.hasText(subCategory)
+                            && !StringUtils.hasText(detailCategory))))) {
             throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
         }
+        // 분류를 찾을 공고 유형. type이 있으면 그 유형, 없으면 categoryType(생략 시 두 유형 모두)
+        OpportunityType categoryScope = type != null ? type : categoryType;
 
         Set<String> regionCodes = null;
         if (region != null) {
@@ -151,14 +157,16 @@ public class OpportunitySearchService {
             if (type != null) {
                 predicates.add(criteriaBuilder.equal(root.get("opportunityType"), type));
             }
-            if (StringUtils.hasText(category)) {
-                predicates.add(criteriaBuilder.equal(root.get("category"), category.trim()));
-            }
-            if (StringUtils.hasText(subCategory)) {
-                predicates.add(criteriaBuilder.equal(root.get("subCategory"), subCategory.trim()));
+            String large = StringUtils.hasText(category) ? category.trim() : null;
+            String medium = StringUtils.hasText(subCategory) ? subCategory.trim() : null;
+            if (large != null || medium != null) {
+                predicates.add(categoryMatches(root, query, criteriaBuilder, categoryScope, large, medium));
             }
             if (StringUtils.hasText(detailCategory)) {
                 predicates.add(criteriaBuilder.equal(root.get("detailCategory"), detailCategory.trim()));
+                if (categoryScope != null && type == null) {
+                    predicates.add(criteriaBuilder.equal(root.get("opportunityType"), categoryScope));
+                }
             }
             if (matchingRegionCodes != null) {
                 predicates.add(regionMatches(root, query, criteriaBuilder, matchingRegionCodes, type));
@@ -378,6 +386,51 @@ public class OpportunitySearchService {
         return criteriaBuilder.and(
                 criteriaBuilder.equal(root.get("opportunityType"), type),
                 root.get("currentVersion").get("id").in(subquery));
+    }
+
+    /**
+     * 대·중분류 필터. 청년정책은 현재 버전의 분류 행에서, 직업훈련은 공고의 분류 컬럼에서 찾는다.
+     * 청년정책은 대·중분류가 함께 오면 같은 분류 행(짝)에서 둘 다 맞아야 한다. (일자리, 취업)·(교육, 미래역량강화) 두 행이 있는
+     * 공고는 교육 + 취업으로 찾지 않는다. 분류 행이 없는 청년정책(분류 없음·백필 전)은 분류 필터에 맞지 않는다.
+     *
+     * 분류 행이 여러 개라도 공고가 중복되지 않도록 조인하지 않고, detailValueIn과 같이 현재 버전 ID를 비상관 IN으로 비교한다.
+     * 유형이 정해진 검색은 regionMatches와 같이 그 유형의 가지만 만든다.
+     */
+    private static Predicate categoryMatches(
+            Root<Opportunity> root, CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder,
+            OpportunityType type, String large, String medium
+    ) {
+        // 청년정책 공고 컬럼에도 원문 대분류(예: 교육･직업훈련)가 있으므로 직업훈련 가지에도 유형을 둔다
+        Predicate training = criteriaBuilder.and(
+                criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.VOCATIONAL_TRAINING),
+                columnEquals(root, criteriaBuilder, "category", large),
+                columnEquals(root, criteriaBuilder, "subCategory", medium));
+        if (type == OpportunityType.VOCATIONAL_TRAINING) {
+            return training;
+        }
+        Subquery<Long> versions = query.subquery(Long.class);
+        Root<OpportunityCategory> row = versions.from(OpportunityCategory.class);
+        List<Predicate> pair = new ArrayList<>();
+        if (large != null) {
+            pair.add(criteriaBuilder.equal(row.get("largeCategory"), large));
+        }
+        if (medium != null) {
+            pair.add(criteriaBuilder.equal(row.get("mediumCategory"), medium));
+        }
+        versions.select(row.get("version").get("id")).where(pair.toArray(Predicate[]::new));
+        Predicate policy = criteriaBuilder.and(
+                criteriaBuilder.equal(root.get("opportunityType"), OpportunityType.YOUTH_POLICY),
+                root.get("currentVersion").get("id").in(versions));
+        if (type == OpportunityType.YOUTH_POLICY) {
+            return policy;
+        }
+        return criteriaBuilder.or(policy, training);
+    }
+
+    private static Predicate columnEquals(
+            Root<Opportunity> root, CriteriaBuilder criteriaBuilder, String attribute, String value
+    ) {
+        return value == null ? criteriaBuilder.conjunction() : criteriaBuilder.equal(root.get(attribute), value);
     }
 
     private static void addDescendants(RegionIndex index, String code, Set<String> codes) {
