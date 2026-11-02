@@ -51,11 +51,12 @@ class RecommendationSelectionServiceTest {
 
     /** 그룹·정렬·혼합 규칙은 운영 RecommendationSelectionService.TopCandidates를 그대로 쓰는 전체 순회 참조 구현으로 검증한다 */
     private RecommendationFullScanReference service;
+    private final SingleCategoryRowsRepository categoryRows = new SingleCategoryRowsRepository();
 
     @BeforeEach
     void setUp() {
         var matcher = new RecommendationInterestMatcher(userInterestService);
-        var eligibility = new RecommendationEligibilityService(eligibilityProvider);
+        var eligibility = new RecommendationEligibilityService(eligibilityProvider, categoryRows);
         service = new RecommendationFullScanReference(profileService, candidateService, matcher,
                 eligibility, preferenceService);
     }
@@ -270,6 +271,7 @@ class RecommendationSelectionServiceTest {
                 new UserInterestResponse(InterestType.SUB_CATEGORY, "high"),
                 new UserInterestResponse(InterestType.DETAIL_CATEGORY, "high"),
                 new UserInterestResponse(InterestType.CATEGORY, "medium"));
+        categoryRows.register(candidates);
         when(userInterestService.getInterests(USER_ID)).thenReturn(new UserInterestsResponse(interests));
         when(candidateService.getCandidatesAfter(org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.anyInt(), eq(TODAY))).thenAnswer(invocation -> {

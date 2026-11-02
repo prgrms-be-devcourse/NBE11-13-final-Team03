@@ -12,6 +12,7 @@ import com.team3.backend.eligibility.service.EligibilityResultService;
 import com.team3.backend.interest.domain.entity.InterestType;
 import com.team3.backend.interest.domain.entity.UserInterest;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
+import com.team3.backend.recommendation.domain.repository.RecommendationCandidateRepository;
 import com.team3.backend.recommendation.dto.RecommendationCandidate;
 import com.team3.backend.recommendation.service.RecommendationCandidateService;
 import com.team3.backend.recommendation.service.RecommendationInterestMatcher;
@@ -132,6 +133,7 @@ class RecommendationBenchmarkTest {
     @Autowired private RecommendationCandidateService candidateService;
     @Autowired private RecommendationInterestMatcher interestMatcher;
     @Autowired private EligibilityProvider eligibilityProvider;
+    @Autowired private RecommendationCandidateRepository candidateRepository;
 
     // ── setup ──
 
@@ -418,8 +420,13 @@ class RecommendationBenchmarkTest {
                 List<RecommendationCandidate> visible = batch.stream()
                         .filter(candidate -> !hidden.contains(candidate.opportunityId())).toList();
                 funnel.hiddenInCandidates += batch.size() - visible.size();
+                // 참조 구현(RecommendationEligibilityService.filterEligible)과 같이 청년정책 분류 행을 배치마다 읽는다
+                var policyCategories = candidateRepository.findPolicyCategories(visible.stream()
+                        .filter(candidate -> candidate.type() == OpportunityType.YOUTH_POLICY)
+                        .map(RecommendationCandidate::opportunityId).toList());
                 List<RecommendationCandidate> matched = visible.stream()
-                        .filter(candidate -> match.match(candidate).isPresent()).toList();
+                        .filter(candidate -> match.match(candidate,
+                                policyCategories.getOrDefault(candidate.opportunityId(), List.of())).isPresent()).toList();
                 funnel.interestMatched += matched.size();
                 if (matched.isEmpty()) {
                     continue;

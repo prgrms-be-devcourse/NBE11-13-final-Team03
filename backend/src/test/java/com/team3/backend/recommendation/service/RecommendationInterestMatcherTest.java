@@ -5,6 +5,7 @@ import com.team3.backend.interest.dto.UserInterestResponse;
 import com.team3.backend.interest.dto.UserInterestsResponse;
 import com.team3.backend.interest.service.UserInterestService;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
+import com.team3.backend.recommendation.domain.repository.RecommendationCandidateRepository.CategoryPair;
 import com.team3.backend.recommendation.dto.InterestMatchLevel;
 import com.team3.backend.recommendation.dto.RecommendationCandidate;
 import org.junit.jupiter.api.Test;
@@ -33,12 +34,29 @@ class RecommendationInterestMatcherTest {
                 interest(InterestType.CATEGORY, "일자리"),
                 interest(InterestType.SUB_CATEGORY, "취업지원"));
 
+        assertEquals(Optional.of(InterestMatchLevel.HIGH), policy(context, pair("일자리", "취업지원")));
+        assertEquals(Optional.of(InterestMatchLevel.MEDIUM), policy(context, pair("일자리", "창업")));
+        assertEquals(Optional.empty(), policy(context, pair("주거", "월세")));
+    }
+
+    @Test
+    void youthPolicyMatchesAnyCategoryRowAndIgnoresRawCommaColumns() {
+        RecommendationInterestMatcher.MatchContext context = load(
+                interest(InterestType.CATEGORY, "교육"),
+                interest(InterestType.SUB_CATEGORY, "취업"));
+        RecommendationCandidate raw = candidate(OpportunityType.YOUTH_POLICY, "일자리,교육", "취업,미래역량강화", null);
+
+        // 두 번째 행의 대분류만 맞아도 MEDIUM, 첫 번째 행의 중분류가 맞으면 HIGH
         assertEquals(Optional.of(InterestMatchLevel.HIGH),
-                context.match(candidate(OpportunityType.YOUTH_POLICY, "일자리", "취업지원", null)));
+                context.match(raw, List.of(pair("일자리", "취업"), pair("교육", "미래역량강화"))));
         assertEquals(Optional.of(InterestMatchLevel.MEDIUM),
-                context.match(candidate(OpportunityType.YOUTH_POLICY, "일자리", "창업", null)));
+                context.match(raw, List.of(pair("일자리", "창업"), pair("교육", "미래역량강화"))));
+        // 중분류만 있는 행·대분류만 있는 행도 각각 맞는다
+        assertEquals(Optional.of(InterestMatchLevel.HIGH), policy(context, pair(null, "취업")));
+        assertEquals(Optional.of(InterestMatchLevel.MEDIUM), policy(context, pair("교육", null)));
+        // 원문 컬럼이 관심 코드와 같아도 분류 행이 없으면(분류 없음·백필 전) 맞지 않는다
         assertEquals(Optional.empty(),
-                context.match(candidate(OpportunityType.YOUTH_POLICY, "주거", "월세", null)));
+                context.match(candidate(OpportunityType.YOUTH_POLICY, "교육", "취업", null), List.of()));
     }
 
     @Test
@@ -50,13 +68,13 @@ class RecommendationInterestMatcherTest {
                 interest(InterestType.NCS, "20010202"));
 
         assertEquals(Optional.of(InterestMatchLevel.HIGH),
-                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "정보통신", "정보기술")));
+                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "정보통신", "정보기술"), List.of()));
         assertEquals(Optional.of(InterestMatchLevel.MEDIUM),
-                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "정보통신", "통신기술")));
+                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "정보통신", "통신기술"), List.of()));
         assertEquals(Optional.empty(),
-                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "경영", "경영기획")));
+                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "경영", "경영기획"), List.of()));
         assertEquals(Optional.empty(),
-                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", null, null)));
+                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", null, null), List.of()));
     }
 
     @Test
@@ -66,9 +84,9 @@ class RecommendationInterestMatcherTest {
                 interest(InterestType.SUB_CATEGORY, "정보통신"));
 
         assertEquals(Optional.of(InterestMatchLevel.HIGH),
-                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "다른 분류", "정보기술")));
+                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "다른 분류", "정보기술"), List.of()));
         assertEquals(Optional.of(InterestMatchLevel.MEDIUM),
-                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "정보통신", null)));
+                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, "교육･직업훈련", "정보통신", null), List.of()));
     }
 
     @Test
@@ -78,7 +96,7 @@ class RecommendationInterestMatcherTest {
                 interest(InterestType.NCS, "20010202"));
 
         assertEquals(Optional.empty(), context.match(candidate(OpportunityType.VOCATIONAL_TRAINING,
-                "교육･직업훈련", "정보통신", "정보기술")));
+                "교육･직업훈련", "정보통신", "정보기술"), List.of()));
     }
 
     @Test
@@ -87,8 +105,7 @@ class RecommendationInterestMatcherTest {
                 interest(InterestType.CATEGORY, "일자리"),
                 interest(InterestType.SUB_CATEGORY, "취업지원"));
 
-        assertEquals(Optional.empty(),
-                context.match(candidate(OpportunityType.YOUTH_POLICY, null, " ", null)));
+        assertEquals(Optional.empty(), policy(context, pair(null, " ")));
     }
 
     @Test
@@ -96,9 +113,9 @@ class RecommendationInterestMatcherTest {
         RecommendationInterestMatcher.MatchContext context = load();
 
         assertEquals(Optional.of(InterestMatchLevel.UNRESTRICTED),
-                context.match(candidate(OpportunityType.YOUTH_POLICY, null, null, null)));
+                context.match(candidate(OpportunityType.YOUTH_POLICY, null, null, null), List.of()));
         assertEquals(Optional.of(InterestMatchLevel.UNRESTRICTED),
-                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, null, null, null)));
+                context.match(candidate(OpportunityType.VOCATIONAL_TRAINING, null, null, null), List.of()));
     }
 
     @Test
@@ -107,19 +124,30 @@ class RecommendationInterestMatcherTest {
         UserInterestResponse subCategory = interest(InterestType.SUB_CATEGORY, "취업지원");
         RecommendationInterestMatcher.MatchContext first = load(category, subCategory, subCategory);
         RecommendationCandidate candidate = candidate(OpportunityType.YOUTH_POLICY, "일자리", "취업지원", null);
+        List<CategoryPair> rows = List.of(pair("일자리", "취업지원"));
 
-        assertEquals(Optional.of(InterestMatchLevel.HIGH), first.match(candidate));
-        assertEquals(Optional.of(InterestMatchLevel.HIGH), first.match(candidate));
+        assertEquals(Optional.of(InterestMatchLevel.HIGH), first.match(candidate, rows));
+        assertEquals(Optional.of(InterestMatchLevel.HIGH), first.match(candidate, rows));
         verify(userInterestService, times(1)).getInterests(1L);
 
         when(userInterestService.getInterests(1L))
                 .thenReturn(new UserInterestsResponse(List.of(subCategory, category)));
-        assertEquals(first.match(candidate), new RecommendationInterestMatcher(userInterestService).load(1L).match(candidate));
+        assertEquals(first.match(candidate, rows),
+                new RecommendationInterestMatcher(userInterestService).load(1L).match(candidate, rows));
     }
 
     private RecommendationInterestMatcher.MatchContext load(UserInterestResponse... interests) {
         when(userInterestService.getInterests(1L)).thenReturn(new UserInterestsResponse(List.of(interests)));
         return new RecommendationInterestMatcher(userInterestService).load(1L);
+    }
+
+    private static Optional<InterestMatchLevel> policy(RecommendationInterestMatcher.MatchContext context,
+                                                       CategoryPair... rows) {
+        return context.match(candidate(OpportunityType.YOUTH_POLICY, null, null, null), List.of(rows));
+    }
+
+    private static CategoryPair pair(String large, String medium) {
+        return new CategoryPair(large, medium);
     }
 
     private static UserInterestResponse interest(InterestType type, String code) {

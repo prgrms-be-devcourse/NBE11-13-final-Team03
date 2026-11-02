@@ -50,11 +50,17 @@ export function searchQueryOptions(params: SearchParams, userId: number | null, 
   }
 }
 
+// 분류가 나온 공고 유형. 대분류 이름으로 유형을 추측하지 않도록 유형 정보가 없거나 비어 있으면 응답 오류로 본다.
+const opportunityTypes = (value: unknown): boolean => Array.isArray(value) && value.length > 0 &&
+  value.every(type => type === 'YOUTH_POLICY' || type === 'VOCATIONAL_TRAINING')
+
 export async function getInterestOptions(signal?: AbortSignal): Promise<InterestOptions> {
   const { data } = await apiClient.get<unknown>('/interests/options', { signal })
   if (!record(data) || !Array.isArray(data.categories) || !data.categories.every((category: unknown) =>
-    record(category) && typeof category.category === 'string' && Array.isArray(category.subCategories) &&
+    record(category) && typeof category.category === 'string' && opportunityTypes(category.opportunityTypes) &&
+    Array.isArray(category.subCategories) &&
     category.subCategories.every((sub: unknown) => record(sub) && typeof sub.subCategory === 'string' &&
+      opportunityTypes(sub.opportunityTypes) &&
       Array.isArray(sub.detailCategories) && sub.detailCategories.every((detail: unknown) => typeof detail === 'string')))) {
     throw new ApiError('unknown', '분류 목록의 응답 형식을 확인할 수 없어요.')
   }

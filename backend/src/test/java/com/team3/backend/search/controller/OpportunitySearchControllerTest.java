@@ -1,5 +1,6 @@
 package com.team3.backend.search.controller;
 
+import com.team3.backend.fixture.PolicyCategoryRows;
 import com.team3.backend.auth.security.CustomUserDetails;
 import com.team3.backend.eligibility.domain.entity.EducationLevel;
 import com.team3.backend.eligibility.domain.entity.EligibilityProfile;
@@ -104,7 +105,7 @@ class OpportunitySearchControllerTest {
                 .normalizationVersion("1").build();
         entityManager.persist(replacement);
         former.changeCurrentVersion(replacement);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 
@@ -173,7 +174,7 @@ class OpportunitySearchControllerTest {
         addTrainingDetail(openTraining, today);
         addTrainingDetail(futureTraining, today.plusDays(1));
         addTrainingDetail(startedTraining, today.minusDays(1));
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 
@@ -266,7 +267,7 @@ class OpportunitySearchControllerTest {
         addTrainingDetail(earlyTraining, today.plusDays(2));
         addTrainingDetail(lateTraining, today.plusDays(4));
         addTrainingDetail(unknownTraining, null);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 
@@ -436,7 +437,7 @@ class OpportunitySearchControllerTest {
         addTrainingDetail(trainingTied, today.plusDays(1));
         addTrainingDetail(trainingLate, today.plusDays(3));
         addTrainingDetail(trainingUnknown, null);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
 
@@ -519,7 +520,7 @@ class OpportunitySearchControllerTest {
                 "career", "job", true);
         addEligibilityResult(userId, eligible, EligibilityStatus.ELIGIBLE);
         addEligibilityResult(userId, possible, EligibilityStatus.POSSIBLY_ELIGIBLE);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
 
         mockMvc.perform(get("/api/opportunities").param("keyword", "V1-6"))
@@ -610,7 +611,7 @@ class OpportunitySearchControllerTest {
                 .user(user).opportunity(hidden).build();
         preference.markHidden();
         entityManager.persist(preference);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
 
         mockMvc.perform(get("/api/opportunities").param("keyword", "V1-1 hidden listing"))
@@ -672,7 +673,7 @@ class OpportunitySearchControllerTest {
             training.updateSummary(training.getTitle(), training.getCategory(), training.getSubCategory(),
                     training == otherDetail ? "하드웨어" : "소프트웨어", null);
         }
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
 
         for (int page = 0; page < 2; page++) {
@@ -716,7 +717,7 @@ class OpportunitySearchControllerTest {
                 null, null, true);
         Opportunity newest = createOpportunity("V1-1 paging newest", OpportunityType.YOUTH_POLICY,
                 null, null, true);
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         LocalDateTime older = LocalDateTime.of(2025, 1, 1, 0, 0);
         LocalDateTime tied = LocalDateTime.of(2025, 2, 1, 0, 0);
         setCreatedAt(first, older);
@@ -783,7 +784,7 @@ class OpportunitySearchControllerTest {
 
         List<String> searchParameters = JsonPath.read(document,
                 "$['paths']['/api/opportunities']['get']['parameters'][*]['name']");
-        assertEquals(Set.of("keyword", "type", "category", "subCategory", "detailCategory", "region",
+        assertEquals(Set.of("keyword", "type", "category", "subCategory", "detailCategory", "categoryType", "region",
                         "applicationStatus", "eligibilityStatuses", "deadlineFrom", "deadlineTo",
                         "startDateFrom", "startDateTo", "sort", "page", "size"),
                 Set.copyOf(searchParameters));
@@ -846,7 +847,7 @@ class OpportunitySearchControllerTest {
             entityManager.persist(version);
             opportunity.changeCurrentVersion(version);
         }
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         return opportunity;
     }
 

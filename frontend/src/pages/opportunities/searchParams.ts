@@ -1,4 +1,4 @@
-import type { ApplicationStatus, OpportunitySearchItem, SearchParams, SearchSort } from './types.ts'
+import type { ApplicationStatus, InterestOptions, OpportunitySearchItem, OpportunityType, SearchParams, SearchSort } from './types.ts'
 import type { EligibilityStatus } from '../../components/ui/StatusBadge.tsx'
 
 export const eligibilityStatuses: EligibilityStatus[] = ['ELIGIBLE', 'POSSIBLY_ELIGIBLE', 'NOT_ELIGIBLE', 'UNKNOWN']
@@ -8,24 +8,61 @@ export function isSearchRegionCode(value: string): boolean {
   return /^(?:\d{2}|\d{10})$/.test(value)
 }
 
-// InterestOptionController의 직업훈련 대분류. 표시 이름과 달리 요청 값은 원문을 유지한다.
+// 직업훈련 대분류의 원본 이름. 청년정책에도 같은 원본 대분류명이 있으므로(옛 분류명) 이름만으로 유형을 판단하지 않는다.
+// 공고 유형은 분류 API의 opportunityTypes와 검색 결과의 type으로 정한다. 이 상수는 직업훈련 대분류의 표시 이름을 바꿀 때만 쓴다.
 export const trainingCategory = '교육･직업훈련'
-export function categoryMatchesType(category: string, type: SearchParams['type']): boolean {
-  if (!type || !category) return true
-  const training = category === trainingCategory
-  return type === 'VOCATIONAL_TRAINING' ? training : !training
+
+// 직업훈련 대분류는 정책 '교육'과 겹치지 않도록 '직업훈련'으로 보여 준다. 청년정책 분류는 원본 이름 그대로 보여 준다.
+export function categoryLabel(type: OpportunityType | '', category: string): string {
+  return type === 'VOCATIONAL_TRAINING' && category === trainingCategory ? typeLabels.VOCATIONAL_TRAINING : category
 }
 
-// 정책 '교육'과 겹치지 않도록 직업훈련 대분류는 '직업훈련'으로 보여 준다.
-export function categoryDisplayLabel(category: string): string {
-  return category === trainingCategory ? '직업훈련' : category
+// 유형 전체 목록·적용 조건처럼 유형이 정해지지 않은 곳에서는 어느 유형의 분류인지 붙인다 ('직업훈련'은 이미 유형 이름이다).
+export function categoryChoiceLabel(type: OpportunityType | '', category: string): string {
+  const label = categoryLabel(type, category)
+  return type && label !== typeLabels[type] ? `${label} · ${typeLabels[type]}` : label
+}
+
+// 분류 API의 같은 이름 대분류를 공고 유형별 선택지로 나눈 것. 하위 분류도 그 유형의 것만 남긴다 (세부 분류는 직업훈련에만 있다).
+export type CategoryEntry = {
+  type: OpportunityType
+  category: string
+  subCategories: { subCategory: string; detailCategories: string[] }[]
+}
+const opportunityTypes: OpportunityType[] = ['YOUTH_POLICY', 'VOCATIONAL_TRAINING']
+export function categoryEntries(options: InterestOptions | undefined, type: OpportunityType | '' = ''): CategoryEntry[] {
+  return opportunityTypes.filter(value => !type || value === type).flatMap(value => (options?.categories ?? [])
+    .filter(item => item.opportunityTypes.includes(value))
+    .map(item => ({
+      type: value, category: item.category,
+      subCategories: item.subCategories.filter(sub => sub.opportunityTypes.includes(value))
+        .map(sub => ({ subCategory: sub.subCategory, detailCategories: value === 'VOCATIONAL_TRAINING' ? sub.detailCategories : [] })),
+    })))
+}
+
+// 검색 조건의 대분류가 가리키는 선택지. 유형(type 또는 categoryType)이 없고 두 유형에 같은 대분류가 있으면 하나로 정할 수 없다.
+export function selectedCategoryEntry(entries: CategoryEntry[], params: Pick<SearchParams, 'type' | 'categoryType' | 'category'>): { entry?: CategoryEntry; ambiguous: boolean } {
+  const scope = params.type || params.categoryType
+  const matches = entries.filter(item => item.category === params.category && (!scope || item.type === scope))
+  return { entry: matches.length === 1 ? matches[0] : undefined, ambiguous: matches.length > 1 }
+}
+
+// select의 값. 유형 전체 목록에서는 같은 대분류명이 유형별로 두 번 나오므로 유형을 앞에 붙인다.
+export function categoryEntryKey(entry: Pick<CategoryEntry, 'type' | 'category'>): string {
+  return `${entry.type}:${entry.category}`
+}
+export function parseCategoryEntryKey(value: string): { type: OpportunityType; category: string } | undefined {
+  const index = value.indexOf(':')
+  const type = value.slice(0, index)
+  return index > 0 && (type === 'YOUTH_POLICY' || type === 'VOCATIONAL_TRAINING') ? { type, category: value.slice(index + 1) } : undefined
 }
 
 export function classificationLabel(item: Pick<OpportunitySearchItem, 'type' | 'category' | 'subCategory' | 'detailCategory'>): string {
+  // 청년정책은 원본 대분류를 그대로 보여 준다 (같은 이름의 '교육･직업훈련'도 '직업훈련'으로 바꾸지 않는다).
   // 직업훈련은 중분류(NCS 1차)·세부 분류(NCS 2차)를 보여 준다. 미분류 대체값 '직업훈련'은 실제 NCS 분류가 있으면 생략하고,
   // 하나도 없으면 '직업훈련'으로 남긴다.
   const training = item.type === 'VOCATIONAL_TRAINING'
-  const labels = (training ? [item.subCategory, item.detailCategory] : [item.category?.trim() && categoryDisplayLabel(item.category.trim()), item.subCategory, item.detailCategory])
+  const labels = (training ? [item.subCategory, item.detailCategory] : [item.category?.trim() && categoryLabel(item.type, item.category.trim()), item.subCategory, item.detailCategory])
     .map(value => value?.trim()).filter((value): value is string => !!value && !(training && value === typeLabels.VOCATIONAL_TRAINING))
   if (training && !labels.length) return typeLabels.VOCATIONAL_TRAINING
   return [...new Set(labels)].join(' · ')
@@ -60,7 +97,7 @@ export function applicationStatusLabel(status: ApplicationStatus, type: SearchPa
 
 export function defaultSearchParams(): SearchParams {
   return {
-    keyword: '', type: '', category: '', subCategory: '', detailCategory: '', region: '', eligibilityStatuses: [], applicationStatus: '',
+    keyword: '', type: '', category: '', categoryType: '', subCategory: '', detailCategory: '', region: '', eligibilityStatuses: [], applicationStatus: '',
     deadlineFrom: '', deadlineTo: '', startDateFrom: '', startDateTo: '',
     sort: 'LATEST', page: 0, size: 10,
   }
@@ -73,10 +110,17 @@ export function availableSorts(type: SearchParams['type'], keyword = ''): Search
     ...(type === 'VOCATIONAL_TRAINING' ? ['START_DATE_ASC' as const] : [])]
 }
 
+// 분류 유형(type 또는 categoryType)이 바뀌면 그 유형의 분류가 아니므로 분류 선택을 지운다.
+// 유형을 '전체'로 바꿀 때는 지금 분류의 유형을 categoryType으로 남겨 같은 분류 조건을 유지한다.
 export function changeSearchType(params: SearchParams, type: SearchParams['type']): SearchParams {
+  const scope = params.type || params.categoryType
+  const hasCategory = !!(params.category || params.subCategory || params.detailCategory)
+  // 직업훈련 분류는 유형을 고를 때 자동으로 정해지므로 직업훈련에서 다른 유형(전체 포함)으로 나가면 남기지 않는다.
+  const keepCategory = !scope || scope === type || (!type && scope !== 'VOCATIONAL_TRAINING')
   return {
     ...params, type, page: 0,
-    ...(!categoryMatchesType(params.category, type) ? { category: '', subCategory: '', detailCategory: '' } : {}),
+    ...(keepCategory ? {} : { category: '', subCategory: '', detailCategory: '' }),
+    categoryType: !type && hasCategory && keepCategory ? scope : '',
     deadlineFrom: type === 'YOUTH_POLICY' ? params.deadlineFrom : '',
     deadlineTo: type === 'YOUTH_POLICY' ? params.deadlineTo : '',
     startDateFrom: type === 'VOCATIONAL_TRAINING' ? params.startDateFrom : '',
@@ -85,10 +129,24 @@ export function changeSearchType(params: SearchParams, type: SearchParams['type'
   }
 }
 
-export function changeSearchCategory(params: SearchParams, level: 'category' | 'subCategory' | 'detailCategory', value: string): SearchParams {
+// 필터 초기화: 키워드와 페이지 크기만 남기고 유형·분류(categoryType 포함)·기간·지역 등을 기본값으로 되돌린다.
+export function resetSearchFilters(applied: SearchParams): SearchParams {
+  return { ...defaultSearchParams(), keyword: applied.keyword, sort: defaultSort(applied.keyword), size: applied.size }
+}
+
+// 직업훈련 유형의 대분류는 하나(원본 교육･직업훈련)뿐이라 유형을 고르면 바로 선택한다. 분류 목록을 아직 받지 못했으면 그대로 둔다.
+export function selectSingleTrainingCategory(params: SearchParams, options: InterestOptions | undefined): SearchParams {
+  if (params.type !== 'VOCATIONAL_TRAINING' || params.category) return params
+  const entries = categoryEntries(options, 'VOCATIONAL_TRAINING')
+  return entries.length === 1 ? changeSearchCategory(params, 'category', entries[0].category) : params
+}
+
+// 대분류를 고를 때 유형 전체 검색이면 그 대분류의 유형(categoryType)을 함께 정한다. type이 있으면 type이 유형을 정한다.
+export function changeSearchCategory(params: SearchParams, level: 'category' | 'subCategory' | 'detailCategory', value: string,
+  categoryType: OpportunityType | '' = ''): SearchParams {
   return {
     ...params, [level]: value, page: 0,
-    ...(level === 'category' ? { subCategory: '', detailCategory: '' } : {}),
+    ...(level === 'category' ? { subCategory: '', detailCategory: '', categoryType: value && !params.type ? categoryType : '' } : {}),
     ...(level === 'subCategory' ? { detailCategory: '' } : {}),
   }
 }
@@ -117,6 +175,14 @@ export function parseSearchParams(url: URLSearchParams): { params: SearchParams;
   const type = url.get('type')
   if (type === 'YOUTH_POLICY' || type === 'VOCATIONAL_TRAINING') params.type = type
   else if (type) invalid()
+  // 분류 유형은 유형 전체 검색에서 분류가 있을 때만 쓴다. type과 다르면 백엔드가 거절하므로 분류 조건과 함께 정리한다.
+  const categoryType = url.get('categoryType')
+  if (categoryType === 'YOUTH_POLICY' || categoryType === 'VOCATIONAL_TRAINING') {
+    if (params.type && params.type !== categoryType) {
+      params.category = params.subCategory = params.detailCategory = ''
+      invalid()
+    } else if (!params.type && (params.category || params.subCategory || params.detailCategory)) params.categoryType = categoryType
+  } else if (categoryType) invalid()
   const status = url.get('applicationStatus')
   if (status && Object.hasOwn(statusLabels, status)) params.applicationStatus = status as ApplicationStatus
   else if (status) invalid()
@@ -152,7 +218,7 @@ export function parseSearchParams(url: URLSearchParams): { params: SearchParams;
 // URL과 API에 같은 직렬화를 사용한다. 기본값·빈 값은 생략한다.
 export function serializeSearchParams(params: SearchParams): URLSearchParams {
   const url = new URLSearchParams()
-  for (const key of ['keyword', 'type', 'category', 'subCategory', 'detailCategory', 'region', 'applicationStatus',
+  for (const key of ['keyword', 'type', 'category', 'subCategory', 'detailCategory', 'categoryType', 'region', 'applicationStatus',
     'deadlineFrom', 'deadlineTo', 'startDateFrom', 'startDateTo'] as const) {
     if (params[key].trim()) url.set(key, key === 'keyword' ? params[key].trim() : params[key])
   }

@@ -24,7 +24,11 @@ import org.springframework.stereotype.Repository;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -41,6 +45,9 @@ public class RecommendationCandidateRepository {
      * 최신 기준은 EligibilityResultRepository.findFreshStatuses, 관심 적합도는 MatchContext.match, 그룹은 groupOf,
      * 날짜는 RecommendationCandidateService.nearestOpenDeadline·훈련 시작일과 같다. 한쪽 규칙을 바꾸면 다른 쪽도 함께 바꾸고
      * RecommendationSelectionEquivalencePostgresTest(전체 순회 참조 구현과 비교)로 확인한다.
+     * 청년정책의 관심 적합도는 현재 버전의 분류 행(opportunity_categories) 중 하나라도 맞으면 된다 (공고 컬럼은 원문 쉼표 문자열).
+     * 관심 코드에 맞는 분류 행만 버전별로 미리 묶어(pc) 왼쪽 조인한다. CASE 안에 EXISTS를 두면 SubPlan이 든 조건이라
+     * match_level 필터가 후보 조인 아래로 내려가지 못해 모든 공고 행이 조인을 거친다 (실험 DB 최악 시나리오 2.6초 → 5.0초, 조인 방식 2.9초).
      */
     private static final String TOP_PER_GROUP_SQL = """
             with fresh as (
@@ -52,7 +59,7 @@ public class RecommendationCandidateRepository {
                   and r.eligibility_status in (:recommendable)
             ), candidate as (
                 select o.id, v.id as version_id, o.opportunity_type, o.title, o.category, o.sub_category, o.detail_category,
-                       o.created_at, f.eligibility_status,
+                       o.created_at, f.eligibility_status, pc.sub_hit, pc.category_hit,
                        case when o.opportunity_type = :policy then (
                                 select min(w.end_date) from application_windows w
                                 where w.version_id = v.id and w.validation_status = :valid and w.period_type = :fixed
@@ -63,6 +70,13 @@ public class RecommendationCandidateRepository {
                 join opportunity_versions v on v.condition_set_id = f.condition_set_id
                 join opportunities o on o.current_version_id = v.id
                 left join training_course_details d on d.version_id = v.id
+                left join (select oc.version_id,
+                                  bool_or(:hasSub and oc.medium_category in (:subCodes)) as sub_hit,
+                                  bool_or(:hasCategory and oc.large_category in (:categoryCodes)) as category_hit
+                           from opportunity_categories oc
+                           where (:hasSub and oc.medium_category in (:subCodes))
+                              or (:hasCategory and oc.large_category in (:categoryCodes))
+                           group by oc.version_id) pc on pc.version_id = o.current_version_id
                 where v.personalization_status in (:personalization)
                   and ((o.opportunity_type = :policy and (
                           exists (select 1 from application_windows w where w.version_id = v.id
@@ -78,8 +92,8 @@ public class RecommendationCandidateRepository {
             ), matched as (
                 select c.*,
                        case when :unrestricted then :levelUnrestricted
-                            when c.opportunity_type = :policy and :hasSub and c.sub_category in (:subCodes) then :levelHigh
-                            when c.opportunity_type = :policy and :hasCategory and c.category in (:categoryCodes) then :levelMedium
+                            when c.opportunity_type = :policy and c.sub_hit then :levelHigh
+                            when c.opportunity_type = :policy and c.category_hit then :levelMedium
                             when c.opportunity_type = :training and :hasDetail and c.detail_category in (:detailCodes) then :levelHigh
                             when c.opportunity_type = :training and :hasSub and c.sub_category in (:subCodes) then :levelMedium
                        end as match_level,
@@ -192,6 +206,31 @@ public class RecommendationCandidateRepository {
         // ID 커서는 모든 적격 공고를 순회하며 페이지 경계에서 중복·누락을 만들지 않는다.
         query.orderBy(builder.asc(opportunity.get("id")));
         return entityManager.createQuery(query).setMaxResults(size).getResultList();
+    }
+
+    /**
+     * 운영 미사용: 전체 순회 참조 구현의 관심 적합도 판정용. 공고 현재 버전의 청년정책 분류 행 (findTopPerGroup의 pc 집계와 같은 기준).
+     */
+    public Map<Long, List<CategoryPair>> findPolicyCategories(Collection<Long> opportunityIds) {
+        if (opportunityIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Object[]> rows = entityManager.createQuery("""
+                        select o.id, c.largeCategory, c.mediumCategory
+                        from Opportunity o join OpportunityCategory c on c.version = o.currentVersion
+                        where o.id in :ids
+                        order by o.id, c.sortOrder""", Object[].class)
+                .setParameter("ids", opportunityIds).getResultList();
+        Map<Long, List<CategoryPair>> result = new HashMap<>();
+        for (Object[] row : rows) {
+            result.computeIfAbsent((Long) row[0], ignored -> new ArrayList<>())
+                    .add(new CategoryPair((String) row[1], (String) row[2]));
+        }
+        return result;
+    }
+
+    /** 청년정책 분류 행 하나 (대분류만·중분류만 있는 행이면 다른 쪽이 null) */
+    public record CategoryPair(String large, String medium) {
     }
 
     /** 현재 버전과 화면·매칭에 필요한 공고 필드만 담는다. */

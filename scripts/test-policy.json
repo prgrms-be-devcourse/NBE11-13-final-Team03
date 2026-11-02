@@ -18,7 +18,20 @@
     "com.team3.backend.recommendation.service.RecommendationSelectionEquivalencePostgresTest": [
       "topPerGroupSelectionMatchesFullScanReferenceOnRandomFixtures"
     ],
-    "com.team3.backend.recommendation.controller.RecommendationPostgresIntegrationTest": []
+    "com.team3.backend.recommendation.controller.RecommendationPostgresIntegrationTest": [],
+    "com.team3.backend.search.controller.OpportunitySearchCategoryPostgresTest": [
+      "categoryFilterKeepsRelevanceAndLatestOrderOfUnfilteredSearch",
+      "duplicateLargeRowsReturnOpportunityOnceWithExactCountsAcrossPages",
+      "largeAndMediumTogetherMustMatchTheSameRow",
+      "largeOrMediumAloneMatchesAnyCategoryRowOfCurrentVersion",
+      "policyWithoutCategoryRowsIsExcludedUntilBackfillAndThenMatches",
+      "sameLargeCategoryNameIsSearchedPerOpportunityTypeWithCategoryType",
+      "trainingKeepsColumnFiltersAndMixesWithPoliciesInUntypedSearch"
+    ],
+    "com.team3.backend.recommendation.service.RecommendationPolicyCategoryPostgresTest": [
+      "multiCategoryRowsDecideHighAndMediumAndPendingBackfillPolicyJoinsAfterBackfill",
+      "sameLargeCategoryNameMatchesOnlyYouthPoliciesForCategoryInterest"
+    ]
   },
   "notification-service": {
     "com.team3.notification.service.NotificationDeliveryPostgresTest": [
@@ -58,7 +71,8 @@
     "Chrome polls the collection history only while a job is pending or running",
     "Chrome offers undo only after a confirmed hide and restores the server hidden state with one DELETE",
     "Chrome confirms logout-all before one POST, keeps the regular logout, guards concurrent transitions and treats lost responses as uncertain",
-    "Chrome records real recommendation impressions, detail views and external link clicks once per action with sources under StrictMode and mocked HTTP"
+    "Chrome records real recommendation impressions, detail views and external link clicks once per action with sources under StrictMode and mocked HTTP",
+    "Chrome selects youth policy and training categories by type in the search filter, auto-selects the single training category and sends raw values with categoryType"
   ],
   "replicaCheckpoints": [
     "fallback-and-cooldown",

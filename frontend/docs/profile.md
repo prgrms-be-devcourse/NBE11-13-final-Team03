@@ -14,6 +14,9 @@
 - `PATCH /api/users/me/eligibility-profile`: JSON Merge Patch 계약이다. 수정한 최상위 필드만 보내며, untouched 필드는 생략하고 명시적으로 비운 선택은 null로 보낸다. 중첩 응답 묶음은 해당 필드 전체를 보낸다. 서버 구현은 일반 JSON body를 받는다.
 - `GET/PUT /api/users/me/interests`: `{ interests: [{ type, code }] }` 응답·요청이다. PUT은 전체 교체, 빈 배열은 전체 해제다. 최대 30개, 동일 type/code 중복을 허용하지 않는다.
 - `GET /api/interests/options`: 검색의 기존 API 함수·`['interest-options']` Query를 재사용한다. category → CATEGORY, subCategory → SUB_CATEGORY, detailCategories의 문자열 → DETAIL_CATEGORY다. 문자열은 가공하지 않는다. NCS 타입은 원본 코드이며 옵션 API는 원본 NCS 코드 목록을 제공하지 않는다.
+  - 대분류·중분류의 `opportunityTypes`로 어느 공고 유형의 분류인지 정한다. 대분류 이름으로 추측하지 않는다. 청년정책 분류는 대·중분류, 직업훈련 분류는 중분류(NCS 1차)·세부 분야(NCS 2차)를 선택지로 만든다.
+  - 직업훈련 대분류는 선택지로 만들지 않는다. 추천은 대분류 관심을 청년정책에만 쓰고 직업훈련은 중·세분류만 매칭하기 때문이다(`RecommendationInterestMatcher`).
+  - 청년정책 원본 대분류 `교육･직업훈련`(옛 분류명)은 직업훈련 대분류와 이름이 같지만 청년정책 대분류 선택지다. 저장값은 기존과 같은 `{ type: 'CATEGORY', code: '교육･직업훈련' }`이며 추천에서는 청년정책에만 맞는다.
 
 [EligibilityProfileController](../../backend/src/main/java/com/team3/backend/eligibility/controller/EligibilityProfileController.java), UpdateRequest·Response·ProfileAnswers, Validator·Service·관련 DTO 및 Validator 테스트, [UserInterestController](../../backend/src/main/java/com/team3/backend/interest/controller/UserInterestController.java)·Service·테스트와 [InterestOptionController](../../backend/src/main/java/com/team3/backend/interest/controller/InterestOptionController.java)·Service를 기준으로 구현했다. 모든 보호 요청은 `requiresAuth: true`이며 기존 CSRF·재발급 정책을 사용한다.
 
@@ -26,7 +29,10 @@
 - 가구원 수는 1~99명이다. 특화 대상은 PROVIDED일 때 하나 이상을 선택하며, 다른 상태로 바꾸면 대상 배열을 비운다. 병역 개월은 복무 완료·복무 중일 때만 0 이상의 Java Integer 범위 정수로 보낼 수 있다.
 - 상태 변경 시 종속 값을 비워 잘못된 짝을 보내지 않는다. 입력 오류는 연결 가능한 필드에 안내하며 서버 내부 메시지 대신 안전한 안내를 표시한다. 중복 저장은 pending 상태 및 동기 실행 가드로 차단한다. 자동 mutation 재시도는 없다.
 - 관심 분야는 실제 계층을 표시하고 각각 선택한다. 상위를 해제해도 하위가 자동 삭제되지 않는다. 기존 NCS·옵션에 없는 값은 체크된 별도 영역에서 유지하며 사용자가 직접 해제한다. 옵션 로딩·오류·빈 목록을 구분하며 오류 시 자유 입력으로 대체하거나 전체 교체 저장을 허용하지 않는다.
-- 화면은 대분류 한 줄 목록이며 한 번에 하나만 펼친다(`<details name>`). 접힌 줄에도 선택지 수와 실제 선택 개수(저장 키 기준)를 보여 주고, 위쪽 선택 요약에서 바로 해제할 수 있다. 펼침은 표시만 바꾸며 선택 상태와 PUT 본문은 그대로다. 옵션 응답에 공고 유형 정보가 없어 청년정책·직업훈련 탭으로 나누지 않으며, 복합 분류 문자열(`일자리,교육` 등)도 그대로 표시한다. 정규화된 API가 대분류별 유형을 제공하면 같은 목록을 유형별 묶음으로 나누면 된다.
+- 화면은 대분류 한 줄 목록이며 한 번에 하나만 펼친다(`<details name>`). 접힌 줄에도 선택지 수와 실제 선택 개수(저장 키 기준)를 보여 주고, 위쪽 선택 요약에서 바로 해제할 수 있다. 펼침은 표시만 바꾸며 선택 상태와 PUT 본문은 그대로다.
+- 대분류 줄은 (공고 유형, 대분류) 단위다. 같은 원본 대분류 `교육･직업훈련`도 청년정책 줄(`교육･직업훈련`, ‘청년정책 · 선택지 n개’)과 직업훈련 줄(‘직업훈련’, ‘직업훈련 NCS · 선택지 n개’)로 따로 보이고, 각 줄에는 그 유형의 하위 분류만 있다. 쉼표로 이은 원문 분류는 백엔드가 분류 행으로 나눠 보내므로 개별 분류로 보인다.
+- 선택 요약은 코드에 유형과 분류 단계를 붙인다(예: ‘교육･직업훈련 · 청년정책 대분류’, ‘정보통신 · 직업훈련 NCS 1차’). 같은 코드가 여러 대분류·유형에 나오면 한 선택지(저장 키 하나)로 합치고 유형을 모두 적는다.
+- 이전에 저장한 `CATEGORY 교육･직업훈련`은 청년정책에 그 대분류가 있으면 청년정책 줄에서 선택된 것으로 보인다. 없으면 맞는 공고가 없으므로 ‘직업훈련 대분류’로 보여 주지 않고, 지우지 않은 채 ‘현재 선택지에 없는 기존 관심 분야’로 둔다.
 
 ## 지역 선택 구조와 연결 경계
 

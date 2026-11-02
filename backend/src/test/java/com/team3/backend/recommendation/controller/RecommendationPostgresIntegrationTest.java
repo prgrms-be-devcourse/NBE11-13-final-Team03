@@ -1,5 +1,6 @@
 package com.team3.backend.recommendation.controller;
 
+import com.team3.backend.fixture.PolicyCategoryRows;
 import org.junit.jupiter.api.Tag;
 
 import com.jayway.jsonpath.JsonPath;
@@ -503,7 +504,7 @@ class RecommendationPostgresIntegrationTest {
     }
 
     private void flushAndClear() {
-        entityManager.flush();
+        PolicyCategoryRows.backfill(entityManager);
         entityManager.clear();
         regionDirectory.refresh();
     }

@@ -4,6 +4,7 @@ import com.team3.backend.interest.domain.entity.InterestType;
 import com.team3.backend.interest.dto.UserInterestResponse;
 import com.team3.backend.interest.service.UserInterestService;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
+import com.team3.backend.recommendation.domain.repository.RecommendationCandidateRepository.CategoryPair;
 import com.team3.backend.recommendation.dto.InterestMatchLevel;
 import com.team3.backend.recommendation.dto.RecommendationCandidate;
 import lombok.RequiredArgsConstructor;
@@ -56,16 +57,20 @@ public class RecommendationInterestMatcher {
             return codesByType.getOrDefault(type, Set.of());
         }
 
-        /** 현재 하위 분류명이 상위 분류 간 유일하다는 전제로 상위 분류를 재검증하지 않고 정확히 일치하는 하위 분류를 우선한다. */
-        public Optional<InterestMatchLevel> match(RecommendationCandidate candidate) {
+        /**
+         * 현재 하위 분류명이 상위 분류 간 유일하다는 전제로 상위 분류를 재검증하지 않고 정확히 일치하는 하위 분류를 우선한다.
+         * 청년정책은 공고 컬럼(원문 쉼표 문자열) 대신 현재 버전의 분류 행(policyCategories) 중 하나라도 맞으면 된다.
+         * 분류 행이 없는 청년정책은 관심 분야가 있으면 맞지 않는다. 직업훈련은 공고 컬럼으로 판정하고 policyCategories를 보지 않는다.
+         */
+        public Optional<InterestMatchLevel> match(RecommendationCandidate candidate, List<CategoryPair> policyCategories) {
             if (unrestricted) {
                 return Optional.of(InterestMatchLevel.UNRESTRICTED);
             }
             if (candidate.type() == OpportunityType.YOUTH_POLICY) {
-                if (matches(InterestType.SUB_CATEGORY, candidate.subCategory())) {
+                if (policyCategories.stream().anyMatch(pair -> matches(InterestType.SUB_CATEGORY, pair.medium()))) {
                     return Optional.of(InterestMatchLevel.HIGH);
                 }
-                if (matches(InterestType.CATEGORY, candidate.category())) {
+                if (policyCategories.stream().anyMatch(pair -> matches(InterestType.CATEGORY, pair.large()))) {
                     return Optional.of(InterestMatchLevel.MEDIUM);
                 }
             } else if (candidate.type() == OpportunityType.VOCATIONAL_TRAINING) {

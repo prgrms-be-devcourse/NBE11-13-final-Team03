@@ -24,6 +24,7 @@ import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.domain.entity.Region;
 import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
+import com.team3.backend.fixture.PolicyCategoryRows;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -120,6 +121,9 @@ class OpportunityEligibilityBatchIntegrationTest {
         Long unknownId = createIncompleteNormalizedOpportunity();
         // 정규화를 거치지 않은 버전은 조건 묶음이 비어 있다. 판정 배치는 묶음을 채우지 않으므로, 수집·정규화 쪽 백필이 채운 상황을 만든다
         conditionSetBackfill.run();
+        // 청년정책 분류 행도 data-service(정규화·백필)가 만든다. 같은 상황을 만든다
+        new TransactionTemplate(transactionManager).executeWithoutResult(ignored ->
+                PolicyCategoryRows.backfill(entityManager));
         save(ownerId, first.opportunityId());
 
         assertThat(item(first.opportunityId(), ownerId).get("eligibilityStatus")).isNull();

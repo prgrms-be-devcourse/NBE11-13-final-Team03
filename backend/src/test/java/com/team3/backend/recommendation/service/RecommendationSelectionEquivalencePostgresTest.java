@@ -14,6 +14,7 @@ import com.team3.backend.interest.domain.entity.InterestType;
 import com.team3.backend.interest.domain.entity.UserInterest;
 import com.team3.backend.opportunity.domain.entity.ApplicationWindow;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
+import com.team3.backend.opportunity.domain.entity.OpportunityCategory;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
 import com.team3.backend.opportunity.domain.entity.PeriodType;
@@ -101,6 +102,9 @@ class RecommendationSelectionEquivalencePostgresTest {
     @Autowired private RecommendationEligibilityService eligibilityService;
     @Autowired private PreferenceService preferenceService;
 
+    /** 시드마다 다시 채우는 청년정책별 분류 행 수 (커버리지 확인용) */
+    private final Map<Long, Integer> policyCategoryCounts = new java.util.HashMap<>();
+
     @Test
     void topPerGroupSelectionMatchesFullScanReferenceOnRandomFixtures() {
         var reference = new RecommendationFullScanReference(profileService, candidateService, interestMatcher,
@@ -109,6 +113,7 @@ class RecommendationSelectionEquivalencePostgresTest {
         List<String> mismatches = new ArrayList<>();
         for (int seed = 1; seed <= SEEDS; seed++) {
             int currentSeed = seed;
+            policyCategoryCounts.clear();
             new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
                 List<Long> users = fixture(new Random(currentSeed));
                 entityManager.flush();
@@ -122,6 +127,7 @@ class RecommendationSelectionEquivalencePostgresTest {
                                 + "\n  expected=" + expected + "\n  actual  =" + actual);
                     }
                     record(coverage, expected);
+                    recordPolicyCategories(coverage, expected);
                 }
                 status.setRollbackOnly();
             });
@@ -130,7 +136,8 @@ class RecommendationSelectionEquivalencePostgresTest {
         assertThat(mismatches).as("참조 구현과 다른 결과").isEmpty();
         // Fixture가 검증할 경우를 실제로 만들었는지 확인한다 (시드 40개 기준)
         assertThat(coverage).containsKeys("선정 0건", "선정 1건", "선정 5건", "관심 미설정", "B·C 혼합(C 1자리 확보)",
-                "D 그룹 포함", "정책·훈련 혼합", "ELIGIBLE·POSSIBLY 혼합");
+                "D 그룹 포함", "정책·훈련 혼합", "ELIGIBLE·POSSIBLY 혼합",
+                "다중 분류 정책 HIGH", "다중 분류 정책 MEDIUM", "분류 행 없는 정책(관심 미설정만)");
     }
 
     private static void record(Map<String, Integer> coverage, List<RecommendationEligibleCandidate> selected) {
@@ -152,6 +159,23 @@ class RecommendationSelectionEquivalencePostgresTest {
         }
         if (selected.stream().map(RecommendationEligibleCandidate::eligibilityStatus).distinct().count() > 1) {
             coverage.merge("ELIGIBLE·POSSIBLY 혼합", 1, Integer::sum);
+        }
+    }
+
+    /** 다중 분류 행 정책이 관심 매칭으로 선정됐는지, 분류 행 없는 정책은 관심 미설정 사용자에게만 선정됐는지 */
+    private void recordPolicyCategories(Map<String, Integer> coverage, List<RecommendationEligibleCandidate> selected) {
+        for (RecommendationEligibleCandidate item : selected) {
+            Integer rows = policyCategoryCounts.get(item.candidate().opportunityId());
+            if (item.candidate().type() != OpportunityType.YOUTH_POLICY || rows == null) {
+                continue;
+            }
+            if (rows == 0) {
+                assertThat(item.interestMatchLevel()).as("분류 행 없는 정책은 관심 매칭되지 않는다")
+                        .isEqualTo(InterestMatchLevel.UNRESTRICTED);
+                coverage.merge("분류 행 없는 정책(관심 미설정만)", 1, Integer::sum);
+            } else if (rows > 1 && item.interestMatchLevel() != InterestMatchLevel.UNRESTRICTED) {
+                coverage.merge("다중 분류 정책 " + item.interestMatchLevel(), 1, Integer::sum);
+            }
         }
     }
 
@@ -183,7 +207,11 @@ class RecommendationSelectionEquivalencePostgresTest {
                     .normalizationVersion("equivalence").build();
             entityManager.persist(version);
             opportunity.changeCurrentVersion(version);
-            opportunity.updateSummary("공고 " + i, pick(random, CATEGORIES), pick(random, SUBS), pick(random, DETAILS), null);
+            if (type == OpportunityType.YOUTH_POLICY) {
+                policyCategories(random, opportunity, version);
+            } else {
+                opportunity.updateSummary("공고 " + i, pick(random, CATEGORIES), pick(random, SUBS), pick(random, DETAILS), null);
+            }
             if (type == OpportunityType.YOUTH_POLICY) {
                 for (int w = 0, count = 1 + random.nextInt(2); w < count; w++) {
                     entityManager.persist(window(random, version));
@@ -245,6 +273,38 @@ class RecommendationSelectionEquivalencePostgresTest {
             users.add(account.getId());
         }
         return users;
+    }
+
+    /**
+     * 청년정책 분류 행 0~3개 (중복 대분류, 대분류만·중분류만 있는 행 포함)와 그 원문 컬럼(쉼표로 이은 문자열).
+     * 행이 0개면 컬럼에 단일 분류를 넣어 백필 전 공고를 만든다. 매칭은 행만 보므로 이 공고는 관심 분야가 있으면 맞지 않아야 한다.
+     */
+    private void policyCategories(Random random, Opportunity opportunity, OpportunityVersion version) {
+        java.util.LinkedHashSet<List<String>> pairs = new java.util.LinkedHashSet<>();
+        for (int k = 0, count = random.nextInt(4); k < count; k++) {
+            String large = pick(random, CATEGORIES);
+            String medium = pick(random, SUBS);
+            if (large != null || medium != null) {
+                pairs.add(java.util.Arrays.asList(large, medium));
+            }
+        }
+        policyCategoryCounts.put(opportunity.getId(), pairs.size());
+        if (pairs.isEmpty()) {
+            opportunity.updateSummary(opportunity.getTitle(), pick(random, CATEGORIES), pick(random, SUBS), null, null);
+            return;
+        }
+        short order = 0;
+        for (List<String> pair : pairs) {
+            entityManager.persist(OpportunityCategory.builder().version(version).sortOrder(order++)
+                    .largeCategory(pair.get(0)).mediumCategory(pair.get(1)).build());
+        }
+        opportunity.updateSummary(opportunity.getTitle(), joined(pairs, 0), joined(pairs, 1), null, null);
+    }
+
+    private static String joined(java.util.Collection<List<String>> pairs, int index) {
+        String value = pairs.stream().map(pair -> pair.get(index)).filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.joining(","));
+        return value.isEmpty() ? null : value;
     }
 
     private static ApplicationWindow window(Random random, OpportunityVersion version) {
