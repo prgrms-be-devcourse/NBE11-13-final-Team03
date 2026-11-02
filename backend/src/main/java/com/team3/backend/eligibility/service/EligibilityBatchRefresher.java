@@ -13,6 +13,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 신규·변경 공고의 신청 가능성 판정 결과를 주기적으로 최신화한다.
@@ -27,6 +29,8 @@ import java.util.List;
  * - yon.eligibility.batch.enabled: false면 끈다 (기본 true). app.scheduling.enabled=false여도 꺼진다
  * - yon.eligibility.batch.interval-ms: 이전 실행이 끝난 뒤 다음 실행까지 (기본 10분)
  * - yon.eligibility.batch.initial-delay-ms: 앱 시작 후 첫 실행까지 (기본 5분)
+ *
+ * 내부 API(POST /api/internal/eligibility/batch/refresh)로 즉시 실행할 수 있다. 스케줄 실행과 겹치면 나중 것은 건너뛴다.
  */
 @Slf4j
 @Component
@@ -40,15 +44,42 @@ public class EligibilityBatchRefresher {
     private final EligibilityProfileRepository profileRepository;
     private final EligibilityResultService resultService;
     private final ApplicationEventPublisher events;
+    private final AtomicBoolean running = new AtomicBoolean(false);
+
+    /** 한 번의 배치 실행 결과 */
+    public record RunResult(int users, int failed, int judged, long elapsedMs) {
+    }
 
     @Scheduled(fixedDelayString = "${yon.eligibility.batch.interval-ms:600000}",
             initialDelayString = "${yon.eligibility.batch.initial-delay-ms:300000}")
     public void run() {
-        refreshAllUsers(OffsetDateTime.now(KST));
+        if (tryRun(OffsetDateTime.now(KST)).isEmpty()) {
+            log.info("Eligibility batch skipped: already running");
+        }
+    }
+
+    /**
+     * 다른 실행이 진행 중이 아니면 바로 실행한다.
+     *
+     * @return 실행 결과, 이미 실행 중이면 empty
+     */
+    public Optional<RunResult> tryRun(OffsetDateTime now) {
+        if (!running.compareAndSet(false, true)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(refresh(now));
+        } finally {
+            running.set(false);
+        }
     }
 
     /** @return 새로 판정한 건수 합계 */
     public int refreshAllUsers(OffsetDateTime now) {
+        return refresh(now).judged();
+    }
+
+    private RunResult refresh(OffsetDateTime now) {
         long started = System.nanoTime();
         int users = 0;
         int failed = 0;
@@ -80,6 +111,6 @@ public class EligibilityBatchRefresher {
         } else {
             log.debug("Eligibility batch: nothing to refresh (users={}, elapsedMs={})", users, elapsedMs);
         }
-        return judged;
+        return new RunResult(users, failed, judged, elapsedMs);
     }
 }
