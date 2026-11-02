@@ -56,9 +56,11 @@ public class MatchCandidatePage {
                        r.rule_version,r.eligibility_status,r.user_info_missing_count,r.check_required_count,
                        EXISTS(SELECT 1 FROM user_opportunity_preferences s
                               WHERE s.user_id=p.user_id AND s.opportunity_id=o.id AND s.is_saved) AS saved,
-                       EXISTS(SELECT 1 FROM user_interests i WHERE i.user_id=p.user_id AND
-                              ((i.interest_type='CATEGORY' AND i.interest_code=o.category)
-                               OR (i.interest_type='SUB_CATEGORY' AND i.interest_code=o.sub_category))) AS interest,
+                       EXISTS(SELECT 1 FROM user_interests i
+                              JOIN opportunity_categories c ON c.version_id=v.id
+                              WHERE i.user_id=p.user_id AND
+                              ((i.interest_type='CATEGORY' AND i.interest_code=c.large_category)
+                               OR (i.interest_type='SUB_CATEGORY' AND i.interest_code=c.medium_category))) AS interest,
                        m.last_input_key
                 FROM opportunities o JOIN opportunity_versions v ON v.id=o.current_version_id
                 JOIN eligibility_profiles p ON p.user_id=?

@@ -144,7 +144,8 @@ public class UserInterestService {
 
             String code = item.code().strip();
 
-            if (code.isEmpty() || code.length() > MAX_CODE_LENGTH) {
+            // 관심 분야 한 항목에는 분류값 하나만 저장한다. 원문의 쉼표 결합값은 받지 않는다.
+            if (code.isEmpty() || code.length() > MAX_CODE_LENGTH || code.contains(",")) {
                 throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
             }
 
