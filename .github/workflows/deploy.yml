@@ -163,6 +163,11 @@ jobs:
           SSH="ssh -i $HOME/.ssh/deploy_key $JUMP_OPT"
           $SSH "$TARGET" "mkdir -p '$DEPLOY_DIR'"
           scp -i ~/.ssh/deploy_key $JUMP_OPT "$COMPOSE_DIR/docker-compose.yml" "$TARGET:$DEPLOY_DIR/docker-compose.yml"
+          # 운영 스크립트(예: deploy/main/eligibility-refresh.sh)도 같은 디렉터리에 올린다. 없으면 건너뛴다
+          for script in "$COMPOSE_DIR"/*.sh; do
+            [ -e "$script" ] || continue
+            scp -i ~/.ssh/deploy_key $JUMP_OPT "$script" "$TARGET:$DEPLOY_DIR/$(basename "$script")"
+          done
           # 토큰은 명령줄에 넣지 않고 표준입력으로 권한 600 파일에 쓴다. 원격 스크립트가 로그인 후 바로 지운다.
           printf '%s' "$GHCR_TOKEN" | $SSH "$TARGET" "umask 077 && cat > '$DEPLOY_DIR/.ghcr_token'"
           $SSH "$TARGET" \

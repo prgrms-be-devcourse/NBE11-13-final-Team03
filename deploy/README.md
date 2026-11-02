@@ -63,7 +63,7 @@ main에는 `team03-main-sqs`, data에는 `team03-data-sqs` 인스턴스 역할�
 배포 순서 (`deploy.yml`)
 1. 서비스의 서버 변수(`EC2_MAIN_HOST` / `EC2_DATA_HOST`)가 비어 있으면 건너뜀
 2. GHCR에 그 커밋 이미지가 있는지 확인
-3. 그 서버 폴더의 `docker-compose.yml`을 배포 폴더로 복사
+3. 그 서버 폴더의 `docker-compose.yml`과 운영 스크립트(`*.sh`, 예: `deploy/main/eligibility-refresh.sh`)를 배포 폴더로 복사
 4. `deploy.env`의 이미지 줄(`BACKEND_IMAGE` / `DATA_SERVICE_IMAGE` / `NOTIFICATION_IMAGE`)만 바꾸고 `docker compose pull/up -d <서비스>`
 5. 약 3분 동안 backend는 HTTP 8080 응답을, data-service는 컨테이너 안에서 인증된 gRPC 9092 읽기 RPC를, notification-service는 컨테이너 안의 8081 포트를 확인한다. 실패하면 로그를 남기고 **이전 이미지로 되돌린 뒤 실패**
 
@@ -328,6 +328,14 @@ nano .env && chmod 600 .env
 ```
 
 `.env`는 `deploy/main/.env.example`을 붙여 넣고 채운다. 그다음 Actions → Deploy → `backend`로 배포한다.
+
+판정 배치 즉시 실행 (10분 주기를 기다리지 않을 때). 배포 폴더의 `.env`에서 `INTERNAL_API_KEY`를 읽어 localhost로 호출한다.
+
+```bash
+ssh yon-main 'bash ~/yon/eligibility-refresh.sh'
+```
+
+응답 본문과 `HTTP 상태`를 출력한다. 종료 코드는 200·409(스케줄 실행 중이라 건너뜀)이면 0, 그 밖(키 없음·401·503·연결 실패)이면 1이다.
 
 ### 알림 서버 (notification-service)
 
