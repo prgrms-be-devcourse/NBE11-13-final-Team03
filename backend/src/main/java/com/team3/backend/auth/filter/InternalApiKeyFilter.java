@@ -15,6 +15,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Component
 @RequiredArgsConstructor
@@ -52,8 +54,11 @@ public class InternalApiKeyFilter extends OncePerRequestFilter {
         String requestApiKey =
                 request.getHeader(INTERNAL_API_KEY_HEADER);
 
+        // 비교 시간이 앞부분 일치 길이에 따라 달라지지 않게 상수 시간으로 비교한다
         if (requestApiKey == null
-                || !internalApiKey.equals(requestApiKey)) {
+                || !MessageDigest.isEqual(
+                        internalApiKey.getBytes(StandardCharsets.UTF_8),
+                        requestApiKey.getBytes(StandardCharsets.UTF_8))) {
 
             AuthErrorCode errorCode =
                     AuthErrorCode.INVALID_INTERNAL_API_KEY;
