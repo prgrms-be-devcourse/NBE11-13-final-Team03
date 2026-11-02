@@ -166,7 +166,7 @@ class ReplicaIntegrationTest {
         checkpoint("standby-write-rejected", Map.of("sqlState", "25006"));
 
         onServer("search", true, () -> {
-            assertThat(search.search("replica", null, null, null, null, null, null, null, null,
+            assertThat(search.search("replica", null, null, null, null, null, null, null, null, null,
                     null, null, null, null, OpportunitySearchSort.LATEST, 0, 10).content())
                     .extracting(item -> item.opportunityId()).containsExactly(opportunity);
             return null;
