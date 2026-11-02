@@ -5,7 +5,8 @@ import { QueryClient, QueryObserver } from '@tanstack/react-query'
 import { apiClient } from '../src/api/client.ts'
 import { ApiError } from '../src/api/ApiError.ts'
 import { getInterestOptions, isSearchResponse, searchOpportunities, searchQueryOptions } from '../src/api/opportunities.ts'
-import { availableSorts, changeSearchCategory, changeSearchConditions, changeSearchType, dateRangeError, defaultSearchParams, defaultSort, hasSearchTokens, isValidDate, paginationPages, parseSearchParams, serializeSearchParams } from '../src/pages/opportunities/searchParams.ts'
+import { availableSorts, categoryChoiceLabel, categoryEntries, categoryEntryKey, categoryLabel, changeSearchCategory, changeSearchConditions, changeSearchType, classificationLabel, dateRangeError, defaultSearchParams, defaultSort, hasSearchTokens, isValidDate, paginationPages, parseCategoryEntryKey, parseSearchParams, selectedCategoryEntry, serializeSearchParams } from '../src/pages/opportunities/searchParams.ts'
+import { sharedCategoryOptions } from './profile-fixtures.mjs'
 import { buildRegionTree, chooseRegionLevel, regionPath } from '../src/pages/profile/regionSelection.ts'
 
 const originalAdapter = apiClient.defaults.adapter
@@ -165,7 +166,8 @@ test('type changes clear incompatible classification descendants and keep origin
   assert.equal(changed.detailCategory, '')
   const training = { ...changed, category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술' }
   assert.equal(changeSearchType(training, 'YOUTH_POLICY').category, '')
-  assert.equal(changeSearchType(training, '').category, '교육･직업훈련')
+  // 직업훈련 분류는 유형을 고를 때 자동으로 정해지므로 전체 유형으로 돌아가도 남기지 않는다
+  assert.deepEqual([changeSearchType(training, '').category, changeSearchType(training, '').categoryType], ['', ''])
   apiClient.defaults.adapter = async config => {
     assert.equal(config.params.get('category'), '교육')
     return response(config, empty())
@@ -336,15 +338,107 @@ test('response checks distinguish null eligibility, actual UNKNOWN and empty pag
 })
 
 test('real interest option hierarchy is accepted and malformed options fail explicitly', async () => {
-  const options = { categories: [{ category: '테스트 분류', subCategories: [{ subCategory: '테스트 중분류', detailCategories: ['테스트 세분류'] }] }] }
+  const options = { categories: [{ category: '테스트 분류', opportunityTypes: ['VOCATIONAL_TRAINING'],
+    subCategories: [{ subCategory: '테스트 중분류', detailCategories: ['테스트 세분류'], opportunityTypes: ['VOCATIONAL_TRAINING'] }] }] }
   apiClient.defaults.adapter = async (config) => {
     assert.equal(config.url, '/interests/options')
     assert.equal(config.requiresAuth, undefined)
     return response(config, options)
   }
   assert.deepEqual(await getInterestOptions(), options)
-  apiClient.defaults.adapter = async (config) => response(config, { categories: [{ category: 'x' }] })
-  await assert.rejects(getInterestOptions(), (error) => error.kind === 'unknown')
+  // 공고 유형이 없거나 비어 있거나 알 수 없으면 이름으로 추측하지 않고 형식 오류로 본다
+  const category = options.categories[0], sub = category.subCategories[0]
+  for (const invalid of [{ categories: [{ category: 'x' }] },
+    { categories: [{ ...category, opportunityTypes: undefined }] }, { categories: [{ ...category, opportunityTypes: [] }] },
+    { categories: [{ ...category, opportunityTypes: ['POLICY'] }] },
+    { categories: [{ ...category, subCategories: [{ ...sub, opportunityTypes: undefined }] }] }]) {
+    apiClient.defaults.adapter = async (config) => response(config, invalid)
+    await assert.rejects(getInterestOptions(), (error) => error.kind === 'unknown')
+  }
+})
+
+test('same raw large category is split into youth policy and training choices by API opportunity types', () => {
+  // 실제 충돌: 청년정책 원본 대분류 '교육･직업훈련'과 직업훈련 대분류 '교육･직업훈련'이 한 노드로 온다
+  const all = categoryEntries(sharedCategoryOptions)
+  assert.deepEqual(all.map(entry => [entry.type, entry.category, entry.subCategories.map(sub => sub.subCategory)]), [
+    ['YOUTH_POLICY', '교육', ['미래역량강화']],
+    ['YOUTH_POLICY', '교육･직업훈련', ['미래역량강화', '온·오프라인교육']],
+    ['VOCATIONAL_TRAINING', '교육･직업훈련', ['정보통신']],
+  ])
+  assert.deepEqual(categoryEntries(sharedCategoryOptions, 'VOCATIONAL_TRAINING').map(entry => entry.subCategories),
+    [[{ subCategory: '정보통신', detailCategories: ['정보기술'] }]])
+  // 표시: 청년정책은 원본 이름, 직업훈련 대분류만 '직업훈련'
+  assert.equal(categoryLabel('YOUTH_POLICY', '교육･직업훈련'), '교육･직업훈련')
+  assert.equal(categoryLabel('VOCATIONAL_TRAINING', '교육･직업훈련'), '직업훈련')
+  assert.equal(categoryChoiceLabel('YOUTH_POLICY', '교육･직업훈련'), '교육･직업훈련 · 청년정책')
+  assert.equal(categoryChoiceLabel('VOCATIONAL_TRAINING', '교육･직업훈련'), '직업훈련')
+  assert.equal(classificationLabel({ type: 'YOUTH_POLICY', category: '교육･직업훈련', subCategory: '미래역량강화', detailCategory: null }), '교육･직업훈련 · 미래역량강화')
+  // 선택 조건 해석: 유형(type·categoryType)이 없으면 같은 이름 대분류를 하나로 정하지 않는다
+  const params = { ...defaultSearchParams(), category: '교육･직업훈련' }
+  assert.deepEqual(selectedCategoryEntry(all, params), { entry: undefined, ambiguous: true })
+  assert.equal(selectedCategoryEntry(all, { ...params, categoryType: 'YOUTH_POLICY' }).entry.type, 'YOUTH_POLICY')
+  assert.equal(selectedCategoryEntry(categoryEntries(sharedCategoryOptions, 'VOCATIONAL_TRAINING'), { ...params, type: 'VOCATIONAL_TRAINING' }).entry.type, 'VOCATIONAL_TRAINING')
+  assert.deepEqual(parseCategoryEntryKey(categoryEntryKey(all[1])), { type: 'YOUTH_POLICY', category: '교육･직업훈련' })
+  assert.equal(parseCategoryEntryKey('교육'), undefined)
+})
+
+test('categoryType is sent only for all-type searches with a classification and stays compatible with old URLs', async () => {
+  // 유형 전체에서 대분류를 고르면 그 대분류의 유형을 함께 보낸다
+  const picked = changeSearchCategory({ ...defaultSearchParams(), page: 3 }, 'category', '교육･직업훈련', 'YOUTH_POLICY')
+  assert.equal(picked.categoryType, 'YOUTH_POLICY')
+  assert.equal(serializeSearchParams(picked).toString(), new URLSearchParams({ category: '교육･직업훈련', categoryType: 'YOUTH_POLICY' }).toString())
+  assert.deepEqual(parseSearchParams(serializeSearchParams(picked)).params, { ...picked, page: 0 })
+  assert.equal(changeSearchCategory(picked, 'category', '').categoryType, '')
+  // 유형을 고르면 type이 분류 유형을 정하므로 categoryType은 보내지 않는다
+  assert.equal(changeSearchCategory({ ...defaultSearchParams(), type: 'YOUTH_POLICY' }, 'category', '교육', 'YOUTH_POLICY').categoryType, '')
+  const typed = changeSearchType(picked, 'YOUTH_POLICY')
+  assert.equal(typed.category, '교육･직업훈련')
+  assert.equal(typed.categoryType, '')
+  // 다른 유형으로 바꾸면 그 유형의 분류가 아니므로 분류를 지운다. 전체로 돌아가면 분류의 유형을 유지한다
+  assert.equal(changeSearchType(picked, 'VOCATIONAL_TRAINING').category, '')
+  assert.equal(changeSearchType(typed, '').categoryType, 'YOUTH_POLICY')
+  assert.equal(changeSearchType({ ...defaultSearchParams(), type: 'YOUTH_POLICY' }, '').categoryType, '')
+  // 기존 URL(categoryType 없음)은 그대로 복원하고 그대로 보낸다
+  const old = parseSearchParams(new URLSearchParams({ category: '교육･직업훈련' }))
+  assert.deepEqual(old.notices, [])
+  assert.equal(old.params.categoryType, '')
+  assert.equal(serializeSearchParams(old.params).toString(), new URLSearchParams({ category: '교육･직업훈련' }).toString())
+  // 백엔드가 400을 돌려주는 조합은 요청 전에 정리한다
+  const mismatch = parseSearchParams(new URLSearchParams({ type: 'VOCATIONAL_TRAINING', categoryType: 'YOUTH_POLICY', category: '교육･직업훈련', subCategory: '미래역량강화' }))
+  assert.deepEqual([mismatch.params.category, mismatch.params.subCategory, mismatch.params.categoryType], ['', '', ''])
+  assert.ok(mismatch.notices.length > 0)
+  assert.equal(parseSearchParams(new URLSearchParams({ categoryType: 'YOUTH_POLICY' })).params.categoryType, '')
+  assert.ok(parseSearchParams(new URLSearchParams({ categoryType: 'POLICY', category: '교육' })).notices.length > 0)
+  const same = parseSearchParams(new URLSearchParams({ type: 'YOUTH_POLICY', categoryType: 'YOUTH_POLICY', category: '교육' }))
+  assert.deepEqual([same.params.category, same.params.categoryType, same.notices], ['교육', '', []])
+  apiClient.defaults.adapter = async (config) => {
+    assert.equal(config.params.get('categoryType'), 'YOUTH_POLICY')
+    assert.equal(config.params.get('type'), null)
+    return response(config, empty())
+  }
+  await searchOpportunities(picked)
+})
+
+test('search requests carry the raw category value and the picked opportunity type for each type scope', async () => {
+  const base = defaultSearchParams()
+  const cases = [
+    // 전체 유형: 선택지의 유형을 categoryType으로 보낸다
+    [changeSearchCategory(base, 'category', '교육･직업훈련', 'YOUTH_POLICY'), { category: '교육･직업훈련', categoryType: 'YOUTH_POLICY', type: null }],
+    [{ ...changeSearchCategory(base, 'category', '교육･직업훈련', 'VOCATIONAL_TRAINING'), subCategory: '정보통신', detailCategory: '정보기술' },
+      { category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술', categoryType: 'VOCATIONAL_TRAINING', type: null }],
+    // 유형 지정: type이 분류 유형을 정하므로 categoryType은 없다. 직업훈련의 표시 이름이 아니라 원본 값을 보낸다
+    [{ ...base, type: 'YOUTH_POLICY', category: '교육･직업훈련', subCategory: '미래역량강화' }, { type: 'YOUTH_POLICY', category: '교육･직업훈련', subCategory: '미래역량강화', categoryType: null }],
+    [{ ...base, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술' },
+      { type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술', categoryType: null }],
+  ]
+  for (const [params, expected] of cases) {
+    apiClient.defaults.adapter = async (config) => {
+      for (const [key, value] of Object.entries(expected)) assert.equal(config.params.get(key), value, key)
+      assert.equal(config.params.get('category') === '직업훈련', false)
+      return response(config, empty())
+    }
+    await searchOpportunities(params)
+  }
 })
 
 test('dependent category changes clear only descendants and reset page without losing other search conditions', () => {

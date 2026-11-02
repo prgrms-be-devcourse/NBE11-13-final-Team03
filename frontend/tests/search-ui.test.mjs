@@ -26,7 +26,7 @@ const { AuthContext } = require('../src/auth/AuthContext.ts')
 const Page = require('../src/pages/opportunities/OpportunitiesPage.tsx').default
 const Filters = require('../src/pages/opportunities/SearchFilters.tsx').default
 const RegionFilter = require('../src/pages/opportunities/SearchRegionFilter.tsx').default
-const { defaultSearchParams, parseSearchParams, serializeSearchParams } = require('../src/pages/opportunities/searchParams.ts')
+const { changeSearchCategory, changeSearchType, defaultSearchParams, parseCategoryEntryKey, parseSearchParams, resetSearchFilters, selectSingleTrainingCategory, serializeSearchParams } = require('../src/pages/opportunities/searchParams.ts')
 const { ApiError } = require('../src/api/ApiError.ts')
 const { searchErrorMessage } = require('../src/pages/opportunities/searchError.ts')
 
@@ -155,7 +155,8 @@ test('filter markup restores applied values, labels native controls and exposes 
     deadlineFrom: '2026-11-01', deadlineTo: '2026-10-01' }
   const html = renderToStaticMarkup(React.createElement(Filters, { applied, optionsLoading: false, optionsError: false,
     onApply: () => {}, onRetryOptions: () => {} }))
-  assert.match(html, /value="테스트 분류"/)
+  // 선택지 목록이 오기 전에도 URL에서 복원한 대분류를 보여 준다 (선택 값은 유형:대분류라 목록이 오면 다시 맞춘다)
+  assert.match(html, /<option value="current" disabled="" selected="">기존 조건: 테스트 분류/)
   assert.match(html, /신청 마감일 범위/)
   assert.doesNotMatch(html, /교육 시작일 범위/)
   assert.match(html, /aria-invalid="true"/)
@@ -186,14 +187,16 @@ test('mobile filter disclosure points to labelled dialog; pagination presents 0-
   assert.match(html, /aria-current="page" aria-label="2페이지"/)
 })
 
+const policyTypes = ['YOUTH_POLICY'], trainingTypes = ['VOCATIONAL_TRAINING']
 const categoryOptions = { categories: [
-  { category: '교육', subCategories: [] },
-  { category: '일자리', subCategories: [{ subCategory: '취업지원', detailCategories: [] }] },
-  { category: '교육･직업훈련', subCategories: [
-    { subCategory: '정보통신', detailCategories: ['정보기술'] },
-    { subCategory: '건설', detailCategories: ['건축'] },
+  { category: '교육', opportunityTypes: policyTypes, subCategories: [] },
+  { category: '일자리', opportunityTypes: policyTypes, subCategories: [{ subCategory: '취업지원', detailCategories: [], opportunityTypes: policyTypes }] },
+  { category: '교육･직업훈련', opportunityTypes: trainingTypes, subCategories: [
+    { subCategory: '정보통신', detailCategories: ['정보기술'], opportunityTypes: trainingTypes },
+    { subCategory: '건설', detailCategories: ['건축'], opportunityTypes: trainingTypes },
   ] },
 ] }
+const { sharedCategoryOptions } = await import('./profile-fixtures.mjs')
 function renderFilters(applied = defaultSearchParams(), props = {}) {
   return renderToStaticMarkup(React.createElement(Filters, {
     applied, options: categoryOptions, optionsLoading: false,
@@ -206,15 +209,15 @@ function classificationSelects(html) {
 
 test('education label stays distinct from training and category choices follow the selected opportunity type', () => {
   const all = classificationSelects(renderFilters())[0]
-  // 요청 값은 원문을 유지하고, 표시 이름만 '교육'·'직업훈련'으로 구분한다.
-  assert.match(all, /value="교육">교육<\/option>/)
-  assert.match(all, /value="교육･직업훈련">직업훈련<\/option>/)
+  // 선택 값은 (공고 유형, 원본 대분류)이고, 표시 이름만 구분한다. 전체 유형은 청년정책·직업훈련 묶음 제목(같은 optgroup)으로 나눈다.
+  assert.match(all, /<optgroup label="청년정책"><option value="YOUTH_POLICY:교육">교육<\/option>/)
+  assert.match(all, /<optgroup label="직업훈련"><option value="VOCATIONAL_TRAINING:교육･직업훈련">직업훈련 전체<\/option><\/optgroup><\/select>/)
   const policy = classificationSelects(renderFilters({ ...defaultSearchParams(), type: 'YOUTH_POLICY' }))[0]
-  assert.match(policy, /value="교육">교육<\/option>/)
-  assert.doesNotMatch(policy, /교육･직업훈련|>직업훈련</)
+  assert.match(policy, /value="YOUTH_POLICY:교육">교육<\/option>/)
+  assert.doesNotMatch(policy, /교육･직업훈련|>직업훈련<|optgroup/)
   const training = classificationSelects(renderFilters({ ...defaultSearchParams(), type: 'VOCATIONAL_TRAINING' }))[0]
-  assert.match(training, /value="교육･직업훈련">직업훈련<\/option>/)
-  assert.doesNotMatch(training, /value="교육"|value="일자리"/)
+  assert.match(training, /value="VOCATIONAL_TRAINING:교육･직업훈련">직업훈련<\/option>/)
+  assert.doesNotMatch(training, /YOUTH_POLICY|optgroup/)
 })
 
 test('classification selects expose only children of selected parents; policy with no detail disables detail selection', () => {
@@ -233,6 +236,193 @@ test('classification selects expose only children of selected parents; policy wi
   assert.match(classificationSelects(policyHtml)[2], /disabled/)
   assert.match(policyHtml, /이 중분류에는 세부 분류가 없어요/)
   assert.doesNotMatch(policyHtml, /datalist|분류명 입력/)
+})
+
+test('youth policy and training sharing the raw large category 교육･직업훈련 get separate choices, children and labels', () => {
+  const render = (params) => classificationSelects(renderFilters({ ...defaultSearchParams(), ...params }, { options: sharedCategoryOptions }))
+  // 전체 유형: 같은 원본 대분류가 청년정책 묶음(원본 이름)과 직업훈련 묶음(‘직업훈련 전체’)에 따로 나온다
+  const [all] = render({})
+  assert.match(all, /<optgroup label="청년정책">[\s\S]*<option value="YOUTH_POLICY:교육･직업훈련">교육･직업훈련<\/option><\/optgroup><optgroup label="직업훈련"><option value="VOCATIONAL_TRAINING:교육･직업훈련">직업훈련 전체<\/option><\/optgroup><\/select>/)
+  // 두 묶음 제목은 같은 방식(optgroup)이고, 제목과 같은 이름의 항목은 없으며 각 선택지는 한 번씩만 나온다
+  assert.equal(all.match(/<optgroup /g).length, 2)
+  assert.doesNotMatch(all, /· 청년정책|>직업훈련<\/option>|>청년정책<\/option>/)
+  assert.equal(all.match(/>직업훈련 전체<\/option>/g).length, 1)
+  assert.equal(all.match(/>교육･직업훈련<\/option>/g).length, 1)
+  // 청년정책 유형: 교육･직업훈련이 청년정책 대분류로 보이고 청년정책 중분류만 나온다
+  const policy = render({ type: 'YOUTH_POLICY', category: '교육･직업훈련' })
+  assert.match(policy[0], /<option value="YOUTH_POLICY:교육･직업훈련" selected="">교육･직업훈련<\/option>/)
+  assert.match(policy[1], /미래역량강화[\s\S]*온·오프라인교육/)
+  assert.doesNotMatch(policy[1], /정보통신/)
+  // 직업훈련 유형: NCS 분류만
+  const training = render({ type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '정보통신' })
+  assert.match(training[0], /<option value="VOCATIONAL_TRAINING:교육･직업훈련" selected="">직업훈련<\/option>/)
+  assert.match(training[1], /value="정보통신" selected/)
+  assert.doesNotMatch(training[1], /미래역량강화|온·오프라인교육/)
+  assert.match(training[2], /정보기술/)
+  // 전체 유형 + 분류 유형: 고른 유형의 하위 분류만
+  const allPolicy = render({ category: '교육･직업훈련', categoryType: 'YOUTH_POLICY', subCategory: '온·오프라인교육' })
+  assert.match(allPolicy[0], /value="YOUTH_POLICY:교육･직업훈련" selected=""/)
+  assert.match(allPolicy[1], /value="온·오프라인교육" selected/)
+  assert.doesNotMatch(allPolicy[1], /정보통신/)
+  // 분류 유형 없는 기존 URL: 하나로 정할 수 없으므로 유형 선택을 요구하고 적용을 막는다
+  const legacy = renderFilters({ ...defaultSearchParams(), category: '교육･직업훈련' }, { options: sharedCategoryOptions })
+  assert.match(legacy, /<option value="current" disabled="" selected="">기존 조건: 교육･직업훈련 \(공고 유형 선택 필요\)<\/option>/)
+  assert.match(legacy, /청년정책과 직업훈련에 같은 이름의 대분류가 있어요/)
+  assert.match(legacy, /<button[^>]*type="submit"[^>]*disabled=""/)
+  // 직업훈련 유형에서 청년정책 중분류를 고른 조건은 목록에 없는 조건이다
+  const wrongChild = renderFilters({ ...defaultSearchParams(), type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '미래역량강화' }, { options: sharedCategoryOptions })
+  assert.match(wrongChild, /기존 조건: 미래역량강화 \(목록 확인 필요\)/)
+})
+
+// 선택지 값과 표시 이름을 그려진 select에서 그대로 읽는다 (사용자가 고르는 값과 같다)
+function optionsOf(markup) {
+  return [...markup.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(([, value, label]) => ({ value, label })).filter(({ value }) => value && value !== 'current')
+}
+function isDisabled(markup) {
+  return /^<select[^>]*disabled/.test(markup)
+}
+// 사용자가 대분류 → 중분류 → 세부 분류를 차례로 고르는 흐름을 SearchFilters의 onChange와 같은 함수로 재현한다
+function pickChain(start, { categoryLabel, subCategory, detailCategory }) {
+  let params = start
+  let selects = classificationSelects(renderFilters(params, { options: sharedCategoryOptions }))
+  const choice = optionsOf(selects[0]).find(({ label }) => label === categoryLabel)
+  assert.ok(choice, `대분류 선택지 없음: ${categoryLabel}`)
+  const picked = parseCategoryEntryKey(choice.value)
+  params = changeSearchCategory(params, 'category', picked.category, picked.type)
+  selects = classificationSelects(renderFilters(params, { options: sharedCategoryOptions }))
+  assert.match(selects[0], new RegExp(`value="${choice.value}" selected=""`))
+  assert.ok(!isDisabled(selects[1]), '중분류가 비활성화됨')
+  if (subCategory) {
+    assert.ok(optionsOf(selects[1]).some(({ value }) => value === subCategory), `중분류 선택지 없음: ${subCategory}`)
+    params = changeSearchCategory(params, 'subCategory', subCategory)
+    selects = classificationSelects(renderFilters(params, { options: sharedCategoryOptions }))
+  }
+  if (detailCategory) {
+    assert.ok(!isDisabled(selects[2]), '세부 분류가 비활성화됨')
+    params = changeSearchCategory(params, 'detailCategory', detailCategory)
+    selects = classificationSelects(renderFilters(params, { options: sharedCategoryOptions }))
+    assert.match(selects[2], new RegExp(`value="${detailCategory}" selected`))
+  }
+  return { params, selects, query: serializeSearchParams(params), picked }
+}
+
+test('category chains for all, youth policy and training types select (type, raw category) and send the matching categoryType', () => {
+  const all = defaultSearchParams()
+  // 전체 유형 + 청년정책 교육･직업훈련: 청년정책 중분류만 나오고 세부 분류는 쓰지 않는다
+  const allPolicy = pickChain(all, { categoryLabel: '교육･직업훈련', subCategory: '온·오프라인교육' })
+  assert.deepEqual(allPolicy.picked, { type: 'YOUTH_POLICY', category: '교육･직업훈련' })
+  assert.doesNotMatch(allPolicy.selects[1], /정보통신/)
+  assert.ok(isDisabled(allPolicy.selects[2]))
+  assert.deepEqual(Object.fromEntries(allPolicy.query), { category: '교육･직업훈련', subCategory: '온·오프라인교육', categoryType: 'YOUTH_POLICY' })
+  // 전체 유형 + 직업훈련: 표시 이름은 ‘직업훈련’, 보내는 값은 원본 교육･직업훈련 + NCS 1차·2차
+  const allTraining = pickChain(all, { categoryLabel: '직업훈련 전체', subCategory: '정보통신', detailCategory: '정보기술' })
+  assert.deepEqual(allTraining.picked, { type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련' })
+  assert.doesNotMatch(allTraining.selects[1], /미래역량강화|온·오프라인교육/)
+  assert.deepEqual(Object.fromEntries(allTraining.query), { category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술', categoryType: 'VOCATIONAL_TRAINING' })
+  // 청년정책 유형: 청년정책 대·중분류만 고를 수 있고 직업훈련 선택지는 없다. 유형이 정해져 있으므로 categoryType은 보내지 않는다
+  const policyStart = { ...all, type: 'YOUTH_POLICY' }
+  const [policyCategories] = classificationSelects(renderFilters(policyStart, { options: sharedCategoryOptions }))
+  assert.ok(!isDisabled(policyCategories))
+  assert.deepEqual(optionsOf(policyCategories).map(({ label }) => label), ['교육', '교육･직업훈련'])
+  const policy = pickChain(policyStart, { categoryLabel: '교육･직업훈련', subCategory: '미래역량강화' })
+  assert.doesNotMatch(policy.selects[1], /정보통신/)
+  assert.ok(isDisabled(policy.selects[2]))
+  assert.deepEqual(Object.fromEntries(policy.query), { type: 'YOUTH_POLICY', category: '교육･직업훈련', subCategory: '미래역량강화' })
+  // 직업훈련 유형: 대분류 ‘직업훈련’ 하나, 중분류 NCS 1차, 세부 분류 NCS 2차 (기존 동작)
+  const trainingStart = { ...all, type: 'VOCATIONAL_TRAINING' }
+  assert.deepEqual(optionsOf(classificationSelects(renderFilters(trainingStart, { options: sharedCategoryOptions }))[0]).map(({ label }) => label), ['직업훈련'])
+  const training = pickChain(trainingStart, { categoryLabel: '직업훈련', subCategory: '정보통신', detailCategory: '정보기술' })
+  assert.doesNotMatch(training.selects[1], /미래역량강화|온·오프라인교육/)
+  assert.deepEqual(Object.fromEntries(training.query), { type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술' })
+})
+
+test('choosing the training type auto-selects its single category, leaving it clears training choices, and URL restore/reset keep selections consistent', () => {
+  // SearchFilters의 공고 유형 onChange와 같은 함수 조합
+  const chooseType = (params, type, options = sharedCategoryOptions) => selectSingleTrainingCategory(changeSearchType(params, type), options)
+  const render = (params) => classificationSelects(renderFilters(params, { options: sharedCategoryOptions }))
+  // 1. 직업훈련 유형을 고르면 대분류 ‘직업훈련’이 바로 선택되고 보내는 값은 원본 교육･직업훈련이다
+  const training = chooseType({ ...defaultSearchParams(), keyword: '청년', sort: 'RELEVANCE', page: 3 }, 'VOCATIONAL_TRAINING')
+  assert.deepEqual([training.type, training.category, training.categoryType, training.page], ['VOCATIONAL_TRAINING', '교육･직업훈련', '', 0])
+  let selects = render(training)
+  assert.match(selects[0], /<option value="VOCATIONAL_TRAINING:교육･직업훈련" selected="">직업훈련<\/option>/)
+  assert.ok(!isDisabled(selects[1]))
+  assert.ok(isDisabled(selects[2]))
+  // NCS 1차 → NCS 2차 선택
+  assert.deepEqual(optionsOf(selects[1]).map(({ value }) => value), ['정보통신'])
+  const ncs = changeSearchCategory(changeSearchCategory(training, 'subCategory', '정보통신'), 'detailCategory', '정보기술')
+  selects = render(ncs)
+  assert.match(selects[1], /value="정보통신" selected/)
+  assert.match(selects[2], /value="정보기술" selected/)
+  assert.deepEqual(Object.fromEntries(serializeSearchParams(ncs)), { keyword: '청년', type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술' })
+  // 분류 목록을 아직 못 받았거나 다른 유형이면 자동 선택하지 않는다
+  assert.equal(selectSingleTrainingCategory(changeSearchType(defaultSearchParams(), 'VOCATIONAL_TRAINING'), undefined).category, '')
+  assert.equal(chooseType(defaultSearchParams(), 'YOUTH_POLICY').category, '')
+  // 2. 직업훈련에서 전체 유형·청년정책으로 돌아오면 직업훈련 분류가 남지 않는다
+  for (const type of ['', 'YOUTH_POLICY']) {
+    const back = chooseType(ncs, type)
+    assert.deepEqual([back.type, back.category, back.subCategory, back.detailCategory, back.categoryType], [type, '', '', '', ''])
+    const [category, sub, detail] = render(back)
+    assert.match(category, /<option value="" selected="">전체 대분류<\/option>/)
+    assert.equal(category.match(/selected=""/g).length, 1)
+    assert.ok(isDisabled(sub) && isDisabled(detail))
+    assert.equal(serializeSearchParams(back).get('categoryType'), null)
+    // 다시 직업훈련을 고르면 다시 자동 선택된다
+    assert.equal(chooseType(back, 'VOCATIONAL_TRAINING').category, '교육･직업훈련')
+  }
+  // 청년정책에서 고른 분류는 전체 유형으로 가도 그 유형(categoryType)과 함께 남는다 (기존 동작)
+  const policy = changeSearchCategory({ ...defaultSearchParams(), type: 'YOUTH_POLICY' }, 'category', '교육･직업훈련')
+  const policyToAll = chooseType(policy, '')
+  assert.deepEqual([policyToAll.category, policyToAll.categoryType], ['교육･직업훈련', 'YOUTH_POLICY'])
+  assert.match(render(policyToAll)[0], /value="YOUTH_POLICY:교육･직업훈련" selected=""/)
+  // 3. URL 복원: 직업훈련 유형과 전체 유형 + categoryType 모두 같은 선택으로 그려지고 그대로 다시 직렬화된다
+  for (const query of [
+    { type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술' },
+    { category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술', categoryType: 'VOCATIONAL_TRAINING' },
+  ]) {
+    const { params, notices } = parseSearchParams(new URLSearchParams(query))
+    assert.deepEqual(notices, [])
+    const [category, sub, detail] = render(params)
+    assert.match(category, new RegExp(`value="VOCATIONAL_TRAINING:교육･직업훈련" selected="">${query.type ? '직업훈련' : '직업훈련 전체'}<`))
+    assert.match(sub, /value="정보통신" selected/)
+    assert.match(detail, /value="정보기술" selected/)
+    assert.deepEqual(Object.fromEntries(serializeSearchParams(params)), query)
+  }
+  // 4. 필터 초기화: 키워드·페이지 크기만 남기고 유형·분류·categoryType을 지운다
+  const reset = resetSearchFilters({ ...ncs, size: 50 })
+  assert.deepEqual(reset, { ...defaultSearchParams(), keyword: '청년', sort: reset.sort, size: 50 })
+  assert.deepEqual([reset.type, reset.category, reset.subCategory, reset.detailCategory, reset.categoryType], ['', '', '', '', ''])
+  assert.match(render(reset)[0], /<option value="" selected="">전체 대분류<\/option>/)
+  assert.match(renderFilters(ncs, { options: sharedCategoryOptions }), /필터 초기화/)
+})
+
+test('all-type filter explains a missing policy category list instead of inventing choices', () => {
+  // 청년정책 분류 행이 없는(백필 전) 선택지 응답: 직업훈련 분류만 있다 (로컬 DB에서 실제로 받은 응답의 형태)
+  const shared = sharedCategoryOptions.categories[1]
+  const trainingOnly = { categories: [{ ...shared, opportunityTypes: ['VOCATIONAL_TRAINING'], subCategories: shared.subCategories.filter((sub) => sub.opportunityTypes.includes('VOCATIONAL_TRAINING')) }] }
+  const all = renderFilters(defaultSearchParams(), { options: trainingOnly })
+  const [category] = classificationSelects(all)
+  assert.doesNotMatch(category, /YOUTH_POLICY|label="청년정책"/)
+  assert.match(category, /<optgroup label="직업훈련"><option value="VOCATIONAL_TRAINING:교육･직업훈련">직업훈련 전체<\/option><\/optgroup><\/select>/)
+  assert.match(all, /청년정책 분류 목록이 아직 없어요/)
+  const policy = renderFilters({ ...defaultSearchParams(), type: 'YOUTH_POLICY' }, { options: trainingOnly })
+  assert.match(policy, /선택할 수 있는 분류가 아직 없어요/)
+  for (const markup of classificationSelects(policy)) assert.ok(isDisabled(markup))
+  // 직업훈련 유형은 그대로이고, 두 유형이 모두 있으면 안내하지 않는다
+  assert.match(classificationSelects(renderFilters({ ...defaultSearchParams(), type: 'VOCATIONAL_TRAINING' }, { options: trainingOnly }))[0], /value="VOCATIONAL_TRAINING:교육･직업훈련">직업훈련<\/option>/)
+  assert.doesNotMatch(renderFilters(defaultSearchParams(), { options: sharedCategoryOptions }), /분류 목록이 아직 없어요/)
+})
+
+test('applied chips and policy cards never show a youth policy 교육･직업훈련 as 직업훈련', () => {
+  const chips = (html) => html.match(/<div class="chips" aria-label="적용된 검색 조건">([\s\S]*?)<\/div>/)?.[1]
+  assert.match(chips(renderPage(data, '/opportunities?category=%EA%B5%90%EC%9C%A1%EF%BD%A5%EC%A7%81%EC%97%85%ED%9B%88%EB%A0%A8&categoryType=YOUTH_POLICY')),
+    /<span>교육･직업훈련 · 청년정책<\/span>/)
+  assert.match(chips(renderPage(data, '/opportunities?type=YOUTH_POLICY&category=%EA%B5%90%EC%9C%A1%EF%BD%A5%EC%A7%81%EC%97%85%ED%9B%88%EB%A0%A8')),
+    /<span>청년정책<\/span><span>교육･직업훈련<\/span>/)
+  assert.match(chips(renderPage(data, '/opportunities?type=VOCATIONAL_TRAINING&category=%EA%B5%90%EC%9C%A1%EF%BD%A5%EC%A7%81%EC%97%85%ED%9B%88%EB%A0%A8')),
+    /<span>직업훈련<\/span><span>직업훈련<\/span>/)
+  const policyCard = renderPage({ ...data, content: [{ ...item, category: '교육･직업훈련', subCategory: '미래역량강화' }] })
+  assert.match(policyCard, /data-opportunity-type="YOUTH_POLICY">청년정책/)
+  assert.match(policyCard, /class="category">교육･직업훈련 · 미래역량강화<\/p>/)
 })
 
 test('option loading, errors and successful empty lists remain distinct without free-input fallback', () => {

@@ -17,7 +17,7 @@ import { regionsQuery } from '../../api/regions'
 import type { RegionSource } from '../profile/regionSelection'
 import { AuthContext } from '../../auth/AuthContext'
 import SearchFilters from './SearchFilters'
-import { applicationStatusLabel, availableSorts, categoryDisplayLabel, changeSearchConditions, classificationLabel, defaultSearchParams, paginationPages, parseSearchParams, serializeSearchParams, sortLabels, typeLabels } from './searchParams'
+import { applicationStatusLabel, availableSorts, categoryChoiceLabel, categoryLabel, changeSearchConditions, classificationLabel, defaultSearchParams, paginationPages, parseSearchParams, serializeSearchParams, sortLabels, typeLabels } from './searchParams'
 import type { SearchParams, SearchSort } from './types'
 import styles from './OpportunitiesPage.module.css'
 
@@ -132,7 +132,7 @@ function OpportunitiesPage() {
           </div>
           <div className={styles.applied}>
             <div className={styles.chips} aria-label="적용된 검색 조건">
-              {[params.keyword && `‘${params.keyword}’`, params.type ? typeLabels[params.type] : '전체 유형', categoryDisplayLabel(params.category), params.subCategory, params.detailCategory, params.applicationStatus && applicationStatusLabel(params.applicationStatus, params.type), ...appliedDates].filter(Boolean).map((value, index) => <span key={index}>{value}</span>)}
+              {[params.keyword && `‘${params.keyword}’`, params.type ? typeLabels[params.type] : '전체 유형', params.category && (params.type ? categoryLabel(params.type, params.category) : categoryChoiceLabel(params.categoryType, params.category)), params.subCategory, params.detailCategory, params.applicationStatus && applicationStatusLabel(params.applicationStatus, params.type), ...appliedDates].filter(Boolean).map((value, index) => <span key={index}>{value}</span>)}
               {params.region && <span>{regionQuery.data?.find(region => region.value === params.region)?.label ?? params.region}</span>}
               {userId !== null && params.eligibilityStatuses.map(status => <StatusBadge key={status} status={status} />)}
             </div>

@@ -14,7 +14,7 @@ import StatusBadge from '../../components/ui/StatusBadge'
 import PreferenceActions from '../../components/opportunities/PreferenceActions'
 import OpportunityTypeBadge from '../../components/opportunities/OpportunityTypeBadge'
 import ArrowLink from '../../components/ui/ArrowLink'
-import { categoryDisplayLabel, statusLabels, typeLabels } from './searchParams'
+import { categoryLabel, statusLabels, typeLabels } from './searchParams'
 import { applicationWindowText, conditionLabels, conditionPresentation, conditionResultLabels, dateRange, regionText, requirementLabels, safeExternalUrl, searchReturnPath, validationLabel } from './detailPresentation'
 import { formatDatesInText } from '../../utils/date'
 import styles from './OpportunityDetailPage.module.css'
@@ -84,7 +84,7 @@ function OpportunityDetailPage() {
     if (userId !== undefined) void recordBehaviorEvent(client, userId, data.opportunityId, { eventType: 'EXTERNAL_LINK_CLICK', source, linkType })
   }
   // 직업훈련에 NCS 분류가 없으면 카드와 같이 '직업훈련'으로 표시한다.
-  const classification = [...new Set([data.category?.trim() && categoryDisplayLabel(data.category.trim()), data.subCategory].map(value => value?.trim()).filter(value => value && value !== typeLabels[data.type]))].join(' · ')
+  const classification = [...new Set([data.category?.trim() && categoryLabel(data.type, data.category.trim()), data.subCategory].map(value => value?.trim()).filter(value => value && value !== typeLabels[data.type]))].join(' · ')
     || (data.type === 'VOCATIONAL_TRAINING' ? typeLabels.VOCATIONAL_TRAINING : '')
   const institution = policy?.supervisingInstitutionName ?? training?.institutionName
   const hasEligibilityEvidence = !!data.eligibility && (!!data.eligibility.reason?.trim() || data.eligibility.conditions.length > 0)

@@ -9,7 +9,7 @@ import Button from '../../components/ui/Button'
 import AsyncState from '../../components/ui/AsyncState'
 import ProfileError from './ProfileError'
 import { interestOptions, toggleInterest } from './interestModel'
-import { categoryDisplayLabel, trainingCategory } from '../opportunities/searchParams'
+import { categoryChoiceLabel, categoryEntries, categoryEntryKey, categoryLabel } from '../opportunities/searchParams'
 import styles from './Profile.module.css'
 
 function InterestsForm({ user, initial, onSaved, onSkip, onBack }: { user: AuthUser; initial: Interest[]; onSaved?: () => void; onSkip?: () => void; onBack?: () => void }) {
@@ -36,10 +36,9 @@ function InterestsForm({ user, initial, onSaved, onSkip, onBack }: { user: AuthU
   const checked = (item: Interest) => selected.some((value) => interestKey(value) === interestKey(item))
   const toggle = (item: Interest) => { setSelected((current) => toggleInterest(current, item)); setSaved(false) }
   const checkbox = (item: Interest, label: string) => <label key={interestKey(item)} className={styles.chip}><input type="checkbox" checked={checked(item)} disabled={mutation.isPending || (!checked(item) && selected.length >= 30)} onChange={() => toggle(item)} />{label}</label>
-  // 선택 요약의 이름은 API 문자열을 그대로 쓴다. 대분류만 화면 이름과 '대분류'를 붙인다.
-  const selectedLabel = (item: Interest) => !keys.has(interestKey(item)) ? `${item.code} (기존 값)` : item.type === 'CATEGORY' ? `${categoryDisplayLabel(item.code)} 대분류` : item.code
-  // 직업훈련 추천은 중분류(NCS 1차)·세부 분야만 매칭한다(RecommendationInterestMatcher). 대분류는 이미 저장된 경우에만 해제할 수 있게 보여 준다.
-  const showCategory = (category: string) => category !== trainingCategory || initial.some((item) => interestKey(item) === interestKey({ type: 'CATEGORY', code: category }))
+  // 선택 요약은 API 문자열에 어느 공고 유형의 어떤 분류인지 붙인다 (예: '교육･직업훈련 · 청년정책 대분류').
+  const labels = new Map(available.map((option) => [interestKey(option), option.label]))
+  const selectedLabel = (item: Interest) => labels.get(interestKey(item)) ?? `${item.code} (기존 값)`
   const submit = async () => {
     if (submitting.current || !options.isSuccess || !changed) return
     submitting.current = true
@@ -65,22 +64,24 @@ function InterestsForm({ user, initial, onSaved, onSkip, onBack }: { user: AuthU
           {unknown.length > 0 && <fieldset className={styles.interestSection}><legend>현재 선택지에 없는 기존 관심 분야</legend><p className={styles.note}>목록에서 제외된 분류도 자동으로 지우지 않아요. 해제할 항목만 선택을 취소해 주세요.</p>
             <div className={styles.chips}>{unknown.map((item) => checkbox(item, `${item.code} (${item.type}) · 기존 값 유지`))}</div></fieldset>}
           {options.data.categories.length === 0 && <AsyncState status="empty" title="현재 제공되는 분류가 없어요" description="새 관심 분야는 추가할 수 없어요. 기존 선택은 유지되며 직접 해제할 수 있어요." />}
-          {/* API 계층(대분류 → 중분류 → 세부 분야)을 그대로 따르는 한 줄 목록이다. 한 번에 한 대분류만 펼쳐 다른 분야를 길게 밀어내지 않는다.
+          {/* API 계층(대분류 → 중분류 → 세부 분야)을 따르는 한 줄 목록이다. 한 번에 한 대분류만 펼쳐 다른 분야를 길게 밀어내지 않는다.
               펼침은 표시만 바꾸며 선택 상태는 위 selected가 소유한다. */}
-          <div className={styles.interestList}>{options.data.categories.map((category) => {
-            const label = categoryDisplayLabel(category.category)
+          {/* 분류 API의 공고 유형별 대분류 묶음이다. 청년정책과 직업훈련이 같은 원본 대분류명을 써도 따로 보여 준다.
+              직업훈련 추천은 중분류(NCS 1차)·세부 분야만 매칭하므로(RecommendationInterestMatcher) 직업훈련 대분류 칩은 두지 않는다. */}
+          <div className={styles.interestList}>{categoryEntries(options.data).map((category) => {
+            const label = categoryLabel(category.type, category.category)
+            const policy = category.type === 'YOUTH_POLICY'
             const withDetails = category.subCategories.filter((sub) => sub.detailCategories.length > 0)
             // 개수는 저장 키(type+code) 기준이다. 같은 문자열이 여러 번 나와도 한 선택지로 센다.
-            const items = [...new Map<string, Interest>([{ type: 'CATEGORY', code: category.category } as Interest, ...category.subCategories.map((sub) => ({ type: 'SUB_CATEGORY' as const, code: sub.subCategory })),
+            const items = [...new Map<string, Interest>([...(policy ? [{ type: 'CATEGORY', code: category.category } as Interest] : []), ...category.subCategories.map((sub) => ({ type: 'SUB_CATEGORY' as const, code: sub.subCategory })),
               ...withDetails.flatMap((sub) => sub.detailCategories.map((detail) => ({ type: 'DETAIL_CATEGORY' as const, code: detail })))].map((item) => [interestKey(item), item])).values()]
-            const total = items.length - (showCategory(category.category) ? 0 : 1)
             const picked = items.filter(checked).length
-            return <details key={category.category} name="interest-category" className={styles.interestGroup}>
-              <summary><span className={styles.groupTitle}><strong>{label}</strong><span className={styles.note}>선택지 {total}개</span></span>
+            return <details key={categoryEntryKey(category)} name="interest-category" className={styles.interestGroup}>
+              <summary><span className={styles.groupTitle}><strong>{label}</strong><span className={styles.note}>{policy ? '청년정책' : '직업훈련 NCS'} · 선택지 {items.length}개</span></span>
                 {picked > 0 && <span className={styles.status} data-state="done">{picked}개 선택</span>}<ChevronDown size={18} aria-hidden="true" /></summary>
               <div className={styles.groupBody}>
-                <div className={styles.chips} role="group" aria-label={`${label} 분류`}>
-                  {showCategory(category.category) && checkbox({ type: 'CATEGORY', code: category.category }, `${label} 대분류`)}
+                <div className={styles.chips} role="group" aria-label={`${categoryChoiceLabel(category.type, category.category)} 분류`}>
+                  {policy && checkbox({ type: 'CATEGORY', code: category.category }, `${label} 대분류`)}
                   {category.subCategories.map((sub) => checkbox({ type: 'SUB_CATEGORY', code: sub.subCategory }, sub.subCategory))}
                 </div>
                 {/* NCS 2차 세부 분야는 필요할 때만 펼친다. 선택 개수는 접힌 상태에서도 보여 준다. */}

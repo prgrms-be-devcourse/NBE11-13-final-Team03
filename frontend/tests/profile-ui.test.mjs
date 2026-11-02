@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import { test } from 'node:test'
 import ts from 'typescript'
-import { profile, user, options, regionRows } from './profile-fixtures.mjs'
+import { profile, user, options, regionRows, sharedCategoryOptions } from './profile-fixtures.mjs'
 const require = createRequire(import.meta.url)
 require.extensions['.svg'] = require.extensions['.png'] = (module, filename) => { module.exports = filename }
 require.extensions['.css'] = (module) => { module.exports = { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) } }
@@ -179,7 +179,7 @@ test('interests render parent and child relationships with preserved existing NC
   assert.match(html, /checked=""/)
   assert.match(html, /20010101 \(NCS\) · 기존 값 유지/)
   // 대분류를 먼저 한 줄씩 보여 주고 펼치면 API 계층 그대로 대분류·중분류 칩이 나온다. 처음에는 모두 접혀 있고 한 번에 하나만 펼친다.
-  assert.match(html, /<details name="interest-category" class="interestGroup"><summary><span class="groupTitle"><strong>일자리<\/strong><span class="note">선택지 2개<\/span><\/span><svg[\s\S]*?<\/summary><div class="groupBody"><div class="chips" role="group" aria-label="일자리 분류"><label class="chip"><input type="checkbox"[^>]*\/>일자리 대분류<\/label><label class="chip"><input type="checkbox"[^>]*\/>취업지원<\/label><\/div><\/div><\/details>/)
+  assert.match(html, /<details name="interest-category" class="interestGroup"><summary><span class="groupTitle"><strong>일자리<\/strong><span class="note">청년정책 · 선택지 2개<\/span><\/span><svg[\s\S]*?<\/summary><div class="groupBody"><div class="chips" role="group" aria-label="일자리 · 청년정책 분류"><label class="chip"><input type="checkbox"[^>]*\/>일자리 대분류<\/label><label class="chip"><input type="checkbox"[^>]*\/>취업지원<\/label><\/div><\/div><\/details>/)
   assert.doesNotMatch(html, /<details[^>]*open/)
   assert.match(html, /<div class="detailGrid"><details class="detailGroup"><summary><svg[^>]*aria-hidden="true"[\s\S]*?<\/svg>정보기술 세부 분야 1개<\/summary><div class="chips" role="group" aria-label="정보기술 세부 분야"><label class="chip"><input type="checkbox"[^>]*\/>정보기술개발<\/label>/)
   // 이전 값도 요약에서 바로 해제할 수 있다.
@@ -188,20 +188,28 @@ test('interests render parent and child relationships with preserved existing NC
   assert.match(html, /선택한 관심 분야 <strong>1<\/strong> \/ 30/)
   assert.match(html, /class="actions formActions"><button type="submit"[^>]*>관심 분야 저장/)
   assert.doesNotMatch(html, /type="text"/)
-  const education = render({ path: '/mypage/interests', interests: [{ type: 'CATEGORY', code: '교육' }], optionData: { categories: [...options.categories, { category: '교육', subCategories: [] }] } })
-  assert.match(education, /<strong>교육<\/strong><span class="note">선택지 1개<\/span><\/span><span class="status" data-state="done">1개 선택<\/span>[\s\S]*?<div class="chips" role="group" aria-label="교육 분류"><label class="chip"><input type="checkbox" checked=""[^>]*\/>교육 대분류<\/label>/)
-  assert.match(education, /<li><span>교육 대분류<\/span><button type="button" aria-label="교육 대분류 선택 해제">/)
-  // 직업훈련 대분류는 표시 이름만 바꾸고, 추천에 쓰이지 않으므로 새로 선택할 칩을 두지 않는다. 숨긴 대분류는 선택지 수에서도 뺀다.
-  assert.match(education, /<strong>직업훈련<\/strong><span class="note">선택지 2개<\/span>[\s\S]*?aria-label="직업훈련 분류"><label class="chip"><input type="checkbox"[^>]*\/>정보기술<\/label>/)
+  const education = render({ path: '/mypage/interests', interests: [{ type: 'CATEGORY', code: '교육' }], optionData: { categories: [...options.categories, { category: '교육', opportunityTypes: ['YOUTH_POLICY'], subCategories: [] }] } })
+  assert.match(education, /<strong>교육<\/strong><span class="note">청년정책 · 선택지 1개<\/span><\/span><span class="status" data-state="done">1개 선택<\/span>[\s\S]*?<div class="chips" role="group" aria-label="교육 · 청년정책 분류"><label class="chip"><input type="checkbox" checked=""[^>]*\/>교육 대분류<\/label>/)
+  assert.match(education, /<li><span>교육 · 청년정책 대분류<\/span><button type="button" aria-label="교육 · 청년정책 대분류 선택 해제">/)
+  // 직업훈련 대분류는 표시 이름만 바꾸고, 추천에 쓰이지 않으므로 선택할 칩을 두지 않는다. 대분류가 없으니 선택지 수에서도 빠진다.
+  assert.match(education, /<strong>직업훈련<\/strong><span class="note">직업훈련 NCS · 선택지 2개<\/span>[\s\S]*?aria-label="직업훈련 분류"><label class="chip"><input type="checkbox"[^>]*\/>정보기술<\/label>/)
   assert.doesNotMatch(education, /교육 \(정책\)|교육･직업훈련|직업훈련 대분류|현재 선택지에 없는 기존 관심 분야/)
+  // 대분류 관심은 추천에서 청년정책에만 쓰인다. 청년정책에 '교육･직업훈련' 대분류가 없으면 이 저장값은 맞는 공고가 없으므로
+  // '직업훈련 대분류'로 보여 주지 않고, 지우지 않은 채 목록에 없는 기존 값으로 둔다.
   const savedTrainingCategory = render({ path: '/mypage/interests', interests: [{ type: 'CATEGORY', code: '교육･직업훈련' }] })
-  assert.match(savedTrainingCategory, /<input type="checkbox" checked=""[^>]*\/>직업훈련 대분류<\/label>/)
-  assert.doesNotMatch(savedTrainingCategory, /현재 선택지에 없는 기존 관심 분야/)
+  assert.match(savedTrainingCategory, /현재 선택지에 없는 기존 관심 분야[\s\S]*<input type="checkbox" checked=""[^>]*\/>교육･직업훈련 \(CATEGORY\) · 기존 값 유지<\/label>/)
+  assert.doesNotMatch(savedTrainingCategory, />직업훈련 대분류/)
   const picked = render({ path: '/mypage/interests', interests: [{ type: 'DETAIL_CATEGORY', code: '정보기술개발' }] })
   assert.match(picked, /정보기술 세부 분야 1개 · 1개 선택/)
   // 접힌 대분류 줄에서도 실제 선택 개수(세부 분야 포함)를 보여 준다.
-  assert.match(picked, /<strong>직업훈련<\/strong><span class="note">선택지 2개<\/span><\/span><span class="status" data-state="done">1개 선택<\/span>/)
-  assert.doesNotMatch(picked, /<strong>일자리<\/strong><span class="note">선택지 2개<\/span><\/span><span class="status"/)
+  assert.match(picked, /<strong>직업훈련<\/strong><span class="note">직업훈련 NCS · 선택지 2개<\/span><\/span><span class="status" data-state="done">1개 선택<\/span>/)
+  assert.doesNotMatch(picked, /<strong>일자리<\/strong><span class="note">청년정책 · 선택지 2개<\/span><\/span><span class="status"/)
+  // 실제 충돌: 청년정책 '교육･직업훈련'과 직업훈련 '교육･직업훈련'은 별도 묶음이다. 저장된 청년정책 대분류는 청년정책 묶음에서 선택돼 보인다.
+  const shared = render({ path: '/mypage/interests', interests: [{ type: 'CATEGORY', code: '교육･직업훈련' }, { type: 'SUB_CATEGORY', code: '온·오프라인교육' }], optionData: sharedCategoryOptions })
+  assert.match(shared, /<strong>교육･직업훈련<\/strong><span class="note">청년정책 · 선택지 3개<\/span><\/span><span class="status" data-state="done">2개 선택<\/span>[\s\S]*?aria-label="교육･직업훈련 · 청년정책 분류"><label class="chip"><input type="checkbox" checked=""[^>]*\/>교육･직업훈련 대분류<\/label><label class="chip"><input type="checkbox"[^>]*\/>미래역량강화<\/label><label class="chip"><input type="checkbox" checked=""[^>]*\/>온·오프라인교육<\/label><\/div>/)
+  assert.match(shared, /<strong>직업훈련<\/strong><span class="note">직업훈련 NCS · 선택지 2개<\/span><\/span><svg[\s\S]*?aria-label="직업훈련 분류"><label class="chip"><input type="checkbox"[^>]*\/>정보통신<\/label><\/div>/)
+  assert.match(shared, /<li><span>교육･직업훈련 · 청년정책 대분류<\/span>[\s\S]*?<li><span>온·오프라인교육 · 청년정책 중분류<\/span>/)
+  assert.doesNotMatch(shared, />직업훈련 대분류|현재 선택지에 없는 기존 관심 분야|aria-label="직업훈련 분류"><label class="chip"><input type="checkbox"[^>]*\/>(미래역량강화|온·오프라인교육)/)
   const css = fs.readFileSync(new URL('../src/pages/profile/Profile.module.css', import.meta.url), 'utf8')
   // 불균형한 2열 대신 한 줄 목록이며, 세부 분야 접기 줄만 폭에 맞춰 여러 열로 둔다.
   assert.doesNotMatch(css, /\.interestList \{[^}]*grid-template-columns/)

@@ -9,7 +9,7 @@ import { needsProfileSetup, getProfile, getInterests, parseProfile, parseInteres
 import { emptyProfile, choices, validateProfile, profilePatch, validateProfileRegions } from '../src/pages/profile/profileModel.ts'
 import { interestOptions, toggleInterest } from '../src/pages/profile/interestModel.ts'
 import { safeReturnPath } from '../src/auth/returnPath.ts'
-import { profile, user, options } from './profile-fixtures.mjs'
+import { profile, user, options, sharedCategoryOptions } from './profile-fixtures.mjs'
 
 const adapter = apiClient.defaults.adapter
 const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
@@ -60,11 +60,29 @@ test('PATCH emits only changed fields and explicit null without dropping untouch
 })
 test('interest options map exact strings to backend types with hierarchy and never fabricate NCS codes', () => {
   const available = interestOptions(options)
-  assert.deepEqual(available.map(({ type, code }) => ({ type, code })), [
-    { type: 'CATEGORY', code: '일자리' }, { type: 'SUB_CATEGORY', code: '취업지원' },
-    { type: 'CATEGORY', code: '교육･직업훈련' }, { type: 'SUB_CATEGORY', code: '정보기술' }, { type: 'DETAIL_CATEGORY', code: '정보기술개발' },
+  // 직업훈련 대분류는 추천에 쓰이지 않으므로 선택지로 만들지 않는다 (RecommendationInterestMatcher)
+  assert.deepEqual(available, [
+    { type: 'CATEGORY', code: '일자리', label: '일자리 · 청년정책 대분류' },
+    { type: 'SUB_CATEGORY', code: '취업지원', label: '취업지원 · 청년정책 중분류' },
+    { type: 'SUB_CATEGORY', code: '정보기술', label: '정보기술 · 직업훈련 NCS 1차' },
+    { type: 'DETAIL_CATEGORY', code: '정보기술개발', label: '정보기술개발 · 직업훈련 NCS 2차' },
   ])
-  assert.match(available[4].label, /교육･직업훈련 › 정보기술 › 정보기술개발/)
+})
+test('youth policy 교육･직업훈련 is a youth policy category choice, never a training one', () => {
+  assert.deepEqual(interestOptions(sharedCategoryOptions), [
+    { type: 'CATEGORY', code: '교육', label: '교육 · 청년정책 대분류' },
+    // 같은 청년정책 중분류가 두 대분류에 나와도 저장 키는 하나다
+    { type: 'SUB_CATEGORY', code: '미래역량강화', label: '미래역량강화 · 청년정책 중분류' },
+    { type: 'CATEGORY', code: '교육･직업훈련', label: '교육･직업훈련 · 청년정책 대분류' },
+    { type: 'SUB_CATEGORY', code: '온·오프라인교육', label: '온·오프라인교육 · 청년정책 중분류' },
+    { type: 'SUB_CATEGORY', code: '정보통신', label: '정보통신 · 직업훈련 NCS 1차' },
+    { type: 'DETAIL_CATEGORY', code: '정보기술', label: '정보기술 · 직업훈련 NCS 2차' },
+  ])
+  // 두 유형에 같은 이름의 중분류가 있으면 한 선택지에 두 유형을 모두 적는다
+  const both = { categories: [{ category: '공통', opportunityTypes: ['YOUTH_POLICY', 'VOCATIONAL_TRAINING'],
+    subCategories: [{ subCategory: '같은 중분류', detailCategories: [], opportunityTypes: ['YOUTH_POLICY', 'VOCATIONAL_TRAINING'] }] }] }
+  assert.deepEqual(interestOptions(both).find(item => item.type === 'SUB_CATEGORY'),
+    { type: 'SUB_CATEGORY', code: '같은 중분류', label: '같은 중분류 · 청년정책 중분류 / 직업훈련 NCS 1차' })
 })
 test('editing interests preserves unknown existing NCS, prevents duplicates and enforces 30 including existing values', () => {
   const old = { type: 'NCS', code: '20010101' }, added = { type: 'CATEGORY', code: '교육･직업훈련' }

@@ -8,6 +8,9 @@ export type SearchParams = {
   keyword: string
   type: OpportunityType | ''
   category: string
+  // 유형 전체 검색에서 고른 분류가 속한 공고 유형. 청년정책·직업훈련이 같은 대분류명(교육･직업훈련)을 쓰므로 함께 보낸다.
+  // type이 있으면 비워 둔다 (type이 분류 유형을 정한다).
+  categoryType: OpportunityType | ''
   subCategory: string
   detailCategory: string
   region: string
@@ -43,9 +46,11 @@ export type OpportunitySearchResponse = {
   hasNext: boolean
 }
 
+// GET /api/interests/options. 같은 이름의 대분류는 한 노드이며, opportunityTypes로 어느 공고 유형의 분류인지 구분한다.
 export type InterestOptions = {
   categories: {
     category: string
-    subCategories: { subCategory: string; detailCategories: string[] }[]
+    subCategories: { subCategory: string; detailCategories: string[]; opportunityTypes: OpportunityType[] }[]
+    opportunityTypes: OpportunityType[]
   }[]
 }
