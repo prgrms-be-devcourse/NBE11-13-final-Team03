@@ -57,6 +57,12 @@ test('saved cards share type colors, deduplicated categories and a labeled saved
   assert.match(html, /저장됨/)
   assert.match(html, /aria-label="테스트 저장 공고 저장됨, 저장 해제" aria-pressed="true"/)
   assert.doesNotMatch(render({ saved: { ...data, content: [{ ...item, category: null, subCategory: ' ' }] } }), /분류 미제공| · <\/p>/)
+  // 청년정책은 검색·상세와 같이 정규화된 분류 행으로 보이고 원문 쉼표 문자열로 대체하지 않는다
+  const policy = render({ saved: { ...data, content: [{ ...item, category: '일자리,교육･직업훈련', subCategory: '취업,미래역량강화',
+    categories: [{ largeCategory: '일자리', mediumCategory: '취업' }, { largeCategory: '교육', mediumCategory: '미래역량강화' }] }] } })
+  assert.match(policy, /<p class="muted">일자리 · 취업 \/ 교육 · 미래역량강화<\/p>/)
+  assert.doesNotMatch(policy, /일자리,교육|교육･직업훈련/)
+  assert.doesNotMatch(render({ saved: { ...data, content: [{ ...item, category: '일자리,교육', categories: [] }] } }), /일자리,교육|<p class="muted">일자리/)
 })
 test('saved empty and error responses remain distinct; expired auth offers login and network failure offers retry', () => {
   assert.match(render({ saved: { ...data, content: [], totalElements: 0, totalPages: 0 } }), /아직 저장한 기회가 없어요/)

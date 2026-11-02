@@ -7,6 +7,7 @@ import com.team3.backend.opportunity.domain.repository.*;
 import com.team3.backend.opportunity.domain.status.ApplicationPeriod;
 import com.team3.backend.opportunity.domain.status.ApplicationStatus;
 import com.team3.backend.opportunity.domain.status.ApplicationStatusCalculator;
+import com.team3.backend.opportunity.dto.OpportunityCategoryItem;
 import com.team3.backend.preference.service.PreferenceService;
 import com.team3.backend.search.dto.OpportunityDetailResponseDto;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +34,7 @@ public class OpportunityDetailService {
     private final OpportunityRegionRepository regionRepository;
     private final YouthPolicyDetailRepository youthPolicyDetailRepository;
     private final TrainingCourseDetailRepository trainingCourseDetailRepository;
+    private final OpportunityCategoryRepository categoryRepository;
     private final ApplicationStatusCalculator applicationStatusCalculator;
     private final OpportunityRegionItemMapper regionItemMapper;
     private final EligibilityProvider eligibilityProvider;
@@ -63,6 +65,11 @@ public class OpportunityDetailService {
                         window.getEndDate(), window.getValidationStatus(), window.getPeriodText()))
                 .toList(), today);
 
+        // 분류 행은 청년정책에만 있다 (직업훈련은 조회하지 않는다)
+        List<OpportunityCategoryItem> categories = opportunity.getOpportunityType() == OpportunityType.YOUTH_POLICY
+                ? categoryRepository.findItemsByVersionIds(List.of(versionId)).getOrDefault(versionId, List.of())
+                : List.of();
+
         OpportunityDetailResponseDto.Detail detail = switch (opportunity.getOpportunityType()) {
             case YOUTH_POLICY -> youthPolicyDetailRepository.findByVersionId(versionId)
                     .map(OpportunityDetailResponseDto.YouthPolicyDetailItem::from).orElse(null);
@@ -80,7 +87,7 @@ public class OpportunityDetailService {
         }
 
         return new OpportunityDetailResponseDto(opportunityId, opportunity.getOpportunityType(),
-                opportunity.getTitle(), opportunity.getCategory(), opportunity.getSubCategory(),
+                opportunity.getTitle(), opportunity.getCategory(), opportunity.getSubCategory(), categories,
                 opportunity.getDetailUrl(), opportunity.getCreatedAt(),
                 regionItemMapper.toItems(version, conditions, regions),
                 windows.stream().map(OpportunityDetailResponseDto.ApplicationWindowItem::from).toList(),

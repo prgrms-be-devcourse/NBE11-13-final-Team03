@@ -1,4 +1,4 @@
-import type { ApplicationStatus, InterestOptions, OpportunitySearchItem, OpportunityType, SearchParams, SearchSort } from './types.ts'
+import type { ApplicationStatus, InterestOptions, OpportunityCategory, OpportunityType, SearchParams, SearchSort } from './types.ts'
 import type { EligibilityStatus } from '../../components/ui/StatusBadge.tsx'
 
 export const eligibilityStatuses: EligibilityStatus[] = ['ELIGIBLE', 'POSSIBLY_ELIGIBLE', 'NOT_ELIGIBLE', 'UNKNOWN']
@@ -8,11 +8,11 @@ export function isSearchRegionCode(value: string): boolean {
   return /^(?:\d{2}|\d{10})$/.test(value)
 }
 
-// 직업훈련 대분류의 원본 이름. 청년정책에도 같은 원본 대분류명이 있으므로(옛 분류명) 이름만으로 유형을 판단하지 않는다.
+// 직업훈련 대분류의 원본 이름. 청년정책 공고 원문에도 옛 분류명으로 같은 이름이 남아 있으므로 이름만으로 유형을 판단하지 않는다.
 // 공고 유형은 분류 API의 opportunityTypes와 검색 결과의 type으로 정한다. 이 상수는 직업훈련 대분류의 표시 이름을 바꿀 때만 쓴다.
 export const trainingCategory = '교육･직업훈련'
 
-// 직업훈련 대분류는 정책 '교육'과 겹치지 않도록 '직업훈련'으로 보여 준다. 청년정책 분류는 원본 이름 그대로 보여 준다.
+// 직업훈련 대분류는 정책 '교육'과 겹치지 않도록 '직업훈련'으로 보여 준다. 청년정책 분류는 받은 이름 그대로 보여 준다.
 export function categoryLabel(type: OpportunityType | '', category: string): string {
   return type === 'VOCATIONAL_TRAINING' && category === trainingCategory ? typeLabels.VOCATIONAL_TRAINING : category
 }
@@ -57,15 +57,34 @@ export function parseCategoryEntryKey(value: string): { type: OpportunityType; c
   return index > 0 && (type === 'YOUTH_POLICY' || type === 'VOCATIONAL_TRAINING') ? { type, category: value.slice(index + 1) } : undefined
 }
 
-export function classificationLabel(item: Pick<OpportunitySearchItem, 'type' | 'category' | 'subCategory' | 'detailCategory'>): string {
-  // 청년정책은 원본 대분류를 그대로 보여 준다 (같은 이름의 '교육･직업훈련'도 '직업훈련'으로 바꾸지 않는다).
+// 청년정책 분류는 서버가 정규화한 분류 행(categories)으로만 만든다. 공고 원문(category·subCategory)은 쉼표로 이은 옛 분류명일 수 있어
+// 쓰지 않고, 이름 통합·짝 나누기도 프런트에서 다시 하지 않는다. 같은 대분류는 한 번만 쓰고 그 대분류 행의 중분류만 묶는다.
+// 중분류만 있는 행(원본 개수가 맞지 않아 짝을 정하지 않은 행)은 어느 대분류에도 붙이지 않고 따로 보여 준다.
+// 예: (일자리, 취업)·(일자리, 창업)·(교육, 미래역량강화) → '일자리 · 취업, 창업 / 교육 · 미래역량강화'
+export function policyClassificationLabel(categories: OpportunityCategory[] | null | undefined): string {
+  const groups = new Map<string, string[]>()
+  const unpaired: string[] = []
+  for (const row of categories ?? []) {
+    const large = row.largeCategory?.trim()
+    const medium = row.mediumCategory?.trim()
+    if (large) {
+      const mediums = groups.get(large) ?? []
+      if (medium && !mediums.includes(medium)) mediums.push(medium)
+      groups.set(large, mediums)
+    } else if (medium && !unpaired.includes(medium)) unpaired.push(medium)
+  }
+  const labels = [...groups].map(([large, mediums]) => mediums.length ? `${large} · ${mediums.join(', ')}` : large)
+  return [...labels, ...(unpaired.length ? [unpaired.join(', ')] : [])].join(' / ')
+}
+
+// 목록 카드·홈 카드·저장 목록·상세가 같은 분류 문구를 쓰도록 공고 유형으로 나눈다.
+export function classificationLabel(item: { type: OpportunityType; subCategory?: string | null; detailCategory?: string | null; categories?: OpportunityCategory[] | null }): string {
+  if (item.type !== 'VOCATIONAL_TRAINING') return policyClassificationLabel(item.categories)
   // 직업훈련은 중분류(NCS 1차)·세부 분류(NCS 2차)를 보여 준다. 미분류 대체값 '직업훈련'은 실제 NCS 분류가 있으면 생략하고,
   // 하나도 없으면 '직업훈련'으로 남긴다.
-  const training = item.type === 'VOCATIONAL_TRAINING'
-  const labels = (training ? [item.subCategory, item.detailCategory] : [item.category?.trim() && categoryLabel(item.type, item.category.trim()), item.subCategory, item.detailCategory])
-    .map(value => value?.trim()).filter((value): value is string => !!value && !(training && value === typeLabels.VOCATIONAL_TRAINING))
-  if (training && !labels.length) return typeLabels.VOCATIONAL_TRAINING
-  return [...new Set(labels)].join(' · ')
+  const labels = [item.subCategory, item.detailCategory]
+    .map(value => value?.trim()).filter((value): value is string => !!value && value !== typeLabels.VOCATIONAL_TRAINING)
+  return labels.length ? [...new Set(labels)].join(' · ') : typeLabels.VOCATIONAL_TRAINING
 }
 
 export const typeLabels = { YOUTH_POLICY: '청년정책', VOCATIONAL_TRAINING: '직업훈련' }

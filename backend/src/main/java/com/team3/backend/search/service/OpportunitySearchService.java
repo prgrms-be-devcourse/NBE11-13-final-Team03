@@ -19,7 +19,9 @@ import com.team3.backend.opportunity.domain.entity.TrainingCourseDetail;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.opportunity.domain.entity.YouthPolicyDetail;
 import com.team3.backend.opportunity.domain.repository.ApplicationStatusSpecifications;
+import com.team3.backend.opportunity.domain.repository.OpportunityCategoryRepository;
 import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.dto.OpportunityCategoryItem;
 import com.team3.backend.preference.service.PreferenceService;
 import com.team3.backend.region.directory.RegionDirectory;
 import com.team3.backend.region.directory.RegionIndex;
@@ -76,6 +78,7 @@ public class OpportunitySearchService {
     private final EntityManager entityManager;
     private final SearchTitleColumns searchTitleColumns;
     private final DetailValueNames detailValueNames;
+    private final OpportunityCategoryRepository categoryRepository;
 
     /** PostgreSQL 여부는 한 번만 확인하고 재사용한다. */
     private volatile Boolean postgres;
@@ -246,9 +249,16 @@ public class OpportunitySearchService {
         }
         Map<Long, EligibilityStatus> statusesById = freshStatuses;
         Set<Long> savedOpportunityIds = savedIds;
+        // 현재 페이지 청년정책의 분류 행을 한 번에 읽는다. 검색 조건·정렬·COUNT에는 쓰지 않는다
+        Map<Long, List<OpportunityCategoryItem>> categories = categoryRepository.findItemsByVersionIds(
+                results.getContent().stream()
+                        .filter(opportunity -> opportunity.getOpportunityType() == OpportunityType.YOUTH_POLICY)
+                        .map(opportunity -> opportunity.getCurrentVersion().getId())
+                        .toList());
         List<OpportunitySearchItemDto> items = results.getContent().stream()
                 .map(opportunity -> OpportunitySearchItemDto.from(
-                        opportunity, statusesById.get(opportunity.getId()),
+                        opportunity, categories.getOrDefault(opportunity.getCurrentVersion().getId(), List.of()),
+                        statusesById.get(opportunity.getId()),
                         savedOpportunityIds.contains(opportunity.getId())))
                 .toList();
 

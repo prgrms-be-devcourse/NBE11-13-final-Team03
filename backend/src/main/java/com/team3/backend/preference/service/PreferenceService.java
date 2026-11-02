@@ -3,7 +3,10 @@ package com.team3.backend.preference.service;
 import com.team3.backend.global.exception.BusinessException;
 import com.team3.backend.global.exception.GlobalErrorCode;
 import com.team3.backend.opportunity.domain.entity.Opportunity;
+import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.OpportunityVersion;
+import com.team3.backend.opportunity.domain.repository.OpportunityCategoryRepository;
+import com.team3.backend.opportunity.dto.OpportunityCategoryItem;
 import com.team3.backend.preference.domain.entity.UserOpportunityPreference;
 import com.team3.backend.preference.domain.repository.UserOpportunityPreferenceRepository;
 import com.team3.backend.preference.dto.SavedOpportunitiesResponseDto;
@@ -22,6 +25,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -33,6 +38,7 @@ public class PreferenceService {
     private final UserRepository userRepository;
     private final UserOpportunityPreferenceRepository preferenceRepository;
     private final EntityManager entityManager;
+    private final OpportunityCategoryRepository categoryRepository;
 
     /** 사용자 잠금 아래 공고를 멱등하게 저장하고 실제 전환 여부를 반환한다. */
     @Transactional
@@ -123,9 +129,18 @@ public class PreferenceService {
 
         Sort sort = Sort.by(Sort.Direction.DESC, "savedAt")
                 .and(Sort.by(Sort.Direction.DESC, "id"));
-        Page<SavedOpportunityResponseDto> results = preferenceRepository
-                .findSavedPageByUserId(userId, PageRequest.of(page, size, sort))
-                .map(SavedOpportunityResponseDto::from);
+        Page<UserOpportunityPreference> preferences = preferenceRepository
+                .findSavedPageByUserId(userId, PageRequest.of(page, size, sort));
+        // 현재 페이지 청년정책의 분류 행을 한 번에 읽는다 (현재 버전이 없는 공고는 행이 없다)
+        Map<Long, List<OpportunityCategoryItem>> categories = categoryRepository.findItemsByVersionIds(
+                preferences.getContent().stream().map(UserOpportunityPreference::getOpportunity)
+                        .filter(opportunity -> opportunity.getOpportunityType() == OpportunityType.YOUTH_POLICY)
+                        .map(this::currentVersionId).filter(Objects::nonNull).toList());
+        Page<SavedOpportunityResponseDto> results = preferences.map(preference -> {
+            Long versionId = currentVersionId(preference.getOpportunity());
+            return SavedOpportunityResponseDto.from(preference,
+                    versionId == null ? List.of() : categories.getOrDefault(versionId, List.of()));
+        });
 
         return new SavedOpportunitiesResponseDto(
                 results.getContent(),

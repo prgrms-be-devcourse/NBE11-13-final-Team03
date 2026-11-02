@@ -4,6 +4,8 @@ import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
+import com.team3.backend.opportunity.domain.repository.OpportunityCategoryRepository;
+import com.team3.backend.opportunity.dto.OpportunityCategoryItem;
 import com.team3.backend.preference.service.PreferenceService;
 import com.team3.backend.recommendation.dto.InterestMatchLevel;
 import com.team3.backend.recommendation.dto.RecommendationCandidate;
@@ -34,6 +36,7 @@ class RecommendationServiceTest {
     @Mock private RecommendationSelectionService selectionService;
     @Mock private PreferenceService preferenceService;
     @Mock private RecommendationRegionService regionService;
+    @Mock private OpportunityCategoryRepository categoryRepository;
 
     @Test
     void preservesSelectionOrderAndReadsSavedIdsOnceWithSameDateForReasons() {
@@ -44,8 +47,10 @@ class RecommendationServiceTest {
         var seoul = new OpportunityDetailResponseDto.RegionItem(RegionRole.RESIDENCE, "SPECIFIC",
                 "1100000000", "서울", ValidationStatus.VALID);
         when(regionService.getRegions(List.of(9L, 2L))).thenReturn(Map.of(9L, List.of(seoul)));
-        var service = new RecommendationService(selectionService, new RecommendationReasonService(), preferenceService,
-                regionService);
+        var categories = List.of(new OpportunityCategoryItem("일자리", "취업"),
+                new OpportunityCategoryItem("교육", "미래역량강화"));
+        when(categoryRepository.findCurrentItemsByOpportunityIds(List.of(9L, 2L))).thenReturn(Map.of(9L, categories));
+        var service = service();
 
         var response = service.recommend(7L, TODAY);
 
@@ -53,21 +58,45 @@ class RecommendationServiceTest {
         assertEquals(List.of(false, true), response.stream().map(item -> item.saved()).toList());
         assertEquals(List.of(seoul), response.getFirst().regions());
         assertEquals(List.of(), response.getLast().regions());
+        assertEquals(categories, response.getFirst().categories());
+        assertEquals(List.of(), response.getLast().categories());
         assertEquals("마감 D-14", response.getFirst().recommendationReasons().badges().getLast());
         assertEquals("마감 D-1", response.getLast().recommendationReasons().badges().getLast());
         verify(preferenceService).getSavedOpportunityIds(7L, List.of(9L, 2L));
         verify(regionService).getRegions(List.of(9L, 2L));
+        verify(categoryRepository).findCurrentItemsByOpportunityIds(List.of(9L, 2L));
+    }
+
+    @Test
+    void readsCategoriesOnlyForSelectedYouthPolicies() {
+        var policy = item(9L, TODAY.plusDays(3));
+        var training = new RecommendationEligibleCandidate(new RecommendationCandidate(4L,
+                OpportunityType.VOCATIONAL_TRAINING, "훈련", "교육･직업훈련", "정보통신", "정보기술", null, null,
+                TODAY.plusDays(5), LocalDateTime.of(2026, 10, 1, 12, 0)), InterestMatchLevel.HIGH,
+                EligibilityStatus.ELIGIBLE);
+        when(selectionService.select(7L, TODAY)).thenReturn(List.of(training, policy));
+        when(categoryRepository.findCurrentItemsByOpportunityIds(List.of(9L))).thenReturn(Map.of());
+
+        var response = service().recommend(7L, TODAY);
+
+        assertEquals(List.of(List.of(), List.of()), response.stream().map(item -> item.categories()).toList());
+        assertEquals("교육･직업훈련", response.getFirst().category());
+        verify(categoryRepository).findCurrentItemsByOpportunityIds(List.of(9L));
     }
 
     @Test
     void emptySelectionReturnsEmptyListWithoutSavedLookup() {
         when(selectionService.select(7L, TODAY)).thenReturn(List.of());
-        var service = new RecommendationService(selectionService, new RecommendationReasonService(), preferenceService,
-                regionService);
 
-        assertEquals(List.of(), service.recommend(7L, TODAY));
+        assertEquals(List.of(), service().recommend(7L, TODAY));
         verifyNoInteractions(preferenceService);
         verifyNoInteractions(regionService);
+        verifyNoInteractions(categoryRepository);
+    }
+
+    private RecommendationService service() {
+        return new RecommendationService(selectionService, new RecommendationReasonService(), preferenceService,
+                regionService, categoryRepository);
     }
 
     private static RecommendationEligibleCandidate item(Long id, LocalDate deadline) {

@@ -89,10 +89,18 @@ test('search cards follow home type colors and classification rules without visi
   assert.doesNotMatch(training, /교육･직업훈련|직업훈련 · |class="category">직업훈련/)
   const ncs = renderPage({ ...data, content: [{ ...item, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: ' 정보통신 ', detailCategory: '정보기술' }] })
   assert.match(ncs, /class="category">정보통신 · 정보기술<\/p>/)
-  const policy = renderPage({ ...data, content: [{ ...item, category: ' 일자리 ', subCategory: '일자리', detailCategory: ' 취업지원 ' }] })
-  assert.match(policy, /class="category">일자리 · 취업지원<\/p>/)
-  const missing = renderPage({ ...data, content: [{ ...item, category: ' ', subCategory: null, detailCategory: '' }] })
-  assert.doesNotMatch(missing, /class="category"|분류 미확인/)
+  // 청년정책은 원문 쉼표 문자열 대신 정규화된 분류 행을 대분류별로 묶어 보여 준다
+  const policy = renderPage({ ...data, content: [{ ...item, category: '일자리,일자리,교육･직업훈련', subCategory: '취업,창업,미래역량강화',
+    categories: [{ largeCategory: '일자리', mediumCategory: '취업' }, { largeCategory: '일자리', mediumCategory: '창업' }, { largeCategory: '교육', mediumCategory: '미래역량강화' }] }] })
+  assert.match(policy, /class="category">일자리 · 취업, 창업 \/ 교육 · 미래역량강화<\/p>/)
+  assert.doesNotMatch(policy, /일자리,일자리|취업,창업|교육･직업훈련/)
+  // 홈·상세·저장 목록 테스트와 같은 분류 행이면 같은 문구다
+  const shared = renderPage({ ...data, content: [{ ...item, category: '일자리,교육･직업훈련', subCategory: '취업,미래역량강화',
+    categories: [{ largeCategory: '일자리', mediumCategory: '취업' }, { largeCategory: '교육', mediumCategory: '미래역량강화' }] }] })
+  assert.match(shared, /class="category">일자리 · 취업 \/ 교육 · 미래역량강화<\/p>/)
+  // 분류 행이 없으면(백필 전) 원문으로 대체하지 않고 분류를 생략한다
+  const missing = renderPage({ ...data, content: [{ ...item, category: '일자리,교육', subCategory: '취업,미래역량강화', categories: [] }] })
+  assert.doesNotMatch(missing, /class="category"|분류 미확인|일자리,교육/)
   assert.match(policy, /<a(?=[^>]*class="iconButton")(?=[^>]*href="\/login\?returnTo=%2Fopportunities")(?=[^>]*aria-label="테스트 전용 검색 결과 저장 안 함, 저장하려면 로그인")[^>]*>/)
   const authenticated = renderPage({ ...data, content: [{ ...item, saved: true }] }, '/opportunities', undefined, { status: 'authenticated', user: { id: 11 } })
   assert.match(authenticated, /aria-label="테스트 전용 검색 결과 저장 해제" aria-pressed="true"/)
@@ -420,9 +428,12 @@ test('applied chips and policy cards never show a youth policy 교육･직업�
     /<span>청년정책<\/span><span>교육･직업훈련<\/span>/)
   assert.match(chips(renderPage(data, '/opportunities?type=VOCATIONAL_TRAINING&category=%EA%B5%90%EC%9C%A1%EF%BD%A5%EC%A7%81%EC%97%85%ED%9B%88%EB%A0%A8')),
     /<span>직업훈련<\/span><span>직업훈련<\/span>/)
-  const policyCard = renderPage({ ...data, content: [{ ...item, category: '교육･직업훈련', subCategory: '미래역량강화' }] })
+  // 원문 옛 대분류 교육･직업훈련은 정규화된 현재 이름 '교육'으로 보이며 '직업훈련'으로 바뀌지 않는다
+  const policyCard = renderPage({ ...data, content: [{ ...item, category: '교육･직업훈련', subCategory: '미래역량강화',
+    categories: [{ largeCategory: '교육', mediumCategory: '미래역량강화' }] }] })
   assert.match(policyCard, /data-opportunity-type="YOUTH_POLICY">청년정책/)
-  assert.match(policyCard, /class="category">교육･직업훈련 · 미래역량강화<\/p>/)
+  assert.match(policyCard, /class="category">교육 · 미래역량강화<\/p>/)
+  assert.doesNotMatch(policyCard, /class="category">[^<]*직업훈련/)
 })
 
 test('option loading, errors and successful empty lists remain distinct without free-input fallback', () => {

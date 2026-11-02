@@ -567,9 +567,9 @@ class OpportunitySearchPostgresTest {
                     .andExpect(jsonPath("$.totalElements").value(9))
                     .andExpect(jsonPath("$.content.length()").value(9))
                     .andReturn();
-            // 목록 1 + COUNT 1 + 판정·저장 조회 1에 더해, 검색 트랜잭션마다 SET LOCAL jit = off 1문장이 붙는다.
-            // 결과 건수와 무관한 고정 1회라 항목별 추가 질의(N+1)가 없다는 검증 의도는 그대로다.
-            assertEquals(4, statistics.getPrepareStatementCount() - beforeLargePage);
+            // 목록 1 + 판정 1 + 저장 1 + 청년정책 분류 행 1에 더해, 검색 트랜잭션마다 SET LOCAL jit = off 1문장이 붙는다.
+            // (한 페이지에 모두 들어와 COUNT는 생략된다.) 결과 건수와 무관한 고정 횟수라 항목별 추가 질의(N+1)가 없다는 검증 의도는 그대로다.
+            assertEquals(5, statistics.getPrepareStatementCount() - beforeLargePage);
             Map<Long, Map<String, Object>> items = searchItems(largePage);
             assertEquals("ELIGIBLE", items.get(eligible.getId()).get("eligibilityStatus"));
             assertEquals(true, items.get(eligible.getId()).get("saved"));

@@ -4,8 +4,8 @@ import { AxiosError } from 'axios'
 import { QueryClient, QueryObserver } from '@tanstack/react-query'
 import { apiClient } from '../src/api/client.ts'
 import { ApiError } from '../src/api/ApiError.ts'
-import { getInterestOptions, isSearchResponse, searchOpportunities, searchQueryOptions } from '../src/api/opportunities.ts'
-import { availableSorts, categoryChoiceLabel, categoryEntries, categoryEntryKey, categoryLabel, changeSearchCategory, changeSearchConditions, changeSearchType, classificationLabel, dateRangeError, defaultSearchParams, defaultSort, hasSearchTokens, isValidDate, paginationPages, parseCategoryEntryKey, parseSearchParams, selectedCategoryEntry, serializeSearchParams } from '../src/pages/opportunities/searchParams.ts'
+import { getInterestOptions, isCategoryRows, isSearchResponse, searchOpportunities, searchQueryOptions } from '../src/api/opportunities.ts'
+import { availableSorts, categoryChoiceLabel, categoryEntries, categoryEntryKey, categoryLabel, changeSearchCategory, changeSearchConditions, changeSearchType, classificationLabel, dateRangeError, defaultSearchParams, defaultSort, hasSearchTokens, isValidDate, paginationPages, parseCategoryEntryKey, parseSearchParams, policyClassificationLabel, selectedCategoryEntry, serializeSearchParams } from '../src/pages/opportunities/searchParams.ts'
 import { sharedCategoryOptions } from './profile-fixtures.mjs'
 import { buildRegionTree, chooseRegionLevel, regionPath } from '../src/pages/profile/regionSelection.ts'
 
@@ -372,7 +372,9 @@ test('same raw large category is split into youth policy and training choices by
   assert.equal(categoryLabel('VOCATIONAL_TRAINING', '교육･직업훈련'), '직업훈련')
   assert.equal(categoryChoiceLabel('YOUTH_POLICY', '교육･직업훈련'), '교육･직업훈련 · 청년정책')
   assert.equal(categoryChoiceLabel('VOCATIONAL_TRAINING', '교육･직업훈련'), '직업훈련')
-  assert.equal(classificationLabel({ type: 'YOUTH_POLICY', category: '교육･직업훈련', subCategory: '미래역량강화', detailCategory: null }), '교육･직업훈련 · 미래역량강화')
+  // 청년정책 카드는 원문의 옛 이름이 아니라 정규화된 분류 행의 현재 이름을 보여 준다
+  assert.equal(classificationLabel({ type: 'YOUTH_POLICY', category: '교육･직업훈련', subCategory: '미래역량강화', detailCategory: null,
+    categories: [{ largeCategory: '교육', mediumCategory: '미래역량강화' }] }), '교육 · 미래역량강화')
   // 선택 조건 해석: 유형(type·categoryType)이 없으면 같은 이름 대분류를 하나로 정하지 않는다
   const params = { ...defaultSearchParams(), category: '교육･직업훈련' }
   assert.deepEqual(selectedCategoryEntry(all, params), { entry: undefined, ambiguous: true })
@@ -505,4 +507,45 @@ test('query key switch cancels stale search; late old response cannot replace la
     assert.equal(observer.getCurrentResult().data.page, 2)
     assert.ok(seen.every((page) => page === 2))
   } finally { oldFinish.resolve(); unsubscribe(); client.clear() }
+})
+
+test('youth policy classification comes only from normalized category rows without inventing pairs', () => {
+  const row = (largeCategory, mediumCategory) => ({ largeCategory, mediumCategory })
+  // 같은 대분류는 한 번만, 그 대분류 행의 중분류만 묶는다
+  assert.equal(policyClassificationLabel([row('일자리', '취업'), row('일자리', '창업'), row('교육', '미래역량강화')]),
+    '일자리 · 취업, 창업 / 교육 · 미래역량강화')
+  // (일자리, 취업)·(교육, 미래역량강화)를 교육 · 취업처럼 엇갈려 묶지 않는다
+  assert.equal(policyClassificationLabel([row('일자리', '취업'), row('교육', '미래역량강화')]), '일자리 · 취업 / 교육 · 미래역량강화')
+  // 개수가 맞지 않아 짝이 없는 행: 대분류만, 중분류만 따로 보여 주고 대분류에 붙이지 않는다
+  assert.equal(policyClassificationLabel([row('일자리', null), row('교육', null), row(null, '취업'), row(null, '창업')]),
+    '일자리 / 교육 / 취업, 창업')
+  assert.equal(policyClassificationLabel([row(null, '취업')]), '취업')
+  // 공백·중복 행 정리, 빈 목록과 필드 없음은 빈 문자열
+  assert.equal(policyClassificationLabel([row(' 일자리 ', ' 취업 '), row('일자리', '취업'), row(' ', ''), { largeCategory: '주거' }]), '일자리 · 취업 / 주거')
+  assert.equal(policyClassificationLabel([]), '')
+  assert.equal(policyClassificationLabel(undefined), '')
+  // 청년정책은 원문 쉼표 문자열로 대체하지 않는다
+  const raw = { type: 'YOUTH_POLICY', category: '일자리,교육･직업훈련', subCategory: '취업,미래역량강화', detailCategory: null }
+  assert.equal(classificationLabel({ ...raw, categories: [] }), '')
+  assert.equal(classificationLabel(raw), '')
+  assert.equal(classificationLabel({ ...raw, categories: [row('일자리', '취업'), row('교육', '미래역량강화')] }), '일자리 · 취업 / 교육 · 미래역량강화')
+  // 직업훈련은 분류 행과 무관하게 기존 NCS 표시를 유지한다
+  const training = { type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: '정보통신', detailCategory: '정보기술', categories: [] }
+  assert.equal(classificationLabel(training), '정보통신 · 정보기술')
+  assert.equal(classificationLabel({ ...training, subCategory: '직업훈련', detailCategory: null }), '직업훈련')
+})
+
+test('category rows are optional but must be well formed when present', () => {
+  assert.ok(isCategoryRows(undefined))
+  assert.ok(isCategoryRows([]))
+  assert.ok(isCategoryRows([{ largeCategory: '일자리', mediumCategory: null }, { mediumCategory: '취업' }]))
+  assert.ok(!isCategoryRows('일자리,교육'))
+  assert.ok(!isCategoryRows([{ largeCategory: 1 }]))
+  assert.ok(!isCategoryRows([null]))
+  const item = { opportunityId: 1, type: 'YOUTH_POLICY', title: '테스트', category: null, subCategory: null, detailCategory: null,
+    createdAt: '2026-10-25T09:00:00', eligibilityStatus: null, saved: false }
+  const page = (content) => ({ content, page: 0, size: 10, totalElements: content.length, totalPages: 1, hasNext: false })
+  assert.ok(isSearchResponse(page([item])))
+  assert.ok(isSearchResponse(page([{ ...item, categories: [{ largeCategory: '일자리', mediumCategory: '취업' }] }])))
+  assert.ok(!isSearchResponse(page([{ ...item, categories: [{ largeCategory: ['일자리'] }] }])))
 })

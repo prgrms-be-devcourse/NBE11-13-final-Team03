@@ -4,11 +4,12 @@ import { ApiError } from './ApiError.ts'
 import type { AuthUser } from './auth.ts'
 import { authQueryKey, authTransitionKey } from '../auth/session.ts'
 import { isOpportunityId } from './opportunityDetail.ts'
-import type { OpportunityType } from '../pages/opportunities/types.ts'
+import type { OpportunityCategory, OpportunityType } from '../pages/opportunities/types.ts'
+import { isCategoryRows } from './opportunities.ts'
 
 export type PreferenceSource = 'SEARCH' | 'RECOMMENDATION' | 'SAVED' | 'OTHER'
 export type PreferenceChange = 'save' | 'unsave' | 'hide' | 'unhide'
-export type SavedOpportunity = { opportunityId: number; type: OpportunityType; title: string; category: string | null; subCategory: string | null; savedAt: string }
+export type SavedOpportunity = { opportunityId: number; type: OpportunityType; title: string; category: string | null; subCategory: string | null; categories?: OpportunityCategory[] | null; savedAt: string }
 export type SavedOpportunities = { content: SavedOpportunity[]; page: number; size: number; totalElements: number; totalPages: number; hasNext: boolean }
 export class PreferenceRefreshError extends Error {
   constructor() {
@@ -23,7 +24,7 @@ export function isSavedOpportunities(value: unknown): value is SavedOpportunitie
   return record(value) && integer(value.page) && integer(value.size) && value.size >= 1 && value.size <= 100 && integer(value.totalElements) &&
     integer(value.totalPages) && typeof value.hasNext === 'boolean' && Array.isArray(value.content) && value.content.length <= value.size &&
     value.content.every((item: unknown) => record(item) && integer(item.opportunityId) && item.opportunityId > 0 &&
-      ['YOUTH_POLICY', 'VOCATIONAL_TRAINING'].includes(String(item.type)) && typeof item.title === 'string' && text(item.category) && text(item.subCategory) &&
+      ['YOUTH_POLICY', 'VOCATIONAL_TRAINING'].includes(String(item.type)) && typeof item.title === 'string' && text(item.category) && text(item.subCategory) && isCategoryRows(item.categories) &&
       typeof item.savedAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(item.savedAt) && Number.isFinite(Date.parse(item.savedAt)))
 }
 function validatePage(page: number, size: number): void {

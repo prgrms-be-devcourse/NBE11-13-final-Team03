@@ -3,6 +3,7 @@ import { ApiError } from './ApiError.ts'
 import type { OpportunitySearchItem, ApplicationStatus } from '../pages/opportunities/types.ts'
 import type { EligibilityStatus } from '../components/ui/StatusBadge.tsx'
 import type { RegionItem } from './opportunityDetail.ts'
+import { isCategoryRows } from './opportunities.ts'
 
 export type RecommendationReasons = { badges: string[]; description: string }
 export type RecommendationItem = Omit<OpportunitySearchItem, 'createdAt' | 'eligibilityStatus'> & {
@@ -25,7 +26,7 @@ export function isRecommendations(value: unknown): value is RecommendationItem[]
     const reasons = item.recommendationReasons
     return typeof item.opportunityId === 'number' && Number.isSafeInteger(item.opportunityId) && item.opportunityId > 0 &&
       member(item.type, ['YOUTH_POLICY', 'VOCATIONAL_TRAINING']) && typeof item.title === 'string' && typeof item.saved === 'boolean' &&
-      ['category', 'subCategory', 'detailCategory'].every((key) => item[key] === null || typeof item[key] === 'string') &&
+      ['category', 'subCategory', 'detailCategory'].every((key) => item[key] === null || typeof item[key] === 'string') && isCategoryRows(item.categories) &&
       ['createdAt', 'applicationEndDate', 'trainingStartDate'].every((key) => text(item[key])) &&
       member(item.applicationStatus, ['UPCOMING', 'OPEN', 'ALWAYS_OPEN', 'CLOSED', 'UNKNOWN']) &&
       member(item.eligibilityStatus, ['ELIGIBLE', 'POSSIBLY_ELIGIBLE', 'NOT_ELIGIBLE', 'UNKNOWN']) &&

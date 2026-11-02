@@ -30,6 +30,7 @@
 
 ### 유형별 내용
 
+- 상단 분류는 목록 카드와 같은 함수로 만든다. 청년정책은 응답의 `categories`(정규화된 분류 행)만, 직업훈련은 NCS 1차를 쓴다 ([검색 문서](search.md)의 ‘목록·상세의 분류 표시’).
 - 청년정책: 소개·지원 내용·지원 규모, 신청 방법·선정 방법·서류, 주관·운영 기관, 사업기간, 기타 안내를 표시한다. 긴 텍스트의 줄바꿈은 유지한다.
 - 직업훈련: 교육기관·교육기간·장소·대상, 비용·정원·연락처를 표시한다. [원본 입력 DTO](../../data-service/src/main/java/com/team3/dataservice/opportunity/normalization/dto/TrainingCourseRaw.java), 정규화 코드와 엔티티에서 `realMan → actualTrainingCost`는 실제 훈련비, `courseMan → courseFee`는 수강비로 확인했다. 응답에 비용 단위·지원 범위·본인 부담액을 확정하는 메타데이터는 없다. 따라서 원본 항목명과 숫자만 표시하고 무료·본인 부담금으로 해석하지 않는다. 0도 누락과 구분한다.
 
