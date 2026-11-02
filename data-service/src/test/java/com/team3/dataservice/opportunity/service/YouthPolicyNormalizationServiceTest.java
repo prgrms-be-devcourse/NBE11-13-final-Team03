@@ -65,6 +65,8 @@ class YouthPolicyNormalizationServiceTest extends ApplicationPostgresTest {
     private RegionDirectory regionDirectory;
     @Autowired
     private YouthPolicyDetailRepository detailRepository;
+    @Autowired
+    private OpportunityCategoryRepository categoryRepository;
     @PersistenceContext
     private EntityManager em;
 
@@ -402,6 +404,42 @@ class YouthPolicyNormalizationServiceTest extends ApplicationPostgresTest {
                 .build();
     }
 
+    @Test
+    void 쉼표로_이어진_대중분류를_짝으로_나눠_분류_행에_저장하고_요약_컬럼은_원본을_유지한다() {
+        NormalizationResult result = service.normalize(command(categoryRaw("일자리,교육", "취업,미래역량강화"), DAY1, List.of()));
+        flushAndClear();
+
+        assertThat(categoryRepository.findByVersionIdOrderBySortOrderAsc(result.versionId()))
+                .extracting(OpportunityCategory::getSortOrder, OpportunityCategory::getLargeCategory, OpportunityCategory::getMediumCategory)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple((short) 0, "일자리", "취업"),
+                        org.assertj.core.groups.Tuple.tuple((short) 1, "교육", "미래역량강화"));
+        Opportunity opportunity = em.find(Opportunity.class, result.opportunityId());
+        assertThat(opportunity.getCategory()).isEqualTo("일자리,교육");
+        assertThat(opportunity.getSubCategory()).isEqualTo("취업,미래역량강화");
+    }
+
+    @Test
+    void 분류가_바뀌면_새_버전에_새_분류_행을_만들고_이전_버전_행은_보존한다() {
+        NormalizationResult v1 = service.normalize(command(categoryRaw("일자리", "취업"), DAY1, List.of()));
+        flushAndClear();
+        NormalizationResult v2 = service.normalize(command(categoryRaw("일자리,일자리", "취업,창업"), DAY2, List.of()));
+        flushAndClear();
+
+        assertThat(v2.newVersion()).isTrue();
+        assertThat(categoryRepository.findByVersionIdOrderBySortOrderAsc(v1.versionId()))
+                .extracting(OpportunityCategory::getMediumCategory).containsExactly("취업");
+        assertThat(categoryRepository.findByVersionIdOrderBySortOrderAsc(v2.versionId()))
+                .extracting(OpportunityCategory::getMediumCategory).containsExactly("취업", "창업");
+    }
+
+    @Test
+    void 분류가_없으면_분류_행을_만들지_않는다() {
+        NormalizationResult result = service.normalize(command(categoryRaw(null, " "), DAY1, List.of()));
+        flushAndClear();
+
+        assertThat(categoryRepository.findByVersionIdOrderBySortOrderAsc(result.versionId())).isEmpty();
+    }
+
     private OpportunityCondition condition(Long versionId, ConditionType type) {
         return conditionRepository.findByVersionId(versionId).stream()
                 .filter(c -> c.getConditionType() == type).findFirst().orElseThrow();
@@ -441,6 +479,15 @@ class YouthPolicyNormalizationServiceTest extends ApplicationPostgresTest {
                 .sprtTrgtMinAge(min).sprtTrgtMaxAge(max).sprtTrgtAgeLmtYn("Y")
                 .aplyPrdSeCd("0057001").aplyYmd(aplyYmd)
                 .lclsfNm("주거").mclsfNm("주거지원").zipCd(zipCd)
+                .build();
+    }
+
+    private static YouthPolicyRaw categoryRaw(String large, String medium) {
+        return YouthPolicyRaw.builder()
+                .plcyNo("R2026-1").plcyNm("청년 월세 지원")
+                .sprtTrgtMinAge("19").sprtTrgtMaxAge("34").sprtTrgtAgeLmtYn("Y")
+                .aplyPrdSeCd("0057001").aplyYmd("20261001 ~ 20261031")
+                .lclsfNm(large).mclsfNm(medium)
                 .build();
     }
 }

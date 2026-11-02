@@ -12,6 +12,7 @@ import com.team3.dataservice.opportunity.normalization.AgeNormalizer;
 import com.team3.dataservice.opportunity.normalization.BodyConditionDetector;
 import com.team3.dataservice.opportunity.domain.status.ApplicationPeriod;
 import com.team3.dataservice.opportunity.normalization.ApplicationPeriodNormalizer;
+import com.team3.dataservice.opportunity.normalization.CategoryNormalizer;
 import com.team3.dataservice.opportunity.normalization.CodeConditionNormalizer;
 import com.team3.dataservice.opportunity.normalization.CodeNormalization;
 import com.team3.dataservice.opportunity.normalization.IncomeNormalization;
@@ -77,6 +78,7 @@ public class YouthPolicyNormalizationService {
     private final OpportunityConditionRepository conditionRepository;
     private final ApplicationWindowRepository windowRepository;
     private final OpportunityRegionRepository opportunityRegionRepository;
+    private final OpportunityCategoryRepository categoryRepository;
     private final RegionRepository regionRepository;
     private final YouthPolicyDetailRepository detailRepository;
     private final ConditionSetIdCache conditionSetIds;
@@ -160,6 +162,7 @@ public class YouthPolicyNormalizationService {
         conditionRepository.saveAll(conditions(version, age, region, codes, income, raw));
         windowRepository.saveAll(windows(version, periods.periods()));
         opportunityRegionRepository.saveAll(regions(version, region));
+        categoryRepository.saveAll(categories(version, raw.lclsfNm(), raw.mclsfNm()));
 
         opportunity.changeCurrentVersion(version);
         opportunity.updateSummary(raw.plcyNm().trim(), blankToNull(raw.lclsfNm()), blankToNull(raw.mclsfNm()),
@@ -580,6 +583,21 @@ public class YouthPolicyNormalizationService {
     }
 
     /** SPECIFIC일 때만 지역 행을 만든다 (NATIONAL·UNKNOWN은 행 없음) */
+    /** 대·중분류 짝 행. 스냅샷의 category는 원본 문자열 그대로라 이 값이 바뀌면 새 버전이 생기고 행도 새로 만든다 */
+    static List<OpportunityCategory> categories(OpportunityVersion version, String large, String medium) {
+        List<CategoryNormalizer.CategoryPair> pairs = CategoryNormalizer.split(large, medium);
+        List<OpportunityCategory> rows = new ArrayList<>();
+        for (int i = 0; i < pairs.size(); i++) {
+            rows.add(OpportunityCategory.builder()
+                    .version(version)
+                    .sortOrder((short) i)
+                    .largeCategory(pairs.get(i).large())
+                    .mediumCategory(pairs.get(i).medium())
+                    .build());
+        }
+        return rows;
+    }
+
     private List<OpportunityRegion> regions(OpportunityVersion version, RegionNormalization region) {
         if (region.status() != RegionStatus.SPECIFIC) {
             return List.of();
