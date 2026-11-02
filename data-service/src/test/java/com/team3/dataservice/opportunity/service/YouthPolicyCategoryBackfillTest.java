@@ -78,6 +78,32 @@ class YouthPolicyCategoryBackfillTest extends ApplicationPostgresTest {
         assertThat(categoryRepository.count()).isEqualTo(3);
     }
 
+    @Test
+    void 옛_분류_이름_행이_있는_버전만_스냅샷에서_다시_만들고_다시_실행하면_아무것도_하지_않는다() {
+        NormalizationResult legacy = normalize("R-4", "교육･직업훈련,일자리", "온·오프라인교육,취업");
+        NormalizationResult current = normalize("R-5", "주거", "기숙사");
+        // 이름 통합 전 정규화가 만든 행처럼 옛 이름으로 되돌린다 (가운뎃점 모양도 섞는다)
+        jdbcTemplate.update("update opportunity_categories set large_category = '교육・직업훈련', medium_category = '온·오프라인교육' "
+                + "where version_id = ? and sort_order = 0", legacy.versionId());
+        em.clear();
+
+        assertThat(backfill.canonicalizeNames()).isEqualTo(1);
+        em.flush();
+        em.clear();
+
+        assertThat(categoryRepository.findByVersionIdOrderBySortOrderAsc(legacy.versionId()))
+                .extracting(OpportunityCategory::getSortOrder, OpportunityCategory::getLargeCategory, OpportunityCategory::getMediumCategory)
+                .containsExactly(tuple((short) 0, "교육", "온라인교육"), tuple((short) 1, "일자리", "취업"));
+        assertThat(categoryRepository.findByVersionIdOrderBySortOrderAsc(current.versionId()))
+                .extracting(OpportunityCategory::getLargeCategory, OpportunityCategory::getMediumCategory)
+                .containsExactly(tuple("주거", "기숙사"));
+
+        assertThat(backfill.canonicalizeNames()).isZero();
+        assertThat(backfill.run()).isZero();
+        em.flush();
+        assertThat(categoryRepository.count()).isEqualTo(3);
+    }
+
     private NormalizationResult normalize(String policyNo, String large, String medium) {
         YouthPolicyRaw raw = YouthPolicyRaw.builder()
                 .plcyNo(policyNo).plcyNm("정책 " + policyNo)

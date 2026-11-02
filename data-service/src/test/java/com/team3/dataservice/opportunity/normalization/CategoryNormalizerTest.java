@@ -49,4 +49,28 @@ class CategoryNormalizerTest {
         assertThat(CategoryNormalizer.split(null, " ")).isEmpty();
         assertThat(CategoryNormalizer.split("", null)).isEmpty();
     }
+
+    @Test
+    void 옛_분류_이름은_현재_이름으로_바꾸고_가운뎃점_모양은_가리지_않는다() {
+        assertThat(CategoryNormalizer.split("교육･직업훈련,금융·복지·문화,참여･기반", "온·오프라인교육,문화활동 및 생활지원,청년참여"))
+                .containsExactly(new CategoryPair("교육", "온라인교육"), new CategoryPair("복지문화", "문화활동"),
+                        new CategoryPair("참여권리", "청년참여"));
+        assertThat(CategoryNormalizer.split("교육・직업훈련", "온ㆍ오프라인교육")).containsExactly(new CategoryPair("교육", "온라인교육"));
+    }
+
+    @Test
+    void 이름을_바꾼_뒤_같아진_짝은_한_번만_남기고_같아진_대분류는_하나로_본다() {
+        assertThat(CategoryNormalizer.split("교육･직업훈련,교육", "미래역량강화,미래역량강화"))
+                .containsExactly(new CategoryPair("교육", "미래역량강화"));
+        assertThat(CategoryNormalizer.split("교육,교육･직업훈련", "미래역량강화,교육비지원,온·오프라인교육")).containsExactly(
+                new CategoryPair("교육", "미래역량강화"), new CategoryPair("교육", "교육비지원"), new CategoryPair("교육", "온라인교육"));
+    }
+
+    @Test
+    void 현재_이름과_목록에_없는_이름은_그대로_둔다() {
+        assertThat(CategoryNormalizer.split("일자리,주거", "취업,기숙사")).containsExactly(
+                new CategoryPair("일자리", "취업"), new CategoryPair("주거", "기숙사"));
+        assertThat(CategoryNormalizer.legacyLargeKeys()).containsExactlyInAnyOrder("교육·직업훈련", "금융·복지·문화", "참여·기반");
+        assertThat(CategoryNormalizer.legacyMediumKeys()).containsExactlyInAnyOrder("온·오프라인교육", "문화활동 및 생활지원");
+    }
 }
