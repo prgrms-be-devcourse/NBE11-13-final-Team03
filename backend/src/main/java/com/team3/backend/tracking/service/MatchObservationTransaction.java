@@ -110,9 +110,12 @@ public class MatchObservationTransaction {
         if (result.profileVersion()!=profile.version() || !Objects.equals(result.rule(),EligibilityResultService.RULE_VERSION)
                 || (result.validUntil()!=null && !result.validUntil().isAfter(date))) return rejected(Status.RESULT_STALE_OR_MISSING);
         boolean interest=Boolean.TRUE.equals(jdbc.queryForObject("""
-                SELECT EXISTS(SELECT 1 FROM user_interests WHERE user_id=? AND
-                  ((interest_type='CATEGORY' AND interest_code=?) OR (interest_type='SUB_CATEGORY' AND interest_code=?)))
-                """,Boolean.class,userId,policy.getCategory(),policy.getSubCategory()));
+                SELECT EXISTS(SELECT 1 FROM user_interests i
+                  JOIN opportunity_categories c ON c.version_id=?
+                  WHERE i.user_id=? AND
+                  ((i.interest_type='CATEGORY' AND i.interest_code=c.large_category)
+                   OR (i.interest_type='SUB_CATEGORY' AND i.interest_code=c.medium_category)))
+                """,Boolean.class,version.getId(),userId));
         var periods=windows.findByVersionId(version.getId()).stream().map(w->new ApplicationPeriod(w.getPeriodType(),
                 w.getStartDate(),w.getEndDate(),w.getValidationStatus(),w.getPeriodText())).toList();
         var input=new MatchObservation(version.getId(),version.getVersionNo(),profile.id(),profile.version(),result.rule(),

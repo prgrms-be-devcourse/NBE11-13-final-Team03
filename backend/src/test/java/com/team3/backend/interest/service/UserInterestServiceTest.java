@@ -244,6 +244,24 @@ class UserInterestServiceTest {
     }
 
     @Test
+    void 쉼표로_결합한_관심분야는_저장하기_전에_거부한다() {
+        when(userRepository.findByIdForUpdate(USER_ID))
+                .thenReturn(Optional.of(user));
+
+        for (String code : List.of("취업,창업", "교육비지원,교육비지원", ",", "일자리, 교육")) {
+            BusinessException exception = assertThrows(
+                    BusinessException.class,
+                    () -> userInterestService.replaceInterests(USER_ID,
+                            new UserInterestsUpdateRequest(List.of(
+                                    new UserInterestItemRequest(InterestType.CATEGORY, "주거"),
+                                    new UserInterestItemRequest(InterestType.SUB_CATEGORY, code))))
+            );
+            assertEquals(GlobalErrorCode.INVALID_INPUT_VALUE, exception.getErrorCode());
+        }
+        verifyNoInteractions(userInterestRepository);
+    }
+
+    @Test
     void 관심분야가_30개를_초과하면_거부한다() {
         when(userRepository.findByIdForUpdate(USER_ID))
                 .thenReturn(Optional.of(user));

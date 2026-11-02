@@ -191,6 +191,31 @@ class UserInterestControllerTest {
     }
 
     @Test
+    void 쉼표_관심분야_요청은_400이며_기존_관심분야를_유지한다() throws Exception {
+        Long userId = createUser();
+        CustomUserDetails principal = principal(userId);
+        mockMvc.perform(put(INTEREST_URL).with(user(principal)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"interests":[{"type":"CATEGORY","code":"일자리"}]}
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put(INTEREST_URL).with(user(principal)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"interests":[{"type":"SUB_CATEGORY","code":"취업,창업"}]}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        mockMvc.perform(get(INTEREST_URL).with(user(principal)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.interests.length()").value(1))
+                .andExpect(jsonPath("$.interests[0].code").value("일자리"));
+    }
+
+    @Test
     void 동일한_관심분야가_중복되면_400을_반환한다()
             throws Exception {
         Long userId = createUser();

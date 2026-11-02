@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Tag;
 
 import com.team3.backend.eligibility.domain.entity.*;
 import com.team3.backend.eligibility.service.EligibilityResultService;
+import com.team3.backend.fixture.PolicyCategoryRows;
 import com.team3.backend.interest.domain.entity.InterestType;
 import com.team3.backend.interest.domain.entity.UserInterest;
 import com.team3.backend.opportunity.domain.entity.*;
@@ -18,6 +19,8 @@ import com.team3.backend.user.domain.entity.Role;
 import com.team3.backend.user.domain.entity.User;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -108,7 +111,7 @@ class MatchObservationPostgresTest {
                     .ruleVersion(EligibilityResultService.RULE_VERSION).eligibilityStatus(status)
                     .conditionResults(List.of()).userInfoMissingCount(status==POSSIBLY_ELIGIBLE?1:0)
                     .evaluatedAt(LocalDateTime.ofInstant(NOW,ZoneOffset.UTC)).validUntil(TODAY.plusYears(1)).build());
-            em.flush(); return p.getId();
+            em.flush(); PolicyCategoryRows.backfill(em); return p.getId();
         });
     }
     private void status(long policy,EligibilityStatus status) {
@@ -162,6 +165,81 @@ class MatchObservationPostgresTest {
         assertThat(observations.observe(userId,p).candidateId()).isNull();
         interest(); assertThat(observations.observe(userId,p).reason()).isEqualTo(MatchPairState.Reason.FIRST_MATCH);
         assertThat(candidates.findAll().getFirst().getEvidence()).containsEntry("userInfoMissing",1).containsEntry("checkRequired",0);
+    }
+    @ParameterizedTest
+    @EnumSource(value = InterestType.class, names = {"CATEGORY", "SUB_CATEGORY"})
+    void multiCategoryMatchAgreesWithLockedReadAndDoesNotDuplicateThePage(InterestType type) {
+        long p = policy(POSSIBLY_ELIGIBLE);
+        long next = policy(POSSIBLY_ELIGIBLE);
+        jdbc.update("UPDATE opportunities SET category='employment,education',sub_category='job-search,skills' WHERE id=?", p);
+        tx(() -> {
+            var version = em.find(Opportunity.class, p).getCurrentVersion();
+            em.persist(OpportunityCategory.builder().version(version).sortOrder((short) 1)
+                    .largeCategory("education").mediumCategory("skills").build());
+            em.persist(OpportunityCategory.builder().version(version).sortOrder((short) 2)
+                    .largeCategory("education").mediumCategory("skills").build());
+            em.persist(UserInterest.create(em.find(User.class, userId), type,
+                    type == InterestType.CATEGORY ? "education" : "skills"));
+            return null;
+        });
+
+        var first = pages.scanUser(userId, 0, 1);
+        assertThat(first.visited()).isEqualTo(1);
+        assertThat(first.lastOpportunityId()).isEqualTo(p);
+        assertThat(first.hasNext()).isTrue();
+        assertThat(first.created()).isEqualTo(1);
+        assertThat(tx(() -> observations.current(userId, p).input().interestMatched())).isTrue();
+        var second = pages.scanUser(userId, first.lastOpportunityId(), 1);
+        assertThat(second.lastOpportunityId()).isEqualTo(next);
+        assertThat(second.created()).isZero();
+
+        var replay = pages.scanUser(userId, 0, 10);
+        assertThat(replay.visited()).isEqualTo(2);
+        assertThat(replay.unchanged()).isEqualTo(2);
+        assertThat(replay.observed()).isZero();
+        assertThat(candidates.count()).isEqualTo(1);
+    }
+    @Test void categoryBackfillChangesTheInputKeyWithoutResettingObservationHistory() {
+        long p = policy(POSSIBLY_ELIGIBLE);
+        interest();
+        jdbc.update("DELETE FROM opportunity_categories");
+        assertThat(pages.scanUser(userId, 0, 10).created()).isZero();
+        assertThat(tx(() -> observations.current(userId, p).input().interestMatched())).isFalse();
+        long pairId = pairs.findByUserIdAndOpportunityId(userId, p).orElseThrow().getId();
+
+        tx(() -> PolicyCategoryRows.backfill(em));
+        var refreshed = pages.scanUser(userId, 0, 10);
+        assertThat(refreshed.observed()).isEqualTo(1);
+        assertThat(refreshed.created()).isEqualTo(1);
+        assertThat(pairs.findByUserIdAndOpportunityId(userId, p).orElseThrow().getId()).isEqualTo(pairId);
+        assertThat(pages.scanUser(userId, 0, 10).observed()).isZero();
+        assertThat(candidates.count()).isEqualTo(1);
+    }
+    @Test void categoriesOfOtherVersionsDoNotMatchAndSummaryRechecksCurrentRows() {
+        long p = policy(POSSIBLY_ELIGIBLE);
+        interest();
+        observations.observe(userId, p);
+        tx(() -> {
+            var policy = em.find(Opportunity.class, p);
+            var other = OpportunityVersion.builder().opportunity(policy).versionNo(2)
+                    .normalizationVersion("v1").normalizedSnapshot(Map.of())
+                    .personalizationStatus(PersonalizationStatus.PERSONALIZABLE).build();
+            em.persist(other);
+            em.persist(OpportunityCategory.builder().version(other).sortOrder((short) 0)
+                    .largeCategory("employment").mediumCategory("job-search").build());
+            return null;
+        });
+        jdbc.update("DELETE FROM opportunity_categories WHERE version_id=(SELECT current_version_id FROM opportunities WHERE id=?)", p);
+
+        assertThat(tx(() -> observations.current(userId, p).input().interestMatched())).isFalse();
+        assertThat(matchOutbox.summarize(userId, UUID.randomUUID(), NOW.plusSeconds(3600)).status())
+                .isEqualTo(MatchOutboxTransaction.Status.DEFERRED);
+        assertThat(outboxes.count()).isZero();
+        observations.observe(userId, p);
+        assertThat(matchOutbox.summarize(userId, UUID.randomUUID(), NOW.plusSeconds(3600)).status())
+                .isEqualTo(MatchOutboxTransaction.Status.EMPTY);
+        assertThat(outboxes.count()).isZero();
+        assertThat(candidates.findAll()).extracting(c -> c.getStatus()).containsExactly("SKIPPED");
     }
     @Test void twoUnresolvedConditionsExcludePossiblyEvenWithInterest() {
         long p=policy(POSSIBLY_ELIGIBLE); interest(); jdbc.update("UPDATE eligibility_set_results SET check_required_count=1");
