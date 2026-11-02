@@ -83,7 +83,7 @@ backend의 `/api/admin/collection/**` 공개 HTTP API·ADMIN 권한은 유지된
 | `COLLECTION_SCHEDULE_ENABLED` | 정기 수집 (고용24 09:30·온통청년 09:45 KST) | 출처 잠금으로 동시 실행은 막히지만, 한쪽이 끝난 뒤 다른 쪽이 또 수집 | `true` | `false` |
 | `YON_NORMALIZATION_INGEST_ENABLED` | 정규화 요청 처리 (LISTEN/NOTIFY, 1분 폴링, 1시간 대조) | 요청은 SKIP LOCKED라 중복 처리는 없지만 같은 일을 두 곳에서 함 | `true` | `false` |
 | `YON_NORMALIZATION_CONDITION_SET_BACKFILL_ENABLED` | 기동 시 조건 묶음 백필 | 동시 기동하면 같은 묶음을 만들다 경합 | `true` | `false` |
-| `YON_NORMALIZATION_CATEGORY_BACKFILL_ENABLED` | 기동 시 청년정책 분류 행(`opportunity_categories`) 백필. 행 없는 버전만 채움 | 해당 없음 (메인 서비스에는 이 작업이 없음) | `true` | - |
+| `YON_NORMALIZATION_CATEGORY_BACKFILL_ENABLED` | 기동 시 청년정책 분류 행(`opportunity_categories`) 백필. 행 없는 버전만 채우고, 옛 분류 이름(교육･직업훈련 등) 행이 있는 버전은 현재 이름으로 다시 만듦 | 해당 없음 (메인 서비스에는 이 작업이 없음) | `true` | - |
 | `REGION_CODE_SYNC_ON_STARTUP` | 기동 시 지역 사전 동기화 | 같은 동기화를 두 번 | 필요할 때만 `true` | `false` |
 
 - 기본값은 모두 `true`입니다 (지역 동기화만 `false`). 메인 서비스 기본값은 수집·정규화를 걷어내는 PR에서 코드와 함께 없앱니다.
