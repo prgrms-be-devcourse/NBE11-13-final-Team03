@@ -3,19 +3,25 @@ package com.team3.dataservice.opportunity.service;
 import com.team3.dataservice.opportunity.domain.entity.OpportunityCategory;
 import com.team3.dataservice.opportunity.domain.repository.OpportunityCategoryRepository;
 import com.team3.dataservice.opportunity.domain.repository.OpportunityVersionRepository;
+import com.team3.dataservice.opportunity.normalization.CategoryNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.function.LongFunction;
 
 /**
  * 분류 행(opportunity_categories)이 없는 청년정책 버전에 분류 행을 채운다 (테이블이 생기기 전에 만든 버전).
@@ -27,7 +33,12 @@ import java.util.List;
  * 분류가 비어 행이 0개인 버전은 다음 실행에서도 다시 읽지만 쓰지 않는다.
  * 버전과 그 분류 행은 정규화의 같은 트랜잭션에서 커밋되므로 정규화와 동시에 돌아도 같은 버전을 두 번 채우지 않는다.
  *
- * yon.normalization.category-backfill.enabled=false면 끈다.
+ * 분류 이름 통합(CategoryNormalizer의 옛 이름 → 현재 이름) 전에 만든 행도 같은 시점에 고친다 (canonicalizeNames).
+ * 옛 이름 행이 하나라도 있는 버전은 그 버전의 분류 행을 지우고 스냅샷에서 다시 만든다. 이름을 바꾸면 같은 짝이 겹치거나
+ * (교육･직업훈련 + 교육) 짝짓는 방식이 달라질 수 있어(대분류가 하나로 합쳐짐) 행 단위 UPDATE 대신 다시 만든다.
+ * 옛 이름 행이 없으면 아무것도 하지 않으므로 반복 실행해도 안전하다.
+ *
+ * yon.normalization.category-backfill.enabled=false면 둘 다 끈다.
  */
 @Slf4j
 @Component
@@ -41,6 +52,17 @@ public class YouthPolicyCategoryBackfill {
             join opportunities o on o.id = v.opportunity_id
             where o.opportunity_type = 'YOUTH_POLICY' and v.id > ?
               and not exists (select 1 from opportunity_categories c where c.version_id = v.id)
+            order by v.id
+            limit ?""";
+
+    /** 옛 분류 이름 행이 있는 청년정책 버전. 가운뎃점 모양은 translate로 맞춰 비교한다 */
+    private static final String LEGACY = """
+            select v.id, v.normalized_snapshot #>> '{category,large}', v.normalized_snapshot #>> '{category,medium}'
+            from opportunity_versions v
+            where v.id > ?
+              and exists (select 1 from opportunity_categories c where c.version_id = v.id
+                          and (translate(c.large_category, '\uFF65\u30FB\u318D', '\u00B7\u00B7\u00B7') in (%s)
+                               or translate(c.medium_category, '\uFF65\u30FB\u318D', '\u00B7\u00B7\u00B7') in (%s)))
             order by v.id
             limit ?""";
 
@@ -59,6 +81,11 @@ public class YouthPolicyCategoryBackfill {
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
         try {
+            canonicalizeNames();
+        } catch (RuntimeException e) {
+            log.warn("Youth policy category name canonicalization failed (옛 분류 이름이 검색·추천 선택지에 남을 수 있음)", e);
+        }
+        try {
             run();
         } catch (RuntimeException e) {
             log.warn("Youth policy category backfill failed (검색·추천의 다중 분류 매칭에서 일부 정책이 빠질 수 있음)", e);
@@ -67,23 +94,58 @@ public class YouthPolicyCategoryBackfill {
 
     /** @return 분류 행을 만든 버전 수 */
     public int run() {
+        Result result = process(afterId -> jdbcTemplate.query(MISSING, MISSING_ROW, afterId, chunkSize), this::fill);
+        if (result.versions() > 0 || result.failedChunks() > 0) {
+            log.info("Youth policy categories backfilled: versions={}, failedChunks={}, elapsedMs={}",
+                    result.versions(), result.failedChunks(), result.elapsedMs());
+        }
+        return result.versions();
+    }
+
+    /** @return 옛 분류 이름 행을 현재 이름으로 다시 만든 버전 수 */
+    public int canonicalizeNames() {
+        Set<String> larges = CategoryNormalizer.legacyLargeKeys();
+        Set<String> mediums = CategoryNormalizer.legacyMediumKeys();
+        String sql = LEGACY.formatted(placeholders(larges.size()), placeholders(mediums.size()));
+        Result result = process(afterId -> {
+            List<Object> args = new ArrayList<>();
+            args.add(afterId);
+            args.addAll(larges);
+            args.addAll(mediums);
+            args.add(chunkSize);
+            return jdbcTemplate.query(sql, MISSING_ROW, args.toArray());
+        }, this::rebuild);
+        if (result.versions() > 0 || result.failedChunks() > 0) {
+            log.info("Youth policy category names canonicalized: versions={}, failedChunks={}, elapsedMs={}",
+                    result.versions(), result.failedChunks(), result.elapsedMs());
+        }
+        return result.versions();
+    }
+
+    private static final RowMapper<Missing> MISSING_ROW =
+            (rs, i) -> new Missing(rs.getLong(1), rs.getString(2), rs.getString(3));
+
+    private record Result(int versions, int failedChunks, long elapsedMs) {
+    }
+
+    /** 버전 ID 순으로 묶음을 읽어 묶음마다 한 트랜잭션으로 처리한다. 실패한 묶음은 건너뛰고 다음 실행이 다시 처리한다 */
+    private Result process(LongFunction<List<Missing>> next, Function<List<Missing>, Integer> work) {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         long started = System.nanoTime();
-        int filled = 0;
+        int versions = 0;
         int failedChunks = 0;
         long afterId = 0L;
         while (true) {
-            List<Missing> chunk = jdbcTemplate.query(MISSING,
-                    (rs, i) -> new Missing(rs.getLong(1), rs.getString(2), rs.getString(3)), afterId, chunkSize);
+            List<Missing> chunk = next.apply(afterId);
             if (chunk.isEmpty()) {
                 break;
             }
             try {
-                Integer count = tx.execute(status -> fill(chunk));
-                filled += count == null ? 0 : count;
+                Integer count = tx.execute(status -> work.apply(chunk));
+                versions += count == null ? 0 : count;
             } catch (RuntimeException e) {
                 failedChunks++;
-                log.warn("Youth policy category backfill chunk failed, skipping (다음 실행이 다시 처리): versionIds={}..{}",
+                log.warn("Youth policy category chunk failed, skipping (다음 실행이 다시 처리): versionIds={}..{}",
                         chunk.getFirst().versionId(), chunk.getLast().versionId(), e);
             }
             afterId = chunk.getLast().versionId();
@@ -91,11 +153,18 @@ public class YouthPolicyCategoryBackfill {
                 break;
             }
         }
-        if (filled > 0 || failedChunks > 0) {
-            log.info("Youth policy categories backfilled: versions={}, failedChunks={}, elapsedMs={}", filled, failedChunks,
-                    (System.nanoTime() - started) / 1_000_000);
-        }
-        return filled;
+        return new Result(versions, failedChunks, (System.nanoTime() - started) / 1_000_000);
+    }
+
+    private int rebuild(List<Missing> chunk) {
+        Long[] versionIds = chunk.stream().map(Missing::versionId).toArray(Long[]::new);
+        jdbcTemplate.update("delete from opportunity_categories where version_id = any(?)",
+                ps -> ps.setArray(1, ps.getConnection().createArrayOf("bigint", versionIds)));
+        return fill(chunk);
+    }
+
+    private static String placeholders(int count) {
+        return String.join(", ", Collections.nCopies(count, "?"));
     }
 
     private int fill(List<Missing> chunk) {
