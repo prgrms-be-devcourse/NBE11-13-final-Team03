@@ -1,0 +1,36 @@
+# 선택: 운영에서 DB_REPLICA_URL(읽기 복제본)을 쓰는 경우에만 perf.env의 PERF_REPLICA=1 로 켠다.
+# 매 회차 primary 스냅샷 복원 뒤 pg_basebackup으로 새로 채우므로 복제 지연·슬롯 상태가 회차마다 같다.
+services:
+  db-replica:
+    image: postgres:16-alpine
+    cpuset: "${CPUSET_REPLICA:-6-7}"
+    mem_limit: 2g
+    memswap_limit: 4g
+    shm_size: 256m
+    entrypoint: ["/bin/sh", "/perf-db/replica-entrypoint.sh"]
+    environment:
+      PRIMARY_HOST: db
+      PRIMARY_USER: ${DB_USERNAME:-postgres}
+      PRIMARY_PASSWORD: ${DB_PASSWORD}
+      TZ: Asia/Seoul
+    volumes:
+      - ./db:/perf-db:ro
+      - replica-data:/var/lib/postgresql/data
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 100
+    restart: "no"
+
+  backend:
+    environment:
+      DB_REPLICA_URL: jdbc:postgresql://db-replica:5432/${DB_NAME:-yon}
+    depends_on:
+      db-replica: { condition: service_healthy }
+
+volumes:
+  replica-data:
+    name: yon-perf-replica-data

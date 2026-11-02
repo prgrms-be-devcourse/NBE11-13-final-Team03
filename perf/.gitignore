@@ -1,0 +1,7 @@
+# 측정 설정·비밀값·토큰·결과는 커밋하지 않는다
+perf.env
+secrets.env
+data/
+results/
+*.pyc
+__pycache__/

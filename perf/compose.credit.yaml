@@ -1,0 +1,7 @@
+# 참고 측정용: t3 CPU 크레딧이 바닥난 상태(코어당 기준 성능 20% → 서버당 0.4 vCPU)를 흉내 낸다.
+# ./perf/run.sh bench --profile credit --runs 1 처럼 1회만 돌린다. 반복 측정·전후 비교에는 쓰지 않는다.
+services:
+  db: { cpus: 0.4 }
+  data-service: { cpus: 0.4 }
+  backend: { cpus: 0.3 }
+  notification-service: { cpus: 0.1 }

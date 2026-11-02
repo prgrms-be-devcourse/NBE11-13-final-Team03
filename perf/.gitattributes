@@ -1,0 +1,5 @@
+# 컨테이너 안에서 실행되는 스크립트는 Windows에서도 LF로 유지
+*.sh text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.yaml text eol=lf

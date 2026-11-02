@@ -1,0 +1,217 @@
+# 성능·부하 측정 전용 스택 (EC2 t3.small 4대 모사). 로컬 개발 스택(docker/compose.yaml)과 프로젝트·볼륨이 분리돼 있다.
+# 직접 띄우지 말고 perf/run.sh 를 쓴다. 값은 perf/perf.env(설정)와 perf/secrets.env(측정 전용 비밀값, init 이 생성)에서 읽는다.
+#
+#   서버 한 대 = cpuset 코어 2개 + 메모리 2GiB + swap 2GiB
+#   main : backend + notification-service (같은 코어 2개를 나눠 씀, 메모리 1.4/0.6GiB)
+#   data : data-service          db : PostgreSQL 16          (선택) db-replica : 스트리밍 복제본
+#   측정용(ext-mock, k6)은 나머지 코어(CPUSET_TOOLS)에서 돈다.
+name: yon-perf
+
+x-jvm-common: &jvm-common
+  env_file: ./secrets.env
+  restart: "no"
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "3" }
+
+services:
+  db:
+    image: postgres:16-alpine
+    cpuset: "${CPUSET_DB:-4-5}"
+    mem_limit: 2g
+    memswap_limit: 4g
+    shm_size: 256m
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?perf/secrets.env 가 필요합니다 (perf/run.sh init)}
+      POSTGRES_DB: ${DB_NAME:-yon}
+      TZ: Asia/Seoul
+      APPLICATION_DB_PASSWORD: ${APPLICATION_DB_PASSWORD:?perf/secrets.env 가 필요합니다}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?perf/secrets.env 가 필요합니다}
+    # 운영(deploy/db)은 PostgreSQL 기본 설정이다. 측정용으로 통계 확장과 느린 쿼리 계획 기록만 더한다
+    # (개선 전·후 모두 같은 설정이므로 비교에 영향 없음). 복제본용 WAL 설정은 기본값과 같다.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements,auto_explain
+      - -c
+      - pg_stat_statements.track=top
+      - -c
+      - pg_stat_statements.max=5000
+      - -c
+      - auto_explain.log_min_duration=${PERF_AUTO_EXPLAIN_MS:-200}
+      - -c
+      - auto_explain.log_format=json
+      - -c
+      - track_io_timing=on
+      - -c
+      - log_lock_waits=on
+      - -c
+      - max_wal_senders=5
+      # JIT: 기본 on(PostgreSQL 16 기본값과 같음). 실험용으로 PERF_DB_JIT=off 를 주면 끈다
+      - -c
+      - jit=${PERF_DB_JIT:-on}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../database/scripts/database-boundaries.sql:/docker-entrypoint-initdb.d/01-database-boundaries.sql:ro
+      # database/local/*.sh 는 Windows 체크아웃에서 CRLF 라 직접 실행하지 않고, 02-repo-local-init.sh 가 CR을 지워 실행한다
+      - ../database/local:/yon-local:ro
+      - ./db/02-repo-local-init.sh:/docker-entrypoint-initdb.d/02-repo-local-init.sh:ro
+      - ./db/04-perf-init.sh:/docker-entrypoint-initdb.d/04-perf-init.sh:ro
+      - ../database/scripts:/yon-scripts:ro
+      - ../data-service/src/main/resources/db/scripts:/yon-data-scripts:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+    restart: "no"
+
+  ext-mock:
+    image: python:3.12-alpine
+    cpuset: "${CPUSET_TOOLS:-8-11}"
+    command: ["python", "-u", "/mock/ext_mock.py"]
+    environment:
+      PORT: "8090"
+      MOCK_ANCHOR_DATE: ${MOCK_ANCHOR_DATE:-2026-11-02}
+      MOCK_E24_TOTAL: ${MOCK_E24_TOTAL:-140000}
+      MOCK_YP_TOTAL: ${MOCK_YP_TOTAL:-4700}
+      MOCK_LATENCY_MEDIAN_MS: ${MOCK_LATENCY_MEDIAN_MS:-139}
+      MOCK_LATENCY_P95_MS: ${MOCK_LATENCY_P95_MS:-273}
+    volumes:
+      - ./mock:/mock:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8090/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: "no"
+
+  data-service:
+    <<: *jvm-common
+    image: yon-data-service:${PERF_TAG:?perf.env에 PERF_TAG가 필요합니다}
+    cpuset: "${CPUSET_DATA:-2-3}"
+    mem_limit: 2g
+    memswap_limit: 4g
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-yon}
+      TZ: Asia/Seoul
+      # 운영 MaxRAMPercentage=70 (t3.small 2GiB) 상당을 고정 힙으로 맞춘다
+      JAVA_TOOL_OPTIONS: >-
+        -Xms256m -Xmx${DATA_HEAP:-1400m}
+        -XX:StartFlightRecording=filename=/jfr/data-service.jfr,settings=${JFR_SETTINGS:-profile},dumponexit=true
+      # 09:30 정기 수집·기동 보완 접수를 끈다. 수집은 시드와 '수집 동시' 시나리오에서만 관리자 API로 접수한다
+      COLLECTION_SCHEDULE_ENABLED: "false"
+      COLLECTION_EMPLOYMENT24_URL: http://ext-mock:8090/d${MOCK_DAY:-0}/employment24
+      COLLECTION_YOUTHPOLICY_URL: http://ext-mock:8090/d${MOCK_DAY:-0}/youth-policy
+      # @Value 경로와 relaxed binding 경로가 다른 이름을 볼 수 있어 두 형태를 모두 넣는다
+      COLLECTION_YOUTH_POLICY_URL: http://ext-mock:8090/d${MOCK_DAY:-0}/youth-policy
+      EMPLOYMENT24_API_KEY: perf-mock-key
+      YOUTH_POLICY_API_KEY: perf-mock-key
+      REGIONCODEAPI_BASEURL: http://ext-mock:8090/region
+      REGION_CODE_API_BASE_URL: http://ext-mock:8090/region
+      REGION_CODE_API_KEY: perf-mock-key
+      REGION_CODE_SYNC_ON_STARTUP: ${PERF_REGION_SYNC:-false}
+      YON_NORMALIZATION_INGEST_ENABLED: "true"
+    volumes:
+      - ${RUN_DIR:-./results/_scratch}/jfr:/jfr
+    depends_on:
+      db: { condition: service_healthy }
+      ext-mock: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/9092"]
+      interval: 3s
+      timeout: 3s
+      retries: 80
+      start_period: 15s
+
+  notification-service:
+    <<: *jvm-common
+    image: yon-notification-service:${PERF_TAG}
+    cpuset: "${CPUSET_MAIN:-0-1}"
+    mem_limit: 600m
+    memswap_limit: 1200m
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-yon}
+      PORT: "8081"
+      TZ: Asia/Seoul
+      # 운영 MaxRAMPercentage=25 (2GiB) 상당
+      JAVA_TOOL_OPTIONS: >-
+        -Xms128m -Xmx${NOTIFICATION_HEAP:-480m}
+        -XX:StartFlightRecording=filename=/jfr/notification-service.jfr,settings=${JFR_SETTINGS:-profile},dumponexit=true
+    volumes:
+      - ${RUN_DIR:-./results/_scratch}/jfr:/jfr
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8081"]
+      interval: 3s
+      timeout: 3s
+      retries: 80
+      start_period: 15s
+
+  backend:
+    <<: *jvm-common
+    image: yon-backend:${PERF_TAG}
+    cpuset: "${CPUSET_MAIN:-0-1}"
+    mem_limit: 1400m
+    memswap_limit: 2800m
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-yon}
+      DB_REPLICA_URL: ${PERF_DB_REPLICA_URL:-}
+      NOTIFICATION_BASE_URL: http://notification-service:8081
+      DATA_SERVICE_GRPC_ADDRESS: static://data-service:9092
+      TZ: Asia/Seoul
+      # 측정 전용 서명 키. 운영 키와 다르며 perf/run.sh init 이 만든다
+      JWT_SECRET_KEY: ${PERF_JWT_SECRET_KEY:?perf.env에 PERF_JWT_SECRET_KEY가 필요합니다 (perf/run.sh init)}
+      # 운영 MaxRAMPercentage=50 (2GiB) 상당
+      JAVA_TOOL_OPTIONS: >-
+        -Xms256m -Xmx${BACKEND_HEAP:-960m}
+        -XX:StartFlightRecording=filename=/jfr/backend.jfr,settings=${JFR_SETTINGS:-profile},dumponexit=true
+    ports:
+      - "127.0.0.1:${PERF_BACKEND_PORT:-18080}:8080"
+    volumes:
+      - ${RUN_DIR:-./results/_scratch}/jfr:/jfr
+    depends_on:
+      db: { condition: service_healthy }
+      data-service: { condition: service_healthy }
+      notification-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8080"]
+      interval: 3s
+      timeout: 3s
+      retries: 80
+      start_period: 15s
+
+  # ---- 측정 도구 (profile tools: run.sh 가 docker compose run 으로만 실행) ----
+  k6:
+    image: grafana/k6:${K6_VERSION:-1.3.0}
+    profiles: ["tools"]
+    cpuset: "${CPUSET_TOOLS:-8-11}"
+    working_dir: /perf/k6
+    environment:
+      BASE_URL: http://backend:8080
+      K6_NO_USAGE_REPORT: "true"
+    volumes:
+      - ./k6:/perf/k6:ro
+      - ./data:/perf/data:ro
+      - ${RUN_DIR:-./results/_scratch}:/out
+
+  tools:
+    image: python:3.12-alpine
+    profiles: ["tools"]
+    cpuset: "${CPUSET_TOOLS:-8-11}"
+    working_dir: /perf
+    environment:
+      BASE_URL: http://backend:8080
+      PYTHONDONTWRITEBYTECODE: "1"
+      PERF_JWT_SECRET_KEY: ${PERF_JWT_SECRET_KEY:-}
+      PERF_USERS: ${PERF_USERS:-1000}
+      SLO_READ_P95_MS: ${SLO_READ_P95_MS:-500}
+      SLO_HEAVY_P95_MS: ${SLO_HEAVY_P95_MS:-1000}
+    volumes:
+      - ./:/perf
+
+volumes:
+  pgdata:
+    name: ${PERF_PG_VOLUME:-yon-perf-pgdata}
