@@ -3,6 +3,7 @@ package com.team3.backend.recommendation.dto;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.dto.OpportunityCategoryItem;
 import com.team3.backend.search.dto.OpportunityDetailResponseDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -18,6 +19,8 @@ public record RecommendationItemDto(
         @Schema(description = "대분류") String category,
         @Schema(description = "중분류") String subCategory,
         @Schema(description = "세 번째 분류 (직업훈련: NCS 중분류)", nullable = true) String detailCategory,
+        @Schema(description = "청년정책 현재 버전의 정규화된 분류 행 (대·중분류 짝, 정렬 순서대로). 직업훈련과 분류 행이 없는 정책은 빈 배열")
+        List<OpportunityCategoryItem> categories,
         @Schema(description = "현재 버전의 지역 목록. 정책은 거주 대상 지역, 훈련은 교육 장소이며 전국·미확인은 상태로 구분한다")
         List<OpportunityDetailResponseDto.RegionItem> regions,
         @Schema(description = "현재 모집 상태. 직업훈련은 실제 모집기간 미확인으로 UNKNOWN이다") ApplicationStatus applicationStatus,

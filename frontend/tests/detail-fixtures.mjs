@@ -6,7 +6,7 @@ export const condition = (patch = {}) => ({ type: 'AGE', requirement: 'REQUIRED'
 
 export const policy = {
   opportunityId: 42, type: 'YOUTH_POLICY', title: '테스트 정책 상세', category: '일자리', subCategory: '취업지원',
-  detailUrl: 'https://example.org/policy', createdAt: '2026-10-25T09:00:00',
+  categories: [{ largeCategory: '일자리', mediumCategory: '취업지원' }], detailUrl: 'https://example.org/policy', createdAt: '2026-10-25T09:00:00',
   regions: [
     { role: 'RESIDENCE', status: 'NATIONAL', code: null, name: null, validationStatus: 'VALID' },
     { role: 'IMPLEMENTATION', status: 'SPECIFIC', code: '1100000000', name: '서울', validationStatus: 'VALID' },
@@ -27,7 +27,7 @@ export const policy = {
   eligibility: null, saved: false,
 }
 export const training = {
-  ...policy, opportunityId: 43, type: 'VOCATIONAL_TRAINING', title: '테스트 훈련 상세', category: '교육･직업훈련', subCategory: '정보통신',
+  ...policy, opportunityId: 43, type: 'VOCATIONAL_TRAINING', title: '테스트 훈련 상세', category: '교육･직업훈련', subCategory: '정보통신', categories: [],
   applicationStatus: 'UNKNOWN', applicationWindows: [{ periodType: 'UNKNOWN', startDate: null, endDate: null, periodText: null, validationStatus: 'UNKNOWN' }],
   regions: [{ role: 'IMPLEMENTATION', status: 'SPECIFIC', code: '1100000000', name: '서울', validationStatus: 'NEEDS_REVIEW' }],
   detail: { courseId: 'TEST-TRAINING', courseRound: 3, institutionName: '테스트 교육기관', institutionCode: 'INTERNAL-ONLY', institutionCustomerId: 'INTERNAL-CUSTOMER',

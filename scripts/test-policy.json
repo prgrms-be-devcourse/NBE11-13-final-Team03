@@ -14,6 +14,10 @@
       "unknownRegionIsNotShownAsNational",
       "verifiedAgeIncomeAndUnreviewedTextConditionsStayDistinct"
     ],
+    "com.team3.backend.search.controller.OpportunityCategoryDisplayPostgresTest": [
+      "listsReadCategoryRowsOnceRegardlessOfItemCountAndDetailAddsOneQueryOnlyForPolicy",
+      "sameOpportunityShowsSameNormalizedCategoriesInSearchDetailRecommendationAndSaved"
+    ],
     "com.team3.backend.recommendation.service.RecommendationCandidateServicePostgresTest": [],
     "com.team3.backend.recommendation.service.RecommendationSelectionEquivalencePostgresTest": [
       "topPerGroupSelectionMatchesFullScanReferenceOnRandomFixtures"

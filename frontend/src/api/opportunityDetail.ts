@@ -1,7 +1,8 @@
 import { apiClient } from './client.ts'
 import { ApiError } from './ApiError.ts'
 import type { EligibilityStatus } from '../components/ui/StatusBadge.tsx'
-import type { ApplicationStatus } from '../pages/opportunities/types.ts'
+import type { ApplicationStatus, OpportunityCategory } from '../pages/opportunities/types.ts'
+import { isCategoryRows } from './opportunities.ts'
 
 export type ValidationStatus = 'VALID' | 'INVALID' | 'DATA_CONFLICT' | 'UNKNOWN' | 'NEEDS_REVIEW' | 'UNVERIFIED'
 export type RequirementType = 'REQUIRED' | 'PREFERRED' | 'EXCLUSION'
@@ -88,6 +89,7 @@ type DetailBase = {
   title: string
   category?: NullableText
   subCategory?: NullableText
+  categories?: OpportunityCategory[] | null
   detailUrl?: NullableText
   createdAt: string
   regions: RegionItem[]
@@ -130,7 +132,7 @@ function isEligibility(value: unknown): boolean {
 export function isOpportunityDetail(value: unknown): value is OpportunityDetail {
   if (!record(value) || !integer(value.opportunityId) || typeof value.opportunityId !== 'number' || value.opportunityId <= 0 ||
     typeof value.title !== 'string' || typeof value.createdAt !== 'string' || typeof value.saved !== 'boolean' ||
-    !textFields(value, ['category', 'subCategory', 'detailUrl']) || !member(value.applicationStatus, ['UPCOMING', 'OPEN', 'ALWAYS_OPEN', 'CLOSED', 'UNKNOWN']) ||
+    !textFields(value, ['category', 'subCategory', 'detailUrl']) || !isCategoryRows(value.categories) || !member(value.applicationStatus, ['UPCOMING', 'OPEN', 'ALWAYS_OPEN', 'CLOSED', 'UNKNOWN']) ||
     !Array.isArray(value.regions) || !value.regions.every((item: unknown) => record(item) && member(item.role, ['RESIDENCE', 'SCHOOL', 'BUSINESS', 'IMPLEMENTATION', 'UNKNOWN']) &&
       typeof item.status === 'string' && textFields(item, ['code', 'name']) && validation(item.validationStatus)) ||
     !Array.isArray(value.applicationWindows) || !value.applicationWindows.every((item: unknown) => record(item) && member(item.periodType, ['FIXED', 'ALWAYS', 'CLOSED', 'UNKNOWN']) &&

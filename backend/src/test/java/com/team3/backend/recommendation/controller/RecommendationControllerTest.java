@@ -8,6 +8,7 @@ import com.team3.backend.opportunity.domain.entity.OpportunityType;
 import com.team3.backend.opportunity.domain.entity.RegionRole;
 import com.team3.backend.opportunity.domain.entity.ValidationStatus;
 import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.dto.OpportunityCategoryItem;
 import com.team3.backend.recommendation.dto.RecommendationItemDto;
 import com.team3.backend.recommendation.dto.RecommendationReasonsDto;
 import com.team3.backend.recommendation.service.RecommendationService;
@@ -67,6 +68,9 @@ class RecommendationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].opportunityId").value(9))
                 .andExpect(jsonPath("$[0].saved").value(true))
+                .andExpect(jsonPath("$[0].category").value("일자리"))
+                .andExpect(jsonPath("$[0].categories[0].largeCategory").value("일자리"))
+                .andExpect(jsonPath("$[0].categories[0].mediumCategory").value("취업"))
                 .andExpect(jsonPath("$[0].regions[0].role").value("RESIDENCE"))
                 .andExpect(jsonPath("$[0].regions[0].code").value("1100000000"))
                 .andExpect(jsonPath("$[1].regions").isEmpty())
@@ -98,6 +102,7 @@ class RecommendationControllerTest {
 
     private static RecommendationItemDto item(Long id, boolean saved) {
         return new RecommendationItemDto(id, OpportunityType.YOUTH_POLICY, "정책", "일자리", "취업", null,
+                List.of(new OpportunityCategoryItem("일자리", "취업")),
                 saved ? List.of(new OpportunityDetailResponseDto.RegionItem(RegionRole.RESIDENCE, "SPECIFIC",
                         "1100000000", "서울", ValidationStatus.VALID)) : List.of(),
                 ApplicationStatus.OPEN, EligibilityStatus.ELIGIBLE, LocalDate.of(2026, 11, 1), null,

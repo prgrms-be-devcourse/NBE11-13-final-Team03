@@ -11,10 +11,17 @@ const integer = (value: unknown): value is number => typeof value === 'number' &
 const nullableText = (value: unknown): boolean => value === null || typeof value === 'string'
 const statuses = new Set(['ELIGIBLE', 'POSSIBLY_ELIGIBLE', 'NOT_ELIGIBLE', 'UNKNOWN'])
 
+// 정규화된 분류 행 목록. 필드가 없으면(이전 응답) 허용하고, 있으면 행마다 대·중분류가 문자열 또는 null이어야 한다.
+export function isCategoryRows(value: unknown): boolean {
+  return value == null || (Array.isArray(value) && value.every((row: unknown) => record(row) &&
+    (row.largeCategory == null || typeof row.largeCategory === 'string') &&
+    (row.mediumCategory == null || typeof row.mediumCategory === 'string')))
+}
+
 function isItem(value: unknown): value is OpportunitySearchItem {
   return record(value) && integer(value.opportunityId) && value.opportunityId > 0 &&
     (value.type === 'YOUTH_POLICY' || value.type === 'VOCATIONAL_TRAINING') && typeof value.title === 'string' &&
-    nullableText(value.category) && nullableText(value.subCategory) && nullableText(value.detailCategory) &&
+    nullableText(value.category) && nullableText(value.subCategory) && nullableText(value.detailCategory) && isCategoryRows(value.categories) &&
     typeof value.createdAt === 'string' && typeof value.saved === 'boolean' &&
     (value.eligibilityStatus === null || (typeof value.eligibilityStatus === 'string' && statuses.has(value.eligibilityStatus)))
 }

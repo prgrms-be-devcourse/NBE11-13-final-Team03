@@ -146,8 +146,15 @@ test('detail keeps type colors and uses a labeled bookmark without changing save
   assert.doesNotMatch(html, />저장 안 함</)
   const anonymous = renderDetail(policy)
   assert.match(anonymous, /href="\/login\?returnTo=%2Fopportunities%2F42"/)
-  const duplicate = renderDetail({ ...policy, category: ' 일자리 ', subCategory: '일자리' })
+  assert.match(anonymous, /<li>일자리 · 취업지원<\/li>/)
+  // 상세도 목록 카드와 같은 규칙: 원문 쉼표 문자열 대신 정규화된 분류 행, 같은 대분류는 한 번만
+  const multiple = renderDetail({ ...policy, category: '일자리,교육･직업훈련', subCategory: '취업,미래역량강화',
+    categories: [{ largeCategory: '일자리', mediumCategory: '취업' }, { largeCategory: '교육', mediumCategory: '미래역량강화' }] })
+  assert.match(multiple, /<li>일자리 · 취업 \/ 교육 · 미래역량강화<\/li>/)
+  assert.doesNotMatch(multiple, /일자리,교육|취업,미래역량강화|교육･직업훈련/)
+  const duplicate = renderDetail({ ...policy, category: ' 일자리 ', subCategory: '일자리', categories: [{ largeCategory: '일자리', mediumCategory: null }] })
   assert.doesNotMatch(duplicate, /일자리 · 일자리/)
+  assert.doesNotMatch(renderDetail({ ...policy, categories: [] }), /<li>일자리|취업지원<\/li>/)
   assert.match(anonymous, /class="facts">2026\.10\.01 ~ 2026\.10\.31/)
   assert.match(anonymous, /사업기간과 신청기간은 다를 수 있습니다/)
   // 공고 카드 위쪽 유형 선: 청년정책 그린, 직업훈련 블루. 상세 상단 카드에도 적용한다.

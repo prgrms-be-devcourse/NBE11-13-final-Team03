@@ -5,6 +5,7 @@ import com.team3.backend.eligibility.api.dto.EligibilityDecision;
 import com.team3.backend.eligibility.domain.entity.EligibilityStatus;
 import com.team3.backend.opportunity.domain.entity.*;
 import com.team3.backend.opportunity.domain.status.ApplicationStatus;
+import com.team3.backend.opportunity.dto.OpportunityCategoryItem;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -19,6 +20,7 @@ public record OpportunityDetailResponseDto(
         String title,
         String category,
         String subCategory,
+        List<OpportunityCategoryItem> categories,
         String detailUrl,
         LocalDateTime createdAt,
         List<RegionItem> regions,

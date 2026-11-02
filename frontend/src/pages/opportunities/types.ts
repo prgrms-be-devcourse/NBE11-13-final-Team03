@@ -25,13 +25,19 @@ export type SearchParams = {
   size: number
 }
 
+// 청년정책 현재 버전의 정규화된 분류 행 (대·중분류 짝). 원본 개수가 맞지 않으면 한쪽만 있는 행이 있다.
+export type OpportunityCategory = { largeCategory?: string | null; mediumCategory?: string | null }
+
 export type OpportunitySearchItem = {
   opportunityId: number
   type: OpportunityType
   title: string
+  // 공고 원문. 청년정책은 여러 분류를 쉼표로 이은 값일 수 있어 표시에는 categories를 쓴다.
   category: string | null
   subCategory: string | null
   detailCategory: string | null
+  // 직업훈련과 분류 행이 없는 청년정책은 빈 배열이다. 필드가 없는 응답도 빈 배열로 본다.
+  categories?: OpportunityCategory[] | null
   createdAt: string
   eligibilityStatus: EligibilityStatus | null
   saved: boolean

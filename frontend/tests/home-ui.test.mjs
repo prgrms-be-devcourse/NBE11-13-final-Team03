@@ -127,13 +127,18 @@ test('training cards show NCS sub/detail categories without repeating the type b
   assert.doesNotMatch(localTest, /교육･직업훈련/)
   const missing = renderCard({ ...latestItem, type: 'VOCATIONAL_TRAINING', category: '교육･직업훈련', subCategory: null, detailCategory: null })
   assert.match(missing, /class="classification">직업훈련<\/p>/)
-  const repeated = renderCard({ ...latestItem, category: '일자리', subCategory: ' 일자리 ', detailCategory: '취업지원' })
-  assert.match(repeated, /class="classification">일자리 · 취업지원<\/p>/)
-  const fallback = renderCard({ ...latestItem, category: '일자리', subCategory: ' ', detailCategory: null })
-  assert.match(fallback, /class="classification">일자리<\/p>/)
-  const duplicate = renderCard({ ...latestItem, category: '일자리', subCategory: ' 일자리 ', detailCategory: '일자리' })
-  assert.match(duplicate, /class="classification">일자리<\/p>/)
-  const absent = renderCard({ ...latestItem, category: null, subCategory: null, detailCategory: ' ', createdAt: null })
+  // 청년정책 카드(공개 목록·추천)는 정규화된 분류 행만 쓴다. 같은 대분류는 한 번만, 짝 없는 중분류는 따로 보인다
+  const repeated = renderCard({ ...latestItem, category: '일자리,일자리', subCategory: '취업,창업',
+    categories: [{ largeCategory: '일자리', mediumCategory: '취업' }, { largeCategory: '일자리', mediumCategory: '창업' }] })
+  assert.match(repeated, /class="classification">일자리 · 취업, 창업<\/p>/)
+  const unpaired = renderCard({ ...latestItem, category: '일자리,교육', subCategory: '취업,창업,미래역량강화',
+    categories: [{ largeCategory: '일자리', mediumCategory: null }, { largeCategory: '교육', mediumCategory: null }, { largeCategory: null, mediumCategory: '취업' }] })
+  assert.match(unpaired, /class="classification">일자리 \/ 교육 \/ 취업<\/p>/)
+  const largeOnly = renderCard({ ...latestItem, categories: [{ largeCategory: '일자리', mediumCategory: ' ' }] })
+  assert.match(largeOnly, /class="classification">일자리<\/p>/)
+  const pending = renderCard({ ...latestItem, category: '일자리,교육', subCategory: '취업', categories: [] })
+  assert.doesNotMatch(pending, /class="classification"|일자리,교육/)
+  const absent = renderCard({ ...latestItem, category: null, subCategory: null, detailCategory: ' ', categories: [], createdAt: null })
   assert.doesNotMatch(absent, /class="classification"|class="cardFooter"|분류 미확인| · /)
 })
 
@@ -283,7 +288,7 @@ test('unconfirmed authentication never renders cached recommendations even when 
 
 test('nullable recommendation metadata renders safely without invented region, deadline or interest-match badges', () => {
   const html = render({ recommendationsOnly: true, userId: 11, authStatus: 'authenticated', data: [{ ...policyRecommendation,
-    title: '', category: null, subCategory: '', detailCategory: null, regions: [], createdAt: null,
+    title: '', category: null, subCategory: '', detailCategory: null, categories: [], regions: [], createdAt: null,
     applicationEndDate: null, trainingStartDate: null,
     recommendationReasons: { badges: ['신청 조건 충족'], description: '저장된 최신 판정에서 신청 조건을 충족합니다.' } }] })
   assert.match(html, /제목 미확인/)
