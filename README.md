@@ -12,7 +12,7 @@
 신규 등록·정보 변경·마감 임박까지 추적해 필요한 지원 기회를 놓치지 않도록 돕는다.
 
 - **서비스:** [Y:ON 바로가기](https://du6sy07fqyo56.cloudfront.net) · [GitHub](https://github.com/prgrms-be-devcourse/NBE11-13-final-Team03)
-- **개발 기간:** 2026.10.06 ~ 2026.11.06
+- **개발 기간:** 2026.10.06 ~ 2026.11.02
 - **팀 구성:** 백엔드 중심 4인 팀, 프런트엔드 및 인프라 공동 구현
 
 > 서비스 주소는 배포 진입점이며, 상시 가동 여부는 운영 상태에 따라 달라질 수 있다.
@@ -79,9 +79,6 @@ Y:ON은 다음 흐름을 하나의 서비스로 연결한다.
 | 변경 추적·알림 전달 | 변경 이벤트와 사용자 관심·조건 일치 여부를 처리하고 알림 발송 |
 | 관리자 | 수집 이력·원본 레코드 조회, 수집 실행·재시도, 행동 이벤트 보관 계획 확인·관리 |
 
-<!-- TODO: 실제 서비스 스크린샷 추가 — 통합 검색 / 상세 조회 / 개인화 추천 / 인앱 알림 / 관리자 페이지 -->
-<!-- 이미지는 2~3개씩 묶어 배치하고, 사용자 화면 위주로 먼저 선정한다. -->
-
 ## 4. 기술 스택
 
 | 영역 | 기술 |
@@ -98,50 +95,28 @@ Y:ON은 다음 흐름을 하나의 서비스로 연결한다.
 
 ## 5. 시스템 아키텍처
 
-<!-- TODO: 최종 AWS 시스템 아키텍처 그림 추가. CloudFront, EC2, 서버 구성, PostgreSQL Primary/Replica, SQS 등 실제 배포 상태 확인 후 삽입 -->
-<!-- TODO: 필요하면 공공 API 수집 → 정규화 → 판정 → 검색·추천 → 추적·알림 데이터 흐름도 별도 추가 -->
+![Y:ON 시스템 아키텍처](docs/images/yon-architecture.png)
 
-전체 구조는 **수집·정규화 → 판정·검색·추천 → 변경 추적·알림**의 처리 흐름을 기준으로 구성했다.
+전체 구조는 **수집·정규화 → 판정·검색·추천 → 변경 추적·알림**의 처리 흐름을 기준으로 세 서비스로 나누었다.
 
-```text
-온통청년 · 고용24
-       │
-       ▼
-data-service ── 수집 / Raw 보존 / 정규화 / 버전 관리
-       │
-       ▼
- PostgreSQL (Primary) ───── PostgreSQL (Read Replica)
-       │                             │
-       ├───────────┐                 │
-       ▼           ▼                 ▼
-    backend    notification-service
-       │           ▲
-       │           └── 변경 추적 / Outbox / 메시징 / FCM
-       ▼
- React Frontend ── CloudFront / Nginx
-```
-
-> 위 그림은 도메인별 책임을 단순화한 **논리 흐름**이다. 실제 네트워크 연결, 서비스 간 호출 및 인프라 배치는 최종 시스템 구성도에서 확인한다.
-
-- **data-service:** 외부 데이터 수집·원본 관리·정규화 담당. Backend의 수집 관리자 요청은 내부 gRPC를 통해 전달한다.
-- **backend:** 인증·프로필·신청 가능성·검색·상세·추천·사용자 행동·관리자 API 제공.
-- **notification-service:** 사용자 영향 추적, 알림 저장·전달·웹 푸시 관련 처리.
-- **PostgreSQL:** 정규화 데이터, 판정·사용자 상태, 변경·알림 정보를 저장하며 읽기 복제본을 통한 조회 부하 분리를 지원한다.
-- **배포:** 프런트엔드 진입점과 서버별 배포 구성을 분리하고, 인프라 설정을 Terraform으로 관리한다.
+- **backend:** 인증·프로필·신청 가능성·검색·상세·추천·사용자 행동·관리자 API를 제공한다. 수집 관리자 요청은 내부 gRPC로 data-service에 전달한다.
+- **data-service:** 외부 데이터 수집·원본 보존·정규화·버전 관리를 담당한다.
+- **notification-service:** 변경 이벤트를 소비해 인앱 알림을 저장하고 FCM 웹 푸시를 전달한다.
+- **PostgreSQL:** 읽기 복제본 라우팅은 `DB_REPLICA_URL` 설정 시 활성화되며, 복제본 장애 시 Primary로 대체한다.
+- **메시징:** backend 알림 Publisher는 HTTP 또는 SQS를 설정으로 선택하고, data-service는 SQS로 발행한다.
+- **배포:** CloudFront가 S3(React)와 backend를 경로별로 분기하고, 서버별 Docker Compose 배포와 Terraform 인프라 구성을 분리한다.
 
 ## 6. 데이터 모델
 
-<!-- TODO: 최종 ERD 이미지 추가. 실제 DB 스키마와 엔티티 관계가 일치하는 버전인지 확인 -->
+![Y:ON ERD](docs/images/yon-erd.png)
 
-외부 원본과 사용자에게 제공할 표준 공고를 분리하고, 공고 버전·조건·신청기간·지역·분류를 연결해 변경 추적과 판정 재사용을 지원한다.
+외부 원본과 사용자에게 제공할 표준 공고를 분리하고, 공고 버전에 조건·신청기간·지역·분류를 연결해 변경 추적과 판정 재사용을 지원한다.
 
-주요 데이터 영역:
+- **수집·정규화:** `raw_external_record` → `opportunities` / `opportunity_versions` 및 버전 하위 테이블
+- **판정·개인화:** `eligibility_profiles`, `condition_sets`, `eligibility_set_results` — 조건 묶음 단위로 판정을 재사용
+- **이용·추적:** `user_opportunity_preferences`, `user_behavior_events`, `opportunity_changes`, `outbox_events`, `notifications`
 
-- **수집·정규화:** `raw_opportunities`, `opportunities`, `opportunity_versions`, `opportunity_categories` 등
-- **판정·개인화:** 사용자 프로필·관심 분야, 조건 묶음, 신청 가능성 결과
-- **이용·추적:** 저장·숨김 상태, 사용자 행동 이벤트, 변경 이력, 알림
-
-> 위 엔티티 표기는 개념 설명이다. 실제 테이블 이름·관계·스키마는 `database/`에서 확인한다.
+> 핵심 테이블 18개 기준이며, 전체 스키마는 `database/`와 각 서비스의 JPA 엔티티를 기준으로 한다.
 
 ## 7. 핵심 구현
 
@@ -224,11 +199,9 @@ Outbox·메시징을 활용해 비즈니스 상태 변경과 알림 전달 단�
 - **회귀 검증:** 검색·추천 변경 전후 결과의 동일성, UI/API 연동 및 필수 테스트 실행 정책을 검증한다.
 - **읽기 부하 분리:** 검색·상세·추천 조회의 PostgreSQL 복제본 라우팅과 장애 시 Primary 대체 경로를 지원한다.
 - **백업·복원:** 데이터베이스 백업과 복원 검증 절차를 마련한다.
-- **부하 테스트:** k6와 EC2 small 자원 제한을 모사한 Docker 성능 측정 환경을 구성했다. 이 도구의 병합만으로 실제 운영 수용 인원이 검증된 것은 아니다.
+- **부하 테스트:** k6와 EC2 t3.small 자원 제한을 모사한 Docker 측정 환경(`perf/`)을 구성했다. 반복 측정 실행과 p95·에러율 확보는 후속 과제다.
 
 관련 PR: [#93 읽기 복제본 라우팅](https://github.com/prgrms-be-devcourse/NBE11-13-final-Team03/pull/93) · [#137 k6 측정 환경](https://github.com/prgrms-be-devcourse/NBE11-13-final-Team03/pull/137)
-
-<!-- TODO: k6 부하 테스트를 실행해 재현 가능한 결과가 확보되면 테스트 조건·p95·에러율·한계 수치를 추가 -->
 
 ## 9. 프로젝트 결과 및 한계
 
@@ -252,7 +225,7 @@ Outbox·메시징을 활용해 비즈니스 상태 변경과 알림 전달 단�
 NBE11-13-final-Team03/
 ├── backend/                # 사용자 API, 판정, 검색·추천, 인증·관리자 API
 ├── data-service/           # 공공 API 수집, Raw 관리, 정규화
-├── notification-service/   # 변경 추적, 알림, 웹 푸시
+├── notification-service/   # 알림 소비·저장, 인앱 알림, 웹 푸시
 ├── frontend/               # React 사용자·관리자 화면
 ├── database/               # 데이터베이스 DDL·운영 SQL·마이그레이션
 ├── contracts/              # 서비스 간 공용 계약
